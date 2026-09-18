@@ -7,6 +7,12 @@ Prevents disk exhaustion on /root/autodl-tmp by selectively downloading targeted
 import argparse
 import os
 import sys
+
+# Ensure local project root is at the very front of sys.path
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from huggingface_hub import HfApi, hf_hub_download
 from src.data.splits import parse_shear_flow_filename
 

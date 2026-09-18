@@ -9,15 +9,15 @@ def parse_shear_flow_filename(filename: str) -> Dict[str, float]:
 
     Example filename: 'shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5'
     """
-    re_match = re.search(r"Reynolds_([0-9a-zA-Z\.\-]+)", filename)
-    sc_match = re.search(r"Schmidt_([0-9a-zA-Z\.\-]+)", filename)
+    clean_name = filename.replace(".hdf5", "").replace(".h5", "")
+    re_match = re.search(r"Reynolds_([0-9a-zA-Z\.\+\-]+)", clean_name)
+    sc_match = re.search(r"Schmidt_([0-9a-zA-Z\.\+\-]+)", clean_name)
 
     if not re_match or not sc_match:
         raise ValueError(f"Could not parse Re and Sc from filename: {filename}")
 
-    re_val = float(re_match.group(1).replace("e", "e").replace("E", "e"))
-    sc_str = sc_match.group(1).replace("e", "e").replace("E", "e")
-    sc_val = float(sc_str)
+    re_val = float(re_match.group(1))
+    sc_val = float(sc_match.group(1))
 
     return {"re": re_val, "sc": sc_val}
 
