@@ -1,0 +1,148 @@
+# ==============================================================================
+# Fluid Dynamics World Models - Git Ignore Specification
+# Repository: World-Model-FlowField-v1
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Python 运行时与字节码缓存 (Byte-compiled / Runtime Cache)
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# ------------------------------------------------------------------------------
+# 2. 包打包、分发与构建中间件 (Packaging / Build / Distribution)
+# ------------------------------------------------------------------------------
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ------------------------------------------------------------------------------
+# 3. 虚拟环境与本地环境变量凭证 (Virtual Environments & Local Envs)
+# ------------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+# ------------------------------------------------------------------------------
+# 4. 编辑器、IDE 与操作系统元数据 (IDEs, Editors & OS Files)
+# ------------------------------------------------------------------------------
+.vscode/
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+*~
+*.bak
+.DS_Store
+.DS_Store?
+ehthumbs.db
+Thumbs.db
+
+# ------------------------------------------------------------------------------
+# 5. 测试框架、代码覆盖率与静态检查缓存 (Testing & Quality Tools Cache)
+# ------------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# ------------------------------------------------------------------------------
+# 6. Jupyter Notebook 交互环境缓存 (Notebooks Cache)
+# ------------------------------------------------------------------------------
+.ipynb_checkpoints/
+*-checkpoint.ipynb
+
+# ------------------------------------------------------------------------------
+# 7. 深度学习权重、检查点与模型导出 (Weights, Checkpoints & Model Dumps)
+# ------------------------------------------------------------------------------
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+*.onnx
+*.engine
+checkpoints/
+
+# ------------------------------------------------------------------------------
+# 8. 大规模流场科学数据与数据集 (Datasets & Scientific Simulation Data)
+# ------------------------------------------------------------------------------
+data/*
+!data/.gitignore
+!data/**/.gitkeep
+datasets/
+raw_data/
+*.h5
+*.hdf5
+*.nc
+*.nc4
+*.npz
+*.npy
+*.mat
+# 断点续传与下载临时文件
+*.aria2
+*.download
+*.part
+
+# ------------------------------------------------------------------------------
+# 9. 训练运行产物、实验记录与监控日志 (Outputs, Logs & Experiment Tracking)
+# ------------------------------------------------------------------------------
+runs/
+runs_*/
+runsold*/
+logs/
+logs_*/
+wandb/
+tensorboard/
+*.log
+# outputs 目录细分治理：忽略其生成内容，但保留目录骨架与 outputs/.gitignore
+outputs/*
+!outputs/.gitignore
+!outputs/**/.gitkeep
+
+# ------------------------------------------------------------------------------
+# 10. 生成的可视化图像与多媒体 (Generated Visualizations & Media)
+# ------------------------------------------------------------------------------
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.gif
+*.mp4
+# 保留文档中的架构图与说明性配图
+!docs/**/*.png
+!docs/**/*.jpg
+!docs/**/*.jpeg
+!docs/**/*.svg
+!docs/**/*.gif
