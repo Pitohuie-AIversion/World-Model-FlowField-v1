@@ -1,0 +1,30 @@
+# Data configuration for The Well shear_flow V1
+dataset_name: "shear_flow"
+data_dir: "/root/autodl-tmp/datasets/shear_flow"
+spatial_resolution: [128, 256]  # [Ny, Nx]
+full_resolution: [256, 512]
+channels: ["u", "v", "p", "s"]
+num_channels: 4
+
+domain:
+  lx: 1.0
+  ly: 2.0
+  x_range: [0.0, 1.0]
+  y_range: [-1.0, 1.0]
+  boundary_condition: "periodic"
+
+time:
+  total_steps: 200
+  dt: 0.1
+  history_length: 4   # L = 4
+  horizon_train: 1    # H = 1 for stage C single-step
+  rollout_horizons: [2, 4, 8]  # Short-rollout training
+  eval_horizons: [1, 5, 10, 20, 30]
+
+subset_parameters:
+  reynolds: [10000.0, 100000.0]
+  schmidt: [0.1, 1.0, 5.0, 10.0]
+
+normalization:
+  mode: "zscore"
+  eps: 1e-6

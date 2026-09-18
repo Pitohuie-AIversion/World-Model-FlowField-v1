@@ -1,0 +1,75 @@
+"""Rollout evaluation pipeline across multiple future horizons (h in {1, 5, 10, 20, 30})."""
+
+from typing import Dict, List, Optional
+import torch
+from src.metrics.field import evaluate_field_metrics
+from src.metrics.tracer import compute_tracer_metrics
+from src.utils.fft_derivatives import (
+    compute_divergence,
+    compute_enstrophy,
+    compute_kinetic_energy,
+    compute_vorticity,
+)
+
+
+def evaluate_rollout_trajectory(
+    pred_trajectory: torch.Tensor,
+    target_trajectory: torch.Tensor,
+    evaluation_steps: Optional[List[int]] = None,
+    domain_size: tuple = (2.0, 1.0),
+) -> Dict[str, Dict[str, float]]:
+    """Evaluates multi-step predicted trajectory against target trajectory.
+
+    Args:
+        pred_trajectory: Predicted sequence (B, H, C, Ny, Nx).
+        target_trajectory: Ground truth sequence (B, H, C, Ny, Nx).
+        evaluation_steps: Horizon steps to record (1-indexed, e.g. [1, 5, 10, 20, 30]).
+        domain_size: (Ly, Lx).
+
+    Returns:
+        Dictionary mapping step name (e.g. 'step_1', 'step_5') to metric dicts.
+    """
+    total_steps = pred_trajectory.shape[1]
+    if evaluation_steps is None:
+        evaluation_steps = [s for s in [1, 5, 10, 20, 30] if s <= total_steps]
+
+    results: Dict[str, Dict[str, float]] = {}
+
+    for step in evaluation_steps:
+        idx = step - 1
+        if idx >= total_steps:
+            continue
+
+        p = pred_trajectory[:, idx]  # (B, C, Ny, Nx)
+        t = target_trajectory[:, idx]
+
+        step_res = {}
+        # 1. Field errors
+        field_metrics = evaluate_field_metrics(p, t)
+        step_res.update(field_metrics)
+
+        # 2. Tracer consistency
+        tracer_metrics = compute_tracer_metrics(p[:, 3], t[:, 3])
+        step_res.update(tracer_metrics)
+
+        # 3. Divergence
+        div_pred = compute_divergence(p[:, 0], p[:, 1], domain_size=domain_size)
+        step_res["div_rmse"] = float(torch.sqrt(torch.mean(div_pred**2)).item())
+
+        # 4. Kinetic Energy evolution error
+        ke_pred = compute_kinetic_energy(p[:, 0], p[:, 1])
+        ke_targ = compute_kinetic_energy(t[:, 0], t[:, 1])
+        ke_rel_err = torch.abs(ke_pred - ke_targ) / (torch.abs(ke_targ) + 1e-6)
+        step_res["ke_rel_err"] = float(ke_rel_err.mean().item())
+
+        # 5. Enstrophy evolution error
+        vort_pred = compute_vorticity(p[:, 0], p[:, 1], domain_size=domain_size)
+        vort_targ = compute_vorticity(t[:, 0], t[:, 1], domain_size=domain_size)
+        ens_pred = compute_enstrophy(vort_pred)
+        ens_targ = compute_enstrophy(vort_targ)
+        ens_rel_err = torch.abs(ens_pred - ens_targ) / (torch.abs(ens_targ) + 1e-6)
+        step_res["enstrophy_rel_err"] = float(ens_rel_err.mean().item())
+
+        results[f"step_{step}"] = step_res
+
+    return results

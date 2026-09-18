@@ -1,0 +1,23 @@
+# Model configuration for Latent ST Transformer (Proposed World Model)
+model_name: "latent_st_transformer"
+
+encoder:
+  in_channels: 4
+  latent_channels: 64
+  base_channels: 32
+  downsample_stages: 3  # 8x spatial reduction
+
+decoder:
+  latent_channels: 64
+  out_channels: 4
+  base_channels: 32
+  project_pressure: true
+
+transformer:
+  embed_dim: 256
+  cond_dim: 128
+  depth: 6
+  num_heads: 8
+  history_length: 4
+  prediction_mode: "direct"  # 'direct' or 'residual'
+  mlp_ratio: 4.0

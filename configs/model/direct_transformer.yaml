@@ -1,0 +1,12 @@
+# Model configuration for Direct ST Transformer (Baseline 4)
+model_name: "direct_st_transformer"
+
+transformer:
+  in_channels: 4
+  patch_size: [8, 8]
+  embed_dim: 256
+  cond_dim: 128
+  depth: 6
+  num_heads: 8
+  history_length: 4
+  prediction_mode: "direct"  # 'direct' or 'residual'
