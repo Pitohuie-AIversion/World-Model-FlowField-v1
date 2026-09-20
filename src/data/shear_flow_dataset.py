@@ -28,7 +28,8 @@ class ShearFlowDataset(Dataset):
 
     def __init__(
         self,
-        file_paths: List[str],
+        file_paths: Optional[List[str]] = None,
+        trajectories: Optional[List[Dict]] = None,
         history_length: int = 4,
         horizon: int = 1,
         stride: int = 1,
@@ -37,6 +38,17 @@ class ShearFlowDataset(Dataset):
         downsample_factor: int = 1,
     ):
         super().__init__()
+        if file_paths is None and trajectories is None:
+            raise ValueError("Either file_paths or trajectories must be provided.")
+
+        if trajectories is not None:
+            self.trajectories = trajectories
+            self.allowed_set = {(t["file_path"], t["traj_idx"]) for t in trajectories}
+            file_paths = sorted(list(set(t["file_path"] for t in trajectories)))
+        else:
+            self.trajectories = None
+            self.allowed_set = None
+
         self.file_paths = sorted(file_paths)
         self.history_length = history_length
         self.horizon = horizon
@@ -89,6 +101,9 @@ class ShearFlowDataset(Dataset):
                 )
 
                 for sim_idx in range(n_sims):
+                    if self.allowed_set is not None and (path, sim_idx) not in self.allowed_set:
+                        continue
+
                     for start_t, split_t, end_t in windows:
                         self.samples.append((f_idx, sim_idx, start_t, split_t, end_t, re_val, sc_val))
 

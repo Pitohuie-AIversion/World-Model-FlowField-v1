@@ -39,6 +39,124 @@ class SplitManager:
         }
 
     @staticmethod
+    def cluster_initial_conditions(
+        file_paths: List[str],
+        tolerance: float = 1e-4,
+    ) -> List[Dict]:
+        """Cluster trajectories across files by their physical initial condition (t=0).
+
+        Returns:
+            List of cluster dictionaries:
+                [{'cluster_id': int, 'members': [{'file_path': str, 'traj_idx': int, 're': float, 'sc': float}]}]
+        """
+        import h5py
+        import numpy as np
+
+        clusters = []
+        for path in sorted(file_paths):
+            params = parse_shear_flow_filename(re.sub(r".*/", "", path))
+            re_val = params["re"]
+            sc_val = params["sc"]
+
+            with h5py.File(path, "r") as h5:
+                vel_ds = h5["t1_fields/velocity"] if "t1_fields/velocity" in h5 else h5.get("velocity")
+                if vel_ds is None:
+                    continue
+                n_trajs = vel_ds.shape[0]
+                vel0_all = np.asarray(vel_ds[:, 0], dtype=np.float32)
+
+                for traj_idx in range(n_trajs):
+                    v0 = vel0_all[traj_idx]
+                    matched = False
+                    for c in clusters:
+                        diff = np.max(np.abs(v0 - c["representative"]))
+                        if diff < tolerance:
+                            c["members"].append({
+                                "file_path": path,
+                                "traj_idx": traj_idx,
+                                "re": re_val,
+                                "sc": sc_val,
+                            })
+                            matched = True
+                            break
+                    if not matched:
+                        new_cid = len(clusters)
+                        clusters.append({
+                            "cluster_id": new_cid,
+                            "representative": v0,
+                            "members": [{
+                                "file_path": path,
+                                "traj_idx": traj_idx,
+                                "re": re_val,
+                                "sc": sc_val,
+                            }],
+                        })
+
+        # Remove representative numpy array before JSON serialization
+        for c in clusters:
+            del c["representative"]
+
+        return clusters
+
+    @staticmethod
+    def get_grouped_split(
+        all_files: List[str],
+        train_ratio: float = 0.77,
+        valid_ratio: float = 0.11,
+        seed: int = 42,
+        tolerance: float = 1e-4,
+    ) -> Dict[str, List[Dict]]:
+        """Strategy 2: Grouped Split (Zero-IC-Leakage Split).
+
+        Clusters all trajectories by initial condition (t=0). Partitions unique
+        IC clusters into train, valid, and test sets. All trajectories belonging
+        to the same cluster (regardless of Sc or file) are strictly placed in the
+        same split partition, guaranteeing zero initial condition data leakage.
+        """
+        import random
+
+        clusters = SplitManager.cluster_initial_conditions(all_files, tolerance=tolerance)
+        num_clusters = len(clusters)
+
+        # Deterministic shuffle of clusters
+        rng = random.Random(seed)
+        shuffled_clusters = list(clusters)
+        rng.shuffle(shuffled_clusters)
+
+        n_train = max(1, int(round(num_clusters * train_ratio)))
+        n_valid = max(1, int(round(num_clusters * valid_ratio)))
+        if n_train + n_valid >= num_clusters:
+            n_valid = max(1, (num_clusters - n_train) // 2)
+
+        train_clusters = shuffled_clusters[:n_train]
+        valid_clusters = shuffled_clusters[n_train : n_train + n_valid]
+        test_clusters = shuffled_clusters[n_train + n_valid :]
+
+        def flatten_members(cluster_list):
+            members = []
+            for c in cluster_list:
+                cid = c["cluster_id"]
+                for m in c["members"]:
+                    item = dict(m)
+                    item["cluster_id"] = cid
+                    members.append(item)
+            return sorted(members, key=lambda x: (x["file_path"], x["traj_idx"]))
+
+        return {
+            "train": flatten_members(train_clusters),
+            "valid": flatten_members(valid_clusters),
+            "test": flatten_members(test_clusters),
+            "metadata": {
+                "total_trajectories": sum(len(c["members"]) for c in clusters),
+                "total_clusters": num_clusters,
+                "train_clusters": len(train_clusters),
+                "valid_clusters": len(valid_clusters),
+                "test_clusters": len(test_clusters),
+                "seed": seed,
+            },
+        }
+
+    @staticmethod
     def get_parameter_holdout_split(
         all_files: List[str],
         holdout_re: float = 1e5,

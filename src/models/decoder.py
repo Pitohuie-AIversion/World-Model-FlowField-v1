@@ -82,12 +82,14 @@ class Decoder2D(nn.Module):
             nn.Conv2d(base_channels, out_channels, kernel_size=3, padding=1, padding_mode="circular"),
         )
 
-    def forward(self, z: torch.Tensor) -> torch.Tensor:
+    def forward(self, z: torch.Tensor, project_pressure: Optional[bool] = None) -> torch.Tensor:
         """Forward pass.
 
         Args:
             z: Latent tensor of shape (B, latent_channels, H_z, W_z)
                or (B, T, latent_channels, H_z, W_z).
+            project_pressure: Optional override for zero-mean pressure gauge projection.
+                              If None, uses self.project_pressure.
 
         Returns:
             q: Physical fields of shape (B, out_channels, H, W)
@@ -102,10 +104,11 @@ class Decoder2D(nn.Module):
         h = self.up_stages(h)
         q = self.out_conv(h)
 
-        if self.project_pressure:
+        do_project = self.project_pressure if project_pressure is None else project_pressure
+        if do_project:
             # Channel 2 is pressure p in [u, v, p, s]
-            p = q[:, 2:3, :, :]
-            q[:, 2:3, :, :] = project_zero_mean_pressure(p)
+            p_proj = project_zero_mean_pressure(q[:, 2:3])
+            q = torch.cat([q[:, :2], p_proj, q[:, 3:]], dim=1)
 
         if orig_ndim == 5:
             _, c, h_out, w_out = q.shape

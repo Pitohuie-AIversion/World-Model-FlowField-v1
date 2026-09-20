@@ -54,7 +54,22 @@ def build_and_save_splits(
         json.dump(official, f, indent=2)
     print(f"Exported Official Split to: {off_path}")
 
-    # 2. Parameter Holdout Split
+    # 2. Grouped Split (Zero-IC-Leakage Split)
+    grouped = SplitManager.get_grouped_split(
+        all_files=all_files,
+        train_ratio=0.77,
+        valid_ratio=0.11,
+        seed=42,
+    )
+    grp_path = os.path.join(output_dir, "grouped_split.json")
+    with open(grp_path, "w") as f:
+        json.dump(grouped, f, indent=2)
+    print(f"Exported Grouped Split (Zero-IC-Leakage) to: {grp_path}")
+    print(f"  Grouped Train trajectories: {len(grouped['train'])} across {grouped['metadata']['train_clusters']} clusters")
+    print(f"  Grouped Valid trajectories: {len(grouped['valid'])} across {grouped['metadata']['valid_clusters']} clusters")
+    print(f"  Grouped Test trajectories:  {len(grouped['test'])} across {grouped['metadata']['test_clusters']} clusters")
+
+    # 3. Parameter Holdout Split
     holdout = SplitManager.get_parameter_holdout_split(
         all_files=all_files,
         holdout_re=holdout_re,

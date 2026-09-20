@@ -70,10 +70,8 @@ class FieldNormalizer(nn.Module):
         if self.mean is None or self.std is None:
             return x
 
-        # Match broadcasting dimensions
-        # If x is (B, T, C, H, W), mean/std need shape (1, 1, C, 1, 1)
-        mean = self.mean
-        std = self.std
+        mean = self.mean.to(x.device)
+        std = self.std.to(x.device)
         if x.ndim == 5 and mean.ndim == 4:
             mean = mean.unsqueeze(1)
             std = std.unsqueeze(1)
@@ -85,8 +83,8 @@ class FieldNormalizer(nn.Module):
         if self.mean is None or self.std is None:
             return x
 
-        mean = self.mean
-        std = self.std
+        mean = self.mean.to(x.device)
+        std = self.std.to(x.device)
         if x.ndim == 5 and mean.ndim == 4:
             mean = mean.unsqueeze(1)
             std = std.unsqueeze(1)

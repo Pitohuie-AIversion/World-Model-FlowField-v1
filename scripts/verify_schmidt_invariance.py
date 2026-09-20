@@ -21,31 +21,55 @@ if PROJECT_ROOT not in sys.path:
 
 
 def verify_schmidt_invariance(
-    file_sc01: str = "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+    file_sc01: str = "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
     file_sc10: str = "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
-    traj_idx: int = 0,
+    traj_idx_a: int = 26,
+    traj_idx_b: int = 0,
+    auto_match_ic: bool = False,
 ):
     print("=" * 80)
     print("PHYSICAL CONSISTENCY VERIFICATION: SCHMIDT NUMBER INVARIANCE AUDIT")
     print("=" * 80)
     print(f"File A (Sc=0.1): {file_sc01}")
     print(f"File B (Sc=1.0): {file_sc10}")
-    print(f"Auditing Trajectory Index: {traj_idx}")
 
     if not os.path.exists(file_sc01) or not os.path.exists(file_sc10):
         print(f"Error: One or both files do not exist.")
         return
 
     with h5py.File(file_sc01, "r") as h5_a, h5py.File(file_sc10, "r") as h5_b:
-        u_a = h5_a["t1_fields/velocity"][traj_idx, :, :, :, 0]
-        v_a = h5_a["t1_fields/velocity"][traj_idx, :, :, :, 1]
-        p_a = h5_a["t0_fields/pressure"][traj_idx, :, :, :]
-        s_a = h5_a["t0_fields/tracer"][traj_idx, :, :, :]
+        vel_a_all = h5_a["t1_fields/velocity"]
+        vel_b_all = h5_b["t1_fields/velocity"]
 
-        u_b = h5_b["t1_fields/velocity"][traj_idx, :, :, :, 0]
-        v_b = h5_b["t1_fields/velocity"][traj_idx, :, :, :, 1]
-        p_b = h5_b["t0_fields/pressure"][traj_idx, :, :, :]
-        s_b = h5_b["t0_fields/tracer"][traj_idx, :, :, :]
+        if auto_match_ic:
+            print("Auto-matching initial condition (t=0) across all trajectories...")
+            n_a = vel_a_all.shape[0]
+            n_b = vel_b_all.shape[0]
+            found = False
+            for ia in range(n_a):
+                for ib in range(n_b):
+                    ic_diff = np.max(np.abs(vel_a_all[ia, 0] - vel_b_all[ib, 0]))
+                    if ic_diff < 1e-4:
+                        traj_idx_a, traj_idx_b = ia, ib
+                        found = True
+                        print(f"Found matched IC pair: File A traj {ia} <=> File B traj {ib} (diff={ic_diff:.3e})")
+                        break
+                if found:
+                    break
+            if not found:
+                print("Warning: No matching initial condition found between the two files!")
+
+        print(f"Auditing Trajectory Index: File A idx={traj_idx_a}, File B idx={traj_idx_b}")
+
+        u_a = vel_a_all[traj_idx_a, :, :, :, 0]
+        v_a = vel_a_all[traj_idx_a, :, :, :, 1]
+        p_a = h5_a["t0_fields/pressure"][traj_idx_a, :, :, :]
+        s_a = h5_a["t0_fields/tracer"][traj_idx_a, :, :, :]
+
+        u_b = vel_b_all[traj_idx_b, :, :, :, 0]
+        v_b = vel_b_all[traj_idx_b, :, :, :, 1]
+        p_b = h5_b["t0_fields/pressure"][traj_idx_b, :, :, :]
+        s_b = h5_b["t0_fields/tracer"][traj_idx_b, :, :, :]
 
     # Compute differences
     diff_u_max = np.max(np.abs(u_a - u_b))
@@ -106,7 +130,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--file_sc01", type=str, default="/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5")
     parser.add_argument("--file_sc10", type=str, default="/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5")
-    parser.add_argument("--traj_idx", type=int, default=0)
+    parser.add_argument("--traj_idx_a", type=int, default=26, help="Trajectory index in File A")
+    parser.add_argument("--traj_idx_b", type=int, default=0, help="Trajectory index in File B")
+    parser.add_argument("--auto_match_ic", action="store_true", help="Automatically search and match identical initial condition")
     args = parser.parse_args()
 
-    verify_schmidt_invariance(args.file_sc01, args.file_sc10, args.traj_idx)
+    verify_schmidt_invariance(args.file_sc01, args.file_sc10, args.traj_idx_a, args.traj_idx_b, args.auto_match_ic)
