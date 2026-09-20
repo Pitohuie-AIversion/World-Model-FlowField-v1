@@ -90,3 +90,34 @@ def test_zero_mean_pressure():
     p_proj = project_zero_mean_pressure(p)
     mean_after = p_proj.mean(dim=(-2, -1))
     assert torch.allclose(mean_after, torch.zeros_like(mean_after), atol=1e-5)
+
+
+def test_laplacian_accuracy():
+    """Test spectral Laplacian against analytical solution: lap(sin(2pi*x)*cos(pi*y)) = -5pi^2 * sin(2pi*x)*cos(pi*y)."""
+    from src.utils.fft_derivatives import compute_laplacian_2d
+    ny, nx = 128, 256
+    ly, lx = 2.0, 1.0
+    yy, xx = make_periodic_grid(ny, nx, ly, lx)
+
+    f = torch.sin(2.0 * torch.pi * xx) * torch.cos(torch.pi * yy)
+    exact_lap = -5.0 * (torch.pi ** 2) * f
+
+    calc_lap = compute_laplacian_2d(f, domain_size=(ly, lx))
+    err = torch.norm(calc_lap - exact_lap) / torch.norm(exact_lap)
+    assert err < 1e-10, f"Laplacian relative error too large: {err}"
+
+
+
+def test_kinetic_energy_and_enstrophy():
+    """Test kinetic energy and enstrophy positive definiteness and calculation."""
+    u = torch.randn(2, 64, 64)
+    v = torch.randn(2, 64, 64)
+    ke = compute_kinetic_energy(u, v)
+    assert ke.shape == (2,)
+    assert (ke >= 0.0).all()
+
+    omega = compute_vorticity(u, v)
+    ens = compute_enstrophy(omega)
+    assert ens.shape == (2,)
+    assert (ens >= 0.0).all()
+

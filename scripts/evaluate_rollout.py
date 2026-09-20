@@ -54,7 +54,7 @@ def evaluate_model_rollout(
             if model_name == "persistence":
                 pred_traj = model(q_hist, horizon=max_horizon)
 
-            elif model_name == "latent_transformer":
+            elif "latent" in model_name:
                 pred_traj = model.forward_rollout(q_hist, re, sc, horizon=max_horizon)
 
             elif model_name == "direct_transformer":
@@ -66,6 +66,10 @@ def evaluate_model_rollout(
                 buf = HistoryBuffer(history_length=q_hist.shape[1])
                 buf.reset(q_hist)
                 pred_traj = buf.rollout(lambda hist, _c: model(hist), steps=max_horizon)
+
+            else:
+                raise ValueError(f"Unknown model_name: {model_name}")
+
 
             # Evaluate metrics at designated steps
             batch_res = evaluate_rollout_trajectory(pred_traj, q_future, evaluation_steps=eval_steps)
@@ -88,7 +92,9 @@ def run_benchmark(
     output_file: str = "outputs/metrics/rollout_benchmark.json",
     max_horizon: int = 30,
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
+    latent_ckpt_arg: str = None,
 ):
+
     seed_everything(42)
     device = torch.device(device_str)
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
@@ -114,20 +120,35 @@ def run_benchmark(
     persistence = PersistenceBaseline().to(device)
     results["persistence"] = evaluate_model_rollout("persistence", persistence, test_loader, device, max_horizon)
 
-    # 2. Main Model: Latent ST Transformer (if checkpoint exists)
-    latent_ckpt = "outputs/checkpoints/dynamics/latent_transformer/best_vrmse_mean.pt"
-    if os.path.exists(latent_ckpt):
-        print("\n--- Evaluating Latent ST Transformer ---")
-        encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
-        decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=True)
-        transformer = LatentSTTransformer(
-            latent_channels=64, embed_dim=256, cond_dim=128, depth=6, num_heads=8, history_length=4
-        )
-        forecaster = LatentForecaster(encoder=encoder, transformer=transformer, decoder=decoder).to(device)
-        ckpt_data = torch.load(latent_ckpt, map_location="cpu")
-        if "model_state_dict" in ckpt_data:
-            forecaster.load_state_dict(ckpt_data["model_state_dict"])
-        results["latent_transformer"] = evaluate_model_rollout("latent_transformer", forecaster, test_loader, device, max_horizon)
+    # 2. Main Model: Latent ST Transformer(s)
+    candidate_ckpts = []
+    if latent_ckpt_arg:
+        candidate_ckpts.append(("latent_transformer", latent_ckpt_arg))
+    else:
+        step1_ckpt = "outputs/checkpoints/dynamics/latent_transformer/best_vrmse_mean.pt"
+        rollout_ckpt = "outputs/checkpoints/dynamics/stage4_latent_rollout_ddp/latent_transformer/best_vrmse_mean.pt"
+        if os.path.exists(step1_ckpt) and os.path.exists(rollout_ckpt):
+            candidate_ckpts.append(("latent_step1", step1_ckpt))
+            candidate_ckpts.append(("latent_rollout", rollout_ckpt))
+        elif os.path.exists(rollout_ckpt):
+            candidate_ckpts.append(("latent_transformer", rollout_ckpt))
+        elif os.path.exists(step1_ckpt):
+            candidate_ckpts.append(("latent_transformer", step1_ckpt))
+
+    for m_label, ckpt_path in candidate_ckpts:
+        if os.path.exists(ckpt_path):
+            print(f"\n--- Evaluating Latent ST Transformer [{m_label}] ({ckpt_path}) ---")
+            encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
+            decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=True)
+            transformer = LatentSTTransformer(
+                latent_channels=64, embed_dim=256, cond_dim=128, depth=6, num_heads=8, history_length=4
+            )
+            forecaster = LatentForecaster(encoder=encoder, transformer=transformer, decoder=decoder).to(device)
+            ckpt_data = torch.load(ckpt_path, map_location="cpu")
+            if "model_state_dict" in ckpt_data:
+                forecaster.load_state_dict(ckpt_data["model_state_dict"])
+            results[m_label] = evaluate_model_rollout(m_label, forecaster, test_loader, device, max_horizon)
+
 
     # 3. Ablation Baseline: Direct ST Transformer
     direct_ckpt = "outputs/checkpoints/dynamics/direct_transformer/best_vrmse_mean.pt"
@@ -148,19 +169,58 @@ def run_benchmark(
             direct_model.load_state_dict(ckpt_data["model_state_dict"])
         results["direct_transformer"] = evaluate_model_rollout("direct_transformer", direct_model, test_loader, device, max_horizon)
 
-    # Print summary table
-    print("\n" + "=" * 90)
-    print(f"{'Model':<20} | {'Metric':<22} | {'Step 1':<10} | {'Step 5':<10} | {'Step 10':<10} | {'Step 20':<10} | {'Step 30':<10}")
-    print("-" * 90)
+    # 4. Neural Operator Baseline: FNO-2D
+    fno_ckpt = "outputs/checkpoints/dynamics/fno_baseline/fno/best_vrmse_mean.pt"
+    if not os.path.exists(fno_ckpt):
+        fno_ckpt = "outputs/checkpoints/dynamics/fno/best_vrmse_mean.pt"
+    if os.path.exists(fno_ckpt):
+        print("\n--- Evaluating FNO-2D Baseline ---")
+        fno_model = FNO2D(
+            in_channels=16,
+            out_channels=4,
+            modes1=16,
+            modes2=16,
+            width=64,
+            num_layers=4,
+        ).to(device)
+        ckpt_data = torch.load(fno_ckpt, map_location="cpu")
+        if "model_state_dict" in ckpt_data:
+            fno_model.load_state_dict(ckpt_data["model_state_dict"])
+        results["fno"] = evaluate_model_rollout("fno", fno_model, test_loader, device, max_horizon)
+
+    # Print comprehensive physical summary table
+    all_physics_metrics = [
+        ("vrmse_mean", "Field Mean VRMSE"),
+        ("rmse_mean", "Field Mean RMSE"),
+        ("div_rmse", "Divergence RMSE"),
+        ("vort_rmse", "Vorticity RMSE"),
+        ("ke_rel_err", "Kinetic Energy Rel Err"),
+        ("enstrophy_rel_err", "Enstrophy Rel Err"),
+        ("energy_spectrum_mae", "Energy Spectrum MAE"),
+        ("tracer_var_retention", "Tracer Var Retention"),
+        ("tracer_mass_error", "Tracer Mass Error"),
+    ]
+
+    print("\n" + "=" * 98)
+    print(f"{'Model':<20} | {'Physical Metric':<24} | {'Step 1':<9} | {'Step 5':<9} | {'Step 10':<9} | {'Step 20':<9} | {'Step 30':<9}")
+    print("-" * 98)
     for m_name, m_res in results.items():
-        for metric in ["vrmse_mean", "div_rmse", "vort_rmse", "tracer_var_retention", "energy_spectrum_mae"]:
-            row = [f"{m_res.get(f'step_{s}', {}).get(metric, 0.0):.4f}" for s in [1, 5, 10, 20, 30]]
-            print(f"{m_name:<20} | {metric:<22} | {row[0]:<10} | {row[1]:<10} | {row[2]:<10} | {row[3]:<10} | {row[4]:<10}")
-        print("-" * 90)
+        for metric_key, metric_title in all_physics_metrics:
+            row = [f"{m_res.get(f'step_{s}', {}).get(metric_key, 0.0):.4f}" for s in [1, 5, 10, 20, 30]]
+            print(f"{m_name:<20} | {metric_title:<24} | {row[0]:<9} | {row[1]:<9} | {row[2]:<9} | {row[3]:<9} | {row[4]:<9}")
+        print("-" * 98)
 
     with open(output_file, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\nSaved benchmark metrics to: {output_file}")
+
+    # Auto-generate publication rollout benchmark curves
+    try:
+        from scripts.plot_rollout_comparison import plot_benchmark_curves
+        plot_benchmark_curves(json_path=output_file)
+    except Exception as e:
+        print(f"Notice: Plotting failed with error: {e}")
+
 
 
 if __name__ == "__main__":
@@ -168,6 +228,13 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--output_file", type=str, default="outputs/metrics/rollout_benchmark.json")
     parser.add_argument("--horizon", type=int, default=30)
+    parser.add_argument("--latent_ckpt", type=str, default=None, help="Custom checkpoint path for Latent ST Transformer")
     args = parser.parse_args()
 
-    run_benchmark(data_dir=args.data_dir, output_file=args.output_file, max_horizon=args.horizon)
+    run_benchmark(
+        data_dir=args.data_dir,
+        output_file=args.output_file,
+        max_horizon=args.horizon,
+        latent_ckpt_arg=args.latent_ckpt,
+    )
+

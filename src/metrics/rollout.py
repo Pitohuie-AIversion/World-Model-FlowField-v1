@@ -48,11 +48,14 @@ def evaluate_rollout_trajectory(
         # 3. Divergence
         div_pred = compute_divergence(p[:, 0], p[:, 1], domain_size=domain_size)
         step_res["div_rmse"] = float(torch.sqrt(torch.mean(div_pred**2)).item())
+        step_res["div_max"] = float(torch.max(torch.abs(div_pred)).item())
 
         # 4. Kinetic Energy evolution error
         ke_pred = compute_kinetic_energy(p[:, 0], p[:, 1])
         ke_targ = compute_kinetic_energy(t[:, 0], t[:, 1])
         ke_rel_err = torch.abs(ke_pred - ke_targ) / (torch.abs(ke_targ) + 1e-6)
+        step_res["ke_pred"] = float(ke_pred.mean().item())
+        step_res["ke_targ"] = float(ke_targ.mean().item())
         step_res["ke_rel_err"] = float(ke_rel_err.mean().item())
 
         # 5. Vorticity RMSE & Enstrophy
@@ -62,12 +65,18 @@ def evaluate_rollout_trajectory(
         ens_pred = compute_enstrophy(vort_pred)
         ens_targ = compute_enstrophy(vort_targ)
         ens_rel_err = torch.abs(ens_pred - ens_targ) / (torch.abs(ens_targ) + 1e-6)
+        step_res["ens_pred"] = float(ens_pred.mean().item())
+        step_res["ens_targ"] = float(ens_targ.mean().item())
         step_res["enstrophy_rel_err"] = float(ens_rel_err.mean().item())
 
-        # 6. Energy Spectrum MAE
+        # 6. Energy Spectrum MAE & sub-bands
         spec_res = compute_spectral_error(p[:, 0], p[:, 1], t[:, 0], t[:, 1], domain_size=domain_size)
         step_res["energy_spectrum_mae"] = float(spec_res["spec_err_total"])
+        step_res["spec_err_low"] = float(spec_res["spec_err_low"])
+        step_res["spec_err_mid"] = float(spec_res["spec_err_mid"])
+        step_res["spec_err_high"] = float(spec_res["spec_err_high"])
 
         results[f"step_{step}"] = step_res
 
     return results
+

@@ -33,18 +33,19 @@ def spectral_grad_2d(
     # fft along second to last dim (y) has size ny
     device = field.device
     orig_dtype = field.dtype
-    field_f32 = field.float()
+    calc_dtype = torch.float64 if orig_dtype == torch.float64 else torch.float32
+    field_calc = field.to(dtype=calc_dtype)
 
     # ky = 2 * pi * n / Ly, shape (ny, 1)
-    ky = 2.0 * torch.pi * torch.fft.fftfreq(ny, d=ly / ny, device=device)
+    ky = 2.0 * torch.pi * torch.fft.fftfreq(ny, d=ly / ny, device=device, dtype=calc_dtype)
     ky = ky.view(*([1] * (field.ndim - 2)), ny, 1)
 
     # kx = 2 * pi * n / Lx, shape (1, nx//2 + 1)
-    kx = 2.0 * torch.pi * torch.fft.rfftfreq(nx, d=lx / nx, device=device)
+    kx = 2.0 * torch.pi * torch.fft.rfftfreq(nx, d=lx / nx, device=device, dtype=calc_dtype)
     kx = kx.view(*([1] * (field.ndim - 2)), 1, nx // 2 + 1)
 
     # Forward 2D RFFT
-    f_hat = torch.fft.rfft2(field_f32, dim=(-2, -1))
+    f_hat = torch.fft.rfft2(field_calc, dim=(-2, -1))
 
     # Differentiation in Fourier space: d/dx -> i * kx, d/dy -> i * ky
     # Using 1j * k
@@ -61,6 +62,7 @@ def spectral_grad_2d(
     df_dy = torch.fft.irfft2(f_hat_y, s=(ny, nx), dim=(-2, -1))
 
     return df_dy.to(dtype=orig_dtype), df_dx.to(dtype=orig_dtype)
+
 
 
 def compute_vorticity(
@@ -139,3 +141,47 @@ def compute_enstrophy(omega: torch.Tensor) -> torch.Tensor:
         Enstrophy: Scalar or shape (...) tensor.
     """
     return 0.5 * torch.mean(omega**2, dim=(-2, -1))
+
+
+def compute_laplacian_2d(
+    field: torch.Tensor,
+    domain_size: Tuple[float, float] = (2.0, 1.0),
+) -> torch.Tensor:
+    """Compute 2D spatial Laplacian: laplacian = d^2f/dx^2 + d^2f/dy^2 via RFFT.
+
+    Args:
+        field: Tensor of shape (..., Ny, Nx), real-valued.
+        domain_size: (Ly, Lx) extent of domain.
+
+    Returns:
+        laplacian: Tensor of same shape as field.
+    """
+    ny, nx = field.shape[-2], field.shape[-1]
+    ly, lx = domain_size
+    device = field.device
+    orig_dtype = field.dtype
+    calc_dtype = torch.float64 if orig_dtype == torch.float64 else torch.float32
+    field_calc = field.to(dtype=calc_dtype)
+
+    ky = 2.0 * torch.pi * torch.fft.fftfreq(ny, d=ly / ny, device=device, dtype=calc_dtype)
+    ky = ky.view(*([1] * (field.ndim - 2)), ny, 1)
+
+    kx = 2.0 * torch.pi * torch.fft.rfftfreq(nx, d=lx / nx, device=device, dtype=calc_dtype)
+    kx = kx.view(*([1] * (field.ndim - 2)), 1, nx // 2 + 1)
+
+    # -(kx^2 + ky^2)
+    k_sq = kx**2 + ky**2
+
+    f_hat = torch.fft.rfft2(field_calc, dim=(-2, -1))
+    f_hat_lap = -k_sq * f_hat
+
+    # Zero Nyquist frequencies if even
+    if ny % 2 == 0:
+        f_hat_lap[..., ny // 2, :] = 0.0
+    if nx % 2 == 0:
+        f_hat_lap[..., :, nx // 2] = 0.0
+
+    laplacian = torch.fft.irfft2(f_hat_lap, s=(ny, nx), dim=(-2, -1))
+    return laplacian.to(dtype=orig_dtype)
+
+

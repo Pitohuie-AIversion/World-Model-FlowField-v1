@@ -97,11 +97,23 @@ class LatentForecasterWrapper(nn.Module):
             return self.transformer(hist_z, re=re, sc=sc)
 
         # Rollout purely in latent space
-        z_rollout = buf.rollout(step_fn, steps=horizon)  # (B, H, C_z, H_z, W_z)
-
+        z_rollout = buf.rollout(step_fn, steps=horizon)
         # Decode entire rollout trajectory
         q_rollout = self.decoder(z_rollout)
         return q_rollout
+
+    def forward(
+        self,
+        q_hist: torch.Tensor,
+        re: Optional[torch.Tensor] = None,
+        sc: Optional[torch.Tensor] = None,
+        horizon: int = 1,
+    ) -> torch.Tensor:
+        """Unified forward interface."""
+        if horizon == 1:
+            return self.forward_single_step(q_hist, re, sc)
+        else:
+            return self.forward_rollout(q_hist, re, sc, horizon=horizon)
 
 
 def train_forecaster(
@@ -127,9 +139,25 @@ def train_forecaster(
     use_amp: bool = False,
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
 ):
-    seed_everything(seed)
-    device = torch.device(device_str)
-    os.makedirs(output_dir, exist_ok=True)
+    # Distributed Data Parallel (DDP) detection
+    is_distributed = "WORLD_SIZE" in os.environ and int(os.environ["WORLD_SIZE"]) > 1
+    if is_distributed:
+        import torch.distributed as dist
+        dist.init_process_group(backend="nccl")
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        global_rank = int(os.environ.get("RANK", 0))
+        world_size = int(os.environ.get("WORLD_SIZE", 1))
+        torch.cuda.set_device(local_rank)
+        device = torch.device(f"cuda:{local_rank}")
+    else:
+        local_rank = 0
+        global_rank = 0
+        world_size = 1
+        device = torch.device(device_str)
+
+    seed_everything(seed + global_rank)
+    if global_rank == 0:
+        os.makedirs(output_dir, exist_ok=True)
 
     def is_valid_hdf5(path: str) -> bool:
         if os.path.exists(path + ".aria2"):
@@ -146,23 +174,37 @@ def train_forecaster(
 
     if not train_files:
         if valid_files and test_files:
-            print(f"Notice: Train files downloading. Using valid partition ({len(valid_files)} file(s)) for training and test partition ({len(test_files)} file(s)) for validation.")
+            if global_rank == 0:
+                print(f"Notice: Train files downloading. Using valid partition ({len(valid_files)} file(s)) for training and test partition ({len(test_files)} file(s)) for validation.")
             train_files = valid_files
             valid_files = test_files
         elif valid_files:
-            print(f"Notice: No train files found. Using available valid files for training.")
+            if global_rank == 0:
+                print(f"Notice: No train files found. Using available valid files for training.")
             train_files = valid_files
         else:
-            print(f"No data found in {data_dir}. Please download data first.")
+            if global_rank == 0:
+                print(f"No data found in {data_dir}. Please download data first.")
             return
 
     train_dataset = ShearFlowDataset(train_files, history_length=4, horizon=horizon, stride=2, preload_to_memory=preload_to_memory)
     valid_dataset = ShearFlowDataset(valid_files, history_length=4, horizon=horizon, stride=8, preload_to_memory=preload_to_memory)
 
+    train_sampler = None
+    if is_distributed:
+        train_sampler = torch.utils.data.distributed.DistributedSampler(
+            train_dataset,
+            num_replicas=world_size,
+            rank=global_rank,
+            shuffle=True,
+            seed=seed,
+        )
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=(train_sampler is None),
+        sampler=train_sampler,
         num_workers=num_workers if not preload_to_memory else 0,
         pin_memory=True,
     )
@@ -178,7 +220,8 @@ def train_forecaster(
         encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
         decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=True)
         if os.path.exists(repr_checkpoint):
-            print(f"Loading pretrained representation weights from {repr_checkpoint}")
+            if global_rank == 0:
+                print(f"Loading pretrained representation weights from {repr_checkpoint}")
             ckpt = torch.load(repr_checkpoint, map_location="cpu")
             if "encoder_state_dict" in ckpt:
                 encoder.load_state_dict(ckpt["encoder_state_dict"])
@@ -200,7 +243,7 @@ def train_forecaster(
             freeze_representation=freeze_representation,
         ).to(device)
 
-    elif model_type == "direct_transformer":
+    elif model_type in ("direct_transformer", "pde_transformer"):
         model = DirectSTTransformer(
             in_channels=4,
             patch_size=(8, 8),
@@ -224,19 +267,32 @@ def train_forecaster(
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
 
+    # Wrap model with DDP
+    if is_distributed:
+        model = torch.nn.parallel.DistributedDataParallel(
+            model,
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=False,
+        )
+
     optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=1e-4)
     field_loss_fn = FieldLoss(loss_type="mse").to(device)
     rollout_loss_fn = RolloutLoss(field_loss=field_loss_fn).to(device)
     div_loss_fn = DivergenceLoss().to(device)
     vort_loss_fn = VorticityLoss().to(device)
 
-    tracker = BestCheckpointTracker(save_dir=output_dir, metric_name="vrmse_mean", mode="min", keep_top_k=3)
-
-    print(f"Training {model_type} on {device} | Horizon: {horizon} | Epochs: {epochs}")
+    tracker = None
+    if global_rank == 0:
+        tracker = BestCheckpointTracker(save_dir=output_dir, metric_name="vrmse_mean", mode="min", keep_top_k=3)
+        print(f"Training {model_type} on {device} (Distributed: {is_distributed}, World Size: {world_size}) | Horizon: {horizon} | Epochs: {epochs}")
 
     scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
     for epoch in range(1, epochs + 1):
+        if is_distributed and train_sampler is not None:
+            train_sampler.set_epoch(epoch)
+
         model.train()
         train_loss = 0.0
 
@@ -250,23 +306,29 @@ def train_forecaster(
 
             with torch.amp.autocast('cuda', enabled=use_amp):
                 if model_type == "latent_transformer":
-                    if horizon == 1:
-                        pred = model.forward_single_step(q_hist, re, sc)
+                    if is_distributed:
+                        pred = model(q_hist, re, sc, horizon=horizon)
                     else:
-                        pred = model.forward_rollout(q_hist, re, sc, horizon=horizon)
-                elif model_type == "direct_transformer":
-                    pred = model(q_hist, re=re, sc=sc)
+                        if horizon == 1:
+                            pred = model.forward_single_step(q_hist, re, sc)
+                        else:
+                            pred = model.forward_rollout(q_hist, re, sc, horizon=horizon)
+                elif model_type in ("direct_transformer", "pde_transformer"):
+                    if horizon == 1:
+                        pred = model(q_hist, re=re, sc=sc)
+                    else:
+                        buf = HistoryBuffer(history_length=q_hist.shape[1])
+                        buf.reset(q_hist)
+                        pred = buf.rollout(lambda hist, _c: model(hist, re=re, sc=sc), steps=horizon)
                 elif model_type == "fno":
                     if horizon == 1:
                         pred = model(q_hist)  # (B, 1, C, Ny, Nx)
                     else:
-                        # Autoregressive rollout for FNO (single-step model)
                         pred_list = []
                         hist_window = q_hist  # (B, L, C, Ny, Nx)
                         for _ in range(horizon):
                             step_pred = model(hist_window)  # (B, 1, C, Ny, Nx)
                             pred_list.append(step_pred)
-                            # Slide history window: drop oldest, append new prediction
                             hist_window = torch.cat([hist_window[:, 1:], step_pred], dim=1)
                         pred = torch.cat(pred_list, dim=1)  # (B, H, C, Ny, Nx)
 
@@ -282,68 +344,83 @@ def train_forecaster(
             scaler.update()
             train_loss += loss.item() * len(q_hist)
 
-        train_loss /= len(train_dataset)
+        train_loss /= len(train_loader.dataset)
 
-        # Validation
-        model.eval()
-        val_metrics_sum = {}
-        with torch.no_grad():
-            with torch.amp.autocast('cuda', enabled=use_amp):
-                for batch in valid_loader:
-                    q_hist = batch["history"].to(device)
-                    q_future = batch["future"].to(device)
-                    re = batch["re"].to(device) if use_condition else None
-                    sc = batch["sc"].to(device) if use_condition else None
+        # Validation only on rank 0
+        if global_rank == 0:
+            model.eval()
+            val_metrics_sum = {}
+            with torch.no_grad():
+                with torch.amp.autocast('cuda', enabled=use_amp):
+                    for batch in valid_loader:
+                        q_hist = batch["history"].to(device)
+                        q_future = batch["future"].to(device)
+                        re = batch["re"].to(device) if use_condition else None
+                        sc = batch["sc"].to(device) if use_condition else None
 
-                    if model_type == "latent_transformer":
-                        if horizon == 1:
-                            pred = model.forward_single_step(q_hist, re, sc)
-                        else:
-                            pred = model.forward_rollout(q_hist, re, sc, horizon=horizon)
-                    elif model_type == "direct_transformer":
-                        pred = model(q_hist, re=re, sc=sc)
-                    elif model_type == "fno":
-                        if horizon == 1:
-                            pred = model(q_hist)
-                        else:
-                            pred_list = []
-                            hist_window = q_hist
-                            for _ in range(horizon):
-                                step_pred = model(hist_window)
-                                pred_list.append(step_pred)
-                                hist_window = torch.cat([hist_window[:, 1:], step_pred], dim=1)
-                            pred = torch.cat(pred_list, dim=1)
+                        eval_model = model.module if is_distributed else model
+                        if model_type == "latent_transformer":
+                            if horizon == 1:
+                                pred = eval_model.forward_single_step(q_hist, re, sc)
+                            else:
+                                pred = eval_model.forward_rollout(q_hist, re, sc, horizon=horizon)
+                        elif model_type in ("direct_transformer", "pde_transformer"):
+                            if horizon == 1:
+                                pred = eval_model(q_hist, re=re, sc=sc)
+                            else:
+                                buf = HistoryBuffer(history_length=q_hist.shape[1])
+                                buf.reset(q_hist)
+                                pred = buf.rollout(lambda hist, _c: eval_model(hist, re=re, sc=sc), steps=horizon)
+                        elif model_type == "fno":
+                            if horizon == 1:
+                                pred = eval_model(q_hist)
+                            else:
+                                pred_list = []
+                                hist_window = q_hist
+                                for _ in range(horizon):
+                                    step_pred = eval_model(hist_window)
+                                    pred_list.append(step_pred)
+                                    hist_window = torch.cat([hist_window[:, 1:], step_pred], dim=1)
+                                pred = torch.cat(pred_list, dim=1)
 
-                    step_metrics = evaluate_field_metrics(pred[:, 0], q_future[:, 0])
-                    for k, v in step_metrics.items():
-                        val_metrics_sum[k] = val_metrics_sum.get(k, 0.0) + v * len(q_hist)
+                        step_metrics = evaluate_field_metrics(pred[:, 0], q_future[:, 0])
+                        for k, v in step_metrics.items():
+                            val_metrics_sum[k] = val_metrics_sum.get(k, 0.0) + v * len(q_hist)
 
-        val_metrics = {k: v / len(valid_dataset) for k, v in val_metrics_sum.items()}
+            val_metrics = {k: v / len(valid_dataset) for k, v in val_metrics_sum.items()}
 
-        vram_gb = torch.cuda.max_memory_allocated() / (1024**3) if torch.cuda.is_available() else 0.0
-        print(
-            f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {train_loss:.4e} | "
-            f"Val VRMSE Mean: {val_metrics['vrmse_mean']:.4f} "
-            f"(u: {val_metrics['vrmse_u']:.4f}, v: {val_metrics['vrmse_v']:.4f}, "
-            f"p: {val_metrics['vrmse_p']:.4f}, s: {val_metrics['vrmse_s']:.4f}) | "
-            f"Max VRAM: {vram_gb:.2f} GB"
-        )
+            vram_gb = torch.cuda.max_memory_allocated(device=device) / (1024**3) if torch.cuda.is_available() else 0.0
+            print(
+                f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {train_loss:.4e} | "
+                f"Val VRMSE Mean: {val_metrics['vrmse_mean']:.4f} "
+                f"(u: {val_metrics['vrmse_u']:.4f}, v: {val_metrics['vrmse_v']:.4f}, "
+                f"p: {val_metrics['vrmse_p']:.4f}, s: {val_metrics['vrmse_s']:.4f}) | "
+                f"Max VRAM: {vram_gb:.2f} GB"
+            )
 
-        state = {
-            "epoch": epoch,
-            "model_type": model_type,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "val_metrics": val_metrics,
-        }
-        tracker.update(val_metrics["vrmse_mean"], state, epoch)
+            raw_model = model.module if is_distributed else model
+            state = {
+                "epoch": epoch,
+                "model_type": model_type,
+                "model_state_dict": raw_model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "val_metrics": val_metrics,
+            }
+            tracker.update(val_metrics["vrmse_mean"], state, epoch)
 
-    print(f"Training completed. Best VRMSE: {tracker.best_score:.4f}")
+    if global_rank == 0 and tracker is not None:
+        print(f"Training completed. Best VRMSE: {tracker.best_score:.4f}")
+
+    if is_distributed:
+        import torch.distributed as dist
+        dist.barrier()
+        dist.destroy_process_group()
+
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="latent_transformer", choices=["latent_transformer", "direct_transformer", "fno"])
+    parser.add_argument("--model", type=str, default="latent_transformer", choices=["latent_transformer", "direct_transformer", "fno", "pde_transformer"])
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--output_dir", type=str, default="outputs/checkpoints/dynamics")
     parser.add_argument("--repr_checkpoint", type=str, default="outputs/checkpoints/representation/best_vrmse_mean.pt")

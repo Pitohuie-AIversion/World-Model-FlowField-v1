@@ -61,3 +61,12 @@ def test_rollout_evaluation():
     assert "step_1" in res
     assert "step_5" in res
     assert res["step_1"]["vrmse_mean"] == pytest.approx(0.0, abs=1e-5)
+    assert res["step_1"]["rmse_mean"] == pytest.approx(0.0, abs=1e-5)
+    assert "div_rmse" in res["step_1"]
+    assert "div_max" in res["step_1"]
+    assert "vort_rmse" in res["step_1"]
+    assert "ke_rel_err" in res["step_1"]
+    assert "enstrophy_rel_err" in res["step_1"]
+    assert "tracer_mean_err" in res["step_1"]
+    assert "energy_spectrum_mae" in res["step_1"]
+

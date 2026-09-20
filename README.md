@@ -2,7 +2,14 @@
 
 > 数据集：The Well / `shear_flow`  
 > 任务：二维不可压缩流场与被动示踪标量的长期未来状态预测  
-> 当前状态：V1 开发规范（审查修订版）
+> 当前状态：V1 开发规范（审查修订版）  
+> 
+> 📚 **核心文档导航**：
+> - [项目工程 TodoList 与研发进度看板](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/TODOLIST.md)
+> - [基准评测报告与物理指标分析](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/BENCHMARK_RESULTS.md)
+> - [The Well 数据集与物理协议说明](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/DATASET.md)
+> - [数据实测审计报告](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/DATA_AUDIT.md)
+
 
 ## 1. 目标
 

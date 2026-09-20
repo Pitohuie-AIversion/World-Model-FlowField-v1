@@ -36,8 +36,15 @@ def compute_tracer_metrics(
     mass_target = torch.sum(target_s, dim=(-2, -1))
     mass_err = torch.mean(torch.abs(mass_pred - mass_target) / (torch.abs(mass_target) + eps))
 
+    # 4. Mean conservation error
+    mean_pred = torch.mean(pred_s, dim=(-2, -1))
+    mean_target = torch.mean(target_s, dim=(-2, -1))
+    mean_err = torch.mean(torch.abs(mean_pred - mean_target))
+
     return {
         "tracer_var_retention": float(var_retention.item()),
         "tracer_out_of_bounds_rate": float(out_of_bounds_rate.item()),
         "tracer_mass_error": float(mass_err.item()),
+        "tracer_mean_err": float(mean_err.item()),
     }
+

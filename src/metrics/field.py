@@ -52,10 +52,15 @@ def evaluate_field_metrics(
         p_c = pred.select(c_dim, c)
         t_c = target.select(c_dim, c)
 
+        mse_val = torch.mean((p_c - t_c) ** 2)
+        metrics[f"mse_{name}"] = float(mse_val.item())
+        metrics[f"rmse_{name}"] = float(torch.sqrt(mse_val).item())
         metrics[f"vrmse_{name}"] = float(compute_vrmse(p_c, t_c).item())
         metrics[f"nmse_{name}"] = float(compute_nmse(p_c, t_c).item())
         metrics[f"max_err_{name}"] = float(compute_max_error(p_c, t_c).item())
 
-    # Overall VRMSE average
+    # Overall VRMSE and RMSE average
     metrics["vrmse_mean"] = sum(metrics[f"vrmse_{name}"] for name in channel_names) / len(channel_names)
+    metrics["rmse_mean"] = sum(metrics[f"rmse_{name}"] for name in channel_names) / len(channel_names)
     return metrics
+

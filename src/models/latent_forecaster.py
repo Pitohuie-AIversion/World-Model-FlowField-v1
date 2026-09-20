@@ -78,3 +78,27 @@ class LatentForecaster(nn.Module):
         z_rollout = buf.rollout(step_fn, steps=horizon)  # (B, H, C_z, H_z, W_z)
         q_rollout = self.decoder(z_rollout)
         return q_rollout
+
+    def forward(
+        self,
+        q_hist: torch.Tensor,
+        re: Optional[torch.Tensor] = None,
+        sc: Optional[torch.Tensor] = None,
+        horizon: int = 1,
+    ) -> torch.Tensor:
+        """Unified forward interface matching baseline models.
+
+        Args:
+            q_hist: History physical fields of shape (B, L, C, Ny, Nx).
+            re: Optional Reynolds number tensor (B,).
+            sc: Optional Schmidt number tensor (B,).
+            horizon: Prediction horizon H (default: 1).
+
+        Returns:
+            Predicted physical fields of shape (B, H, C, Ny, Nx).
+        """
+        if horizon == 1:
+            return self.forward_single_step(q_hist, re=re, sc=sc)
+        else:
+            return self.forward_rollout(q_hist, re=re, sc=sc, horizon=horizon)
+
