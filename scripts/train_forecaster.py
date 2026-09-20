@@ -257,7 +257,18 @@ def train_forecaster(
                 elif model_type == "direct_transformer":
                     pred = model(q_hist, re=re, sc=sc)
                 elif model_type == "fno":
-                    pred = model(q_hist)
+                    if horizon == 1:
+                        pred = model(q_hist)  # (B, 1, C, Ny, Nx)
+                    else:
+                        # Autoregressive rollout for FNO (single-step model)
+                        pred_list = []
+                        hist_window = q_hist  # (B, L, C, Ny, Nx)
+                        for _ in range(horizon):
+                            step_pred = model(hist_window)  # (B, 1, C, Ny, Nx)
+                            pred_list.append(step_pred)
+                            # Slide history window: drop oldest, append new prediction
+                            hist_window = torch.cat([hist_window[:, 1:], step_pred], dim=1)
+                        pred = torch.cat(pred_list, dim=1)  # (B, H, C, Ny, Nx)
 
                 loss = rollout_loss_fn(pred, q_future)
 
@@ -292,7 +303,16 @@ def train_forecaster(
                     elif model_type == "direct_transformer":
                         pred = model(q_hist, re=re, sc=sc)
                     elif model_type == "fno":
-                        pred = model(q_hist)
+                        if horizon == 1:
+                            pred = model(q_hist)
+                        else:
+                            pred_list = []
+                            hist_window = q_hist
+                            for _ in range(horizon):
+                                step_pred = model(hist_window)
+                                pred_list.append(step_pred)
+                                hist_window = torch.cat([hist_window[:, 1:], step_pred], dim=1)
+                            pred = torch.cat(pred_list, dim=1)
 
                     step_metrics = evaluate_field_metrics(pred[:, 0], q_future[:, 0])
                     for k, v in step_metrics.items():

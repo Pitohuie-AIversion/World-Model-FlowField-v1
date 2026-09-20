@@ -7,7 +7,12 @@ import torch.fft
 
 
 class SpectralConv2d(nn.Module):
-    """2D Fourier layer with periodic boundary handling."""
+    """2D Fourier layer with periodic boundary handling.
+
+    Weights are stored as real float32 tensors (real + imag stacked on last dim)
+    to be compatible with AMP GradScaler (which does not support cfloat gradients).
+    They are reassembled into complex tensors via view_as_complex during forward.
+    """
 
     def __init__(self, in_channels: int, out_channels: int, modes1: int, modes2: int):
         super().__init__()
@@ -17,8 +22,13 @@ class SpectralConv2d(nn.Module):
         self.modes2 = modes2  # Wavenumbers along Nx
 
         scale = 1.0 / (in_channels * out_channels)
-        self.weights1 = nn.Parameter(scale * torch.randn(in_channels, out_channels, modes1, modes2, dtype=torch.cfloat))
-        self.weights2 = nn.Parameter(scale * torch.randn(in_channels, out_channels, modes1, modes2, dtype=torch.cfloat))
+        # Store as real(..., 2) to avoid AMP cfloat GradScaler incompatibility
+        self.weights1 = nn.Parameter(
+            scale * torch.randn(in_channels, out_channels, modes1, modes2, 2)
+        )
+        self.weights2 = nn.Parameter(
+            scale * torch.randn(in_channels, out_channels, modes1, modes2, 2)
+        )
 
     def compl_mul2d(self, input: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
         # (batch, in_channel, x, y), (in_channel, out_channel, x, y) -> (batch, out_channel, x, y)
@@ -31,6 +41,10 @@ class SpectralConv2d(nn.Module):
         # Compute 2D Fourier coefficients
         x_ft = torch.fft.rfft2(x, norm="ortho")
 
+        # Reassemble real(...,2) weights as complex tensors (AMP-compatible trick)
+        w1 = torch.view_as_complex(self.weights1.float().contiguous())  # (in, out, m1, m2)
+        w2 = torch.view_as_complex(self.weights2.float().contiguous())  # (in, out, m1, m2)
+
         # Multiply relevant Fourier modes
         out_ft = torch.zeros(
             batchsize,
@@ -42,10 +56,10 @@ class SpectralConv2d(nn.Module):
         )
 
         out_ft[:, :, : self.modes1, : self.modes2] = self.compl_mul2d(
-            x_ft[:, :, : self.modes1, : self.modes2], self.weights1
+            x_ft[:, :, : self.modes1, : self.modes2], w1
         )
         out_ft[:, :, -self.modes1 :, : self.modes2] = self.compl_mul2d(
-            x_ft[:, :, -self.modes1 :, : self.modes2], self.weights2
+            x_ft[:, :, -self.modes1 :, : self.modes2], w2
         )
 
         # Return to spatial domain
