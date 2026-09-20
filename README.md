@@ -5,10 +5,12 @@
 > 当前状态：V1 开发规范（审查修订版）  
 > 
 > 📚 **核心文档导航**：
-> - [项目工程 TodoList 与研发进度看板](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/TODOLIST.md)
-> - [基准评测报告与物理指标分析](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/BENCHMARK_RESULTS.md)
-> - [The Well 数据集与物理协议说明](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/DATASET.md)
-> - [数据实测审计报告](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/DATA_AUDIT.md)
+> - [V1 阶段全链验收报告与 10 月任务规划](docs/V1_ACCEPTANCE_REPORT.md)
+> - [系统架构说明与技术规范](docs/ARCHITECTURE.md)
+> - [项目工程 TodoList 与研发进度看板](docs/TODOLIST.md)
+> - [基准评测报告与物理指标分析](docs/BENCHMARK_RESULTS.md)
+> - [The Well 数据集与物理协议说明](docs/DATASET.md)
+> - [数据实测审计报告](docs/DATA_AUDIT.md)
 
 
 ## 1. 目标
