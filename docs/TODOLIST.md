@@ -3,7 +3,7 @@
 > **项目名称**：World-Model-FlowField-v1  
 > **基准数据集**：The Well `shear_flow` (2D 不可压缩剪切流 + 被动示踪标量)  
 > **计算环境**：NVIDIA vGPU-32GB × 2 (CUDA 13.0, PyTorch 2.10.0+cu128)  
-> **工程测试基线**：全套自动化测试套件通过（37/37 tests passed）
+> **工程测试基线**：全套自动化测试套件通过（40/40 tests passed）
 
 ---
 

@@ -126,10 +126,14 @@ logs_*/
 wandb/
 tensorboard/
 *.log
-# outputs 目录细分治理：忽略其生成内容，但保留目录骨架与 outputs/.gitignore
+# outputs 目录细分治理：忽略大型检查点与中间日志，保留目录骨架、划分清单、评测指标、归一化统计与总结图表
 outputs/*
 !outputs/.gitignore
 !outputs/**/.gitkeep
+!outputs/splits/*.json
+!outputs/metrics/*.json
+!outputs/normalization/*.pt
+!outputs/figures/*.png
 
 # ------------------------------------------------------------------------------
 # 10. 生成的可视化图像与多媒体 (Generated Visualizations & Media)

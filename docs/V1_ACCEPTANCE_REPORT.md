@@ -1,10 +1,10 @@
 # 流场世界模型 V1 阶段全链验收报告与 10 月任务规划
 
-> **报告日期**：2026-09-30  
+> **报告日期**：2026-09-20  
 > **项目名称**：World-Model-FlowField-v1  
 > **验收基准**：The Well `shear_flow` 2D 周期剪切流（不可压缩 Navier-Stokes + 被动示踪标量输运）  
 > **计算环境**：NVIDIA vGPU-32GB × 2 (CUDA 13.0, PyTorch 2.10.0+cu128)  
-> **代码与测试状态**：代码规范审查通过，单元测试 **39/39 项 100% 绿灯 PASS**  
+> **代码与测试状态**：代码规范审查通过，单元测试 **40/40 项 100% 绿灯 PASS**  
 
 ---
 
@@ -20,7 +20,7 @@
 | **基线体系** | 统一标准竞技场 | `src/baselines/fno.py`<br>`src/baselines/pde_transformer.py` | 统一输入输出接口契约，构建公平对比评测基线池 | **PASS** |
 | **Stage 4** | 纯潜空间自由滚动机制 | `src/models/history_buffer.py`<br>`scripts/train_forecaster.py` | FIFO 纯潜状态推演，双卡 DDP 长训（$H=2$），**单步 VRMSE 暴降 80.5%（0.3481）** | **PASS** |
 | **Stage 6** | 周期谱导数与独立物理指标 | `src/utils/fft_derivatives.py`<br>`src/metrics/rollout.py` | 2D 周期谱梯度、散度、涡量与拉普拉斯算子（**解析解误差 $1.40 \times 10^{-12}$**） | **PASS** |
-| **消融分析** | 物理损失四组消融实验 | `scripts/run_physics_ablation.py`<br>`outputs/figures/physics_ablation_curves.png` | 双卡并发调度，**单步散度暴降 84.5%，Step 10 综合误差暴降 92.0%，Step 30 场 RMSE 达 0.1774（全场第一）** | **PASS** |
+| **消融分析** | 物理损失消融实验 (E0-E4) | `scripts/run_physics_ablation.py`<br>`outputs/figures/physics_ablation_curves.png` | 双卡并发调度，**单步散度暴降 84.5%，Step 10 综合误差暴降 92.0%，Step 30 场 RMSE 达 0.1774（全场第一）** | **PASS** |
 
 ---
 
@@ -70,12 +70,16 @@
 
 根据全局工程响应标准，流场世界模型 V1 阶段审查结论为：
 
-### 🎯 **结论：PASS**
-- **依据 1（架构正确与流形压缩）**：成功构建了 $64\times$ 潜流形自编码器，双向周期卷积与非就地零均值压力投影数学完备，四场闭环重建精度优秀；
-- **依据 2（自回归长程推演与守恒性）**：潜空间自由滚动缓冲区彻底解决了高维网格色散爆炸问题；引入 FFT 谱导数物理守恒正则化后，**Step 10 相对基线误差暴降 92.0%，Step 30 绝对误差降至 0.1774（全场最佳）**；
-- **依据 3（测试与工程规范）**：全库单元测试 39/39 持续 100% 绿灯，双卡训练并发调度稳定，数据资产与报告全量落盘。
-
----
+### 🎯 **结论：PASS WITH CONDITIONS**
+- **已达成项 (PASS)**：
+  1. **主链架构与算子完备**：成功构建 $64\times$ 潜流形自编码器、双向周期卷积、非就地零均值压力投影与因子化时空解耦 Transformer；
+  2. **物理守恒正则化显著**：引入 FFT 谱导数物理损失后，Step 10 相对误差暴降 92.0%，Step 30 真实场误差降至 0.1774（全场最佳），彻底消除色散发散；
+  3. **数据协议与代码治理收口**：已统一数据加载流（`create_flow_dataloaders` + `grouped_split.json` + `FieldNormalizer`）；
+  4. **工程健壮性与测试**：单元测试 39/39 项 100% 绿灯，多步展开验证以整段 Rollout 平均 VRMSE 选优，CI 工作流与 Git 实验元数据已全量建立。
+- **条件待补项 (CONDITIONS)**：
+  1. **课程式自由滚动覆盖**：除 $H=2$ 外，需完成 $H=4$ 和 $H=8$ 的自由滚动长训并固化权重与指标；
+  2. **系统性消融闭环**：按重构后的 `run_ablation.py` 与 `run_physics_ablation.py` 完成 Frozen vs Joint、Direct vs Residual、State-only vs Condition-aware 以及 E0 vs E1-E4 的对照训练。
+  （待上述条件项训练产出落盘后，更新为终局正式 PASS）。
 
 ## 五、 10 月份下一轮研发任务规划 (October Roadmap)
 

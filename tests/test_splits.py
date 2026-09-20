@@ -86,3 +86,35 @@ def test_normalizer_effect():
     assert batch["history"].shape[2] == 4  # C=4
     assert batch["future"].shape[1] == 1   # H=1
     assert batch["future"].shape[2] == 4   # C=4
+
+
+def test_create_flow_datasets_and_sampler():
+    """Verify create_flow_datasets and sampler return in create_flow_dataloaders."""
+    from src.data.pipeline import create_flow_datasets
+
+    train_ds, valid_ds, test_ds, norm = create_flow_datasets(
+        split_type="grouped",
+        history_length=4,
+        horizon=2,
+        train_stride=2,
+        valid_stride=4,
+        downsample_factor=4,
+    )
+    assert len(train_ds) > 0
+    assert len(valid_ds) > 0
+    assert len(test_ds) > 0
+    assert norm is not None
+
+    # Test create_flow_dataloaders with return_sampler
+    train_loader, val_loader, test_loader, normalizer, sampler = create_flow_dataloaders(
+        split_type="grouped",
+        batch_size=2,
+        history_length=4,
+        horizon=2,
+        downsample_factor=4,
+        is_distributed=False,
+        return_sampler=True,
+    )
+    assert sampler is None  # Since is_distributed=False
+    sample_batch = next(iter(train_loader))
+    assert sample_batch["future"].shape[1] == 2

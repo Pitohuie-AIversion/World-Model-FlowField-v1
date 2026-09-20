@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from typing import Dict, List, Optional
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -15,6 +16,7 @@ import torch
 from torch.utils.data import DataLoader
 from src.baselines.fno import FNO2D
 from src.baselines.persistence import PersistenceBaseline
+from src.data.pipeline import create_flow_dataloaders
 from src.data.shear_flow_dataset import ShearFlowDataset
 from src.metrics.compute import benchmark_inference, count_parameters
 from src.metrics.rollout import evaluate_rollout_trajectory
@@ -35,6 +37,7 @@ def evaluate_model_rollout(
     device: torch.device,
     max_horizon: int = 30,
     eval_steps: list = [1, 5, 10, 20, 30],
+    normalizer=None,
 ) -> dict:
     """Roll out model for max_horizon steps and compute evaluation metrics."""
     model.eval()
@@ -71,8 +74,16 @@ def evaluate_model_rollout(
                 raise ValueError(f"Unknown model_name: {model_name}")
 
 
+            # Denormalize to physical space for metric computation if normalizer is provided
+            if normalizer is not None:
+                pred_eval = normalizer.denormalize(pred_traj)
+                future_eval = normalizer.denormalize(q_future)
+            else:
+                pred_eval = pred_traj
+                future_eval = q_future
+
             # Evaluate metrics at designated steps
-            batch_res = evaluate_rollout_trajectory(pred_traj, q_future, evaluation_steps=eval_steps)
+            batch_res = evaluate_rollout_trajectory(pred_eval, future_eval, evaluation_steps=eval_steps)
             for step_key, step_data in batch_res.items():
                 for m_key, m_val in step_data.items():
                     accumulated_metrics[step_key][m_key] = (
@@ -90,6 +101,9 @@ def evaluate_model_rollout(
 def run_benchmark(
     data_dir: str = "/root/autodl-tmp/datasets/shear_flow",
     output_file: str = "outputs/metrics/rollout_benchmark.json",
+    split_type: str = "grouped",
+    split_file: Optional[str] = None,
+    normalize: bool = True,
     max_horizon: int = 30,
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
     latent_ckpt_arg: str = None,
@@ -99,26 +113,43 @@ def run_benchmark(
     device = torch.device(device_str)
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
-    test_files = sorted(glob.glob(os.path.join(data_dir, "**/test/*.hdf5"), recursive=True))
-    if not test_files:
-        test_files = sorted(glob.glob(os.path.join(data_dir, "**/valid/*.hdf5"), recursive=True))
-        if test_files:
-            print(f"Notice: No test files found. Using available valid files for benchmark evaluation.")
-        else:
-            print(f"No test/valid files found in {data_dir}.")
-            return
+    if split_file is None:
+        split_file = f"outputs/splits/{split_type}_split.json"
 
-    test_dataset = ShearFlowDataset(test_files, history_length=4, horizon=max_horizon, stride=20)
-    test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False)
+    normalizer = None
+    if os.path.exists(split_file):
+        print(f"Loading benchmark test dataset via unified pipeline ({split_type} split: {split_file})...")
+        _, _, test_loader, normalizer = create_flow_dataloaders(
+            split_type=split_type,
+            split_file=split_file,
+            history_length=4,
+            horizon=max_horizon,
+            stride=20,
+            batch_size=2,
+            num_workers=0,
+            normalize=normalize,
+        )
+    else:
+        test_files = sorted(glob.glob(os.path.join(data_dir, "**/test/*.hdf5"), recursive=True))
+        if not test_files:
+            test_files = sorted(glob.glob(os.path.join(data_dir, "**/valid/*.hdf5"), recursive=True))
+            if test_files:
+                print(f"Notice: No test files found. Using available valid files for benchmark evaluation.")
+            else:
+                print(f"No test/valid files found in {data_dir}.")
+                return
 
-    print(f"Loaded {len(test_dataset)} test trajectories for {max_horizon}-step rollout evaluation.")
+        test_dataset = ShearFlowDataset(test_files, history_length=4, horizon=max_horizon, stride=20)
+        test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False)
+
+    print(f"Loaded {len(test_loader.dataset)} test trajectories for {max_horizon}-step rollout evaluation.")
 
     results = {}
 
     # 1. Baseline: Persistence
     print("\n--- Evaluating Persistence Baseline ---")
     persistence = PersistenceBaseline().to(device)
-    results["persistence"] = evaluate_model_rollout("persistence", persistence, test_loader, device, max_horizon)
+    results["persistence"] = evaluate_model_rollout("persistence", persistence, test_loader, device, max_horizon, normalizer=normalizer)
 
     # 2. Main Model: Latent ST Transformer(s)
     candidate_ckpts = []
@@ -147,7 +178,7 @@ def run_benchmark(
             ckpt_data = torch.load(ckpt_path, map_location="cpu")
             if "model_state_dict" in ckpt_data:
                 forecaster.load_state_dict(ckpt_data["model_state_dict"])
-            results[m_label] = evaluate_model_rollout(m_label, forecaster, test_loader, device, max_horizon)
+            results[m_label] = evaluate_model_rollout(m_label, forecaster, test_loader, device, max_horizon, normalizer=normalizer)
 
 
     # 3. Ablation Baseline: Direct ST Transformer
@@ -167,7 +198,7 @@ def run_benchmark(
         ckpt_data = torch.load(direct_ckpt, map_location="cpu")
         if "model_state_dict" in ckpt_data:
             direct_model.load_state_dict(ckpt_data["model_state_dict"])
-        results["direct_transformer"] = evaluate_model_rollout("direct_transformer", direct_model, test_loader, device, max_horizon)
+        results["direct_transformer"] = evaluate_model_rollout("direct_transformer", direct_model, test_loader, device, max_horizon, normalizer=normalizer)
 
     # 4. Neural Operator Baseline: FNO-2D
     fno_ckpt = "outputs/checkpoints/dynamics/fno_baseline/fno/best_vrmse_mean.pt"
@@ -186,7 +217,7 @@ def run_benchmark(
         ckpt_data = torch.load(fno_ckpt, map_location="cpu")
         if "model_state_dict" in ckpt_data:
             fno_model.load_state_dict(ckpt_data["model_state_dict"])
-        results["fno"] = evaluate_model_rollout("fno", fno_model, test_loader, device, max_horizon)
+        results["fno"] = evaluate_model_rollout("fno", fno_model, test_loader, device, max_horizon, normalizer=normalizer)
 
     # Print comprehensive physical summary table
     all_physics_metrics = [
@@ -224,9 +255,12 @@ def run_benchmark(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Evaluate multi-step autoregressive rollouts.")
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--output_file", type=str, default="outputs/metrics/rollout_benchmark.json")
+    parser.add_argument("--split_type", type=str, default="grouped", choices=["grouped", "official"])
+    parser.add_argument("--split_file", type=str, default=None)
+    parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--horizon", type=int, default=30)
     parser.add_argument("--latent_ckpt", type=str, default=None, help="Custom checkpoint path for Latent ST Transformer")
     args = parser.parse_args()
@@ -234,6 +268,9 @@ if __name__ == "__main__":
     run_benchmark(
         data_dir=args.data_dir,
         output_file=args.output_file,
+        split_type=args.split_type,
+        split_file=args.split_file,
+        normalize=args.normalize,
         max_horizon=args.horizon,
         latent_ckpt_arg=args.latent_ckpt,
     )

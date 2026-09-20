@@ -55,40 +55,42 @@ def fit_normalizer_on_dataset(
     return normalizer
 
 
-def create_flow_dataloaders(
+def create_flow_datasets(
     split_type: str = "grouped",
     split_file: Optional[str] = None,
     history_length: int = 4,
     horizon: int = 1,
     stride: int = 1,
+    train_stride: Optional[int] = None,
+    valid_stride: Optional[int] = None,
+    test_stride: Optional[int] = None,
     downsample_factor: int = 1,
-    batch_size: int = 4,
-    num_workers: int = 0,
     normalize: bool = True,
     normalizer: Optional[FieldNormalizer] = None,
     stats_dir: str = "outputs/normalization",
     preload_to_memory: bool = False,
     seed: int = 42,
-) -> Tuple[DataLoader, DataLoader, DataLoader, Optional[FieldNormalizer]]:
-    """Create reproducible PyTorch DataLoaders for train, valid, and test sets.
+) -> Tuple[ShearFlowDataset, ShearFlowDataset, ShearFlowDataset, Optional[FieldNormalizer]]:
+    """Create reproducible PyTorch Datasets for train, valid, and test sets.
 
     Args:
         split_type: 'grouped' (zero-leakage) or 'official'.
         split_file: Optional path to split JSON registry. Defaults to 'outputs/splits/{split_type}_split.json'.
         history_length: Historical sequence length L (default: 4).
         horizon: Prediction horizon H (default: 1).
-        stride: Temporal window stride (default: 1).
+        stride: Default temporal window stride (default: 1).
+        train_stride: Optional stride override for training set.
+        valid_stride: Optional stride override for validation set.
+        test_stride: Optional stride override for test set.
         downsample_factor: Spatial downsampling factor (default: 1 for 256x512, 2 for 128x256).
-        batch_size: Mini-batch size.
-        num_workers: DataLoader workers.
         normalize: Whether to apply channel-wise normalization.
         normalizer: Optional pre-fitted normalizer.
         stats_dir: Directory to cache fitted normalizer statistics.
         preload_to_memory: Whether to cache HDF5 files in memory.
-        seed: Random seed for deterministic data loading.
+        seed: Random seed for deterministic initialization.
 
     Returns:
-        (train_loader, valid_loader, test_loader, normalizer)
+        (train_dataset, valid_dataset, test_dataset, normalizer)
     """
     seed_everything(seed)
 
@@ -101,7 +103,10 @@ def create_flow_dataloaders(
     with open(split_file, "r") as f:
         split_data = json.load(f)
 
-    # Instantiate datasets without normalizer first to calculate train statistics if needed
+    t_stride = train_stride if train_stride is not None else stride
+    v_stride = valid_stride if valid_stride is not None else stride
+    te_stride = test_stride if test_stride is not None else stride
+
     if split_type == "grouped":
         train_trajs = split_data["train"]
         valid_trajs = split_data["valid"]
@@ -111,7 +116,7 @@ def create_flow_dataloaders(
             trajectories=train_trajs,
             history_length=history_length,
             horizon=horizon,
-            stride=stride,
+            stride=t_stride,
             normalizer=None,
             preload_to_memory=preload_to_memory,
             downsample_factor=downsample_factor,
@@ -125,7 +130,7 @@ def create_flow_dataloaders(
             file_paths=train_files,
             history_length=history_length,
             horizon=horizon,
-            stride=stride,
+            stride=t_stride,
             normalizer=None,
             preload_to_memory=preload_to_memory,
             downsample_factor=downsample_factor,
@@ -133,7 +138,6 @@ def create_flow_dataloaders(
     else:
         raise ValueError(f"Unsupported split_type: {split_type}. Choose 'grouped' or 'official'.")
 
-    # Fit or load normalizer strictly from training data
     fitted_normalizer = None
     if normalize:
         os.makedirs(stats_dir, exist_ok=True)
@@ -149,17 +153,15 @@ def create_flow_dataloaders(
             fitted_normalizer = fit_normalizer_on_dataset(raw_train_ds)
             torch.save(fitted_normalizer.state_dict(), stats_path)
 
-    # Attach normalizer to train dataset
     raw_train_ds.normalizer = fitted_normalizer
     train_dataset = raw_train_ds
 
-    # Build validation and test datasets
     if split_type == "grouped":
         valid_dataset = ShearFlowDataset(
             trajectories=valid_trajs,
             history_length=history_length,
             horizon=horizon,
-            stride=stride,
+            stride=v_stride,
             normalizer=fitted_normalizer,
             preload_to_memory=preload_to_memory,
             downsample_factor=downsample_factor,
@@ -168,7 +170,7 @@ def create_flow_dataloaders(
             trajectories=test_trajs,
             history_length=history_length,
             horizon=horizon,
-            stride=stride,
+            stride=te_stride,
             normalizer=fitted_normalizer,
             preload_to_memory=preload_to_memory,
             downsample_factor=downsample_factor,
@@ -178,7 +180,7 @@ def create_flow_dataloaders(
             file_paths=valid_files,
             history_length=history_length,
             horizon=horizon,
-            stride=stride,
+            stride=v_stride,
             normalizer=fitted_normalizer,
             preload_to_memory=preload_to_memory,
             downsample_factor=downsample_factor,
@@ -187,42 +189,100 @@ def create_flow_dataloaders(
             file_paths=test_files,
             history_length=history_length,
             horizon=horizon,
-            stride=stride,
+            stride=te_stride,
             normalizer=fitted_normalizer,
             preload_to_memory=preload_to_memory,
             downsample_factor=downsample_factor,
         )
 
-    # Deterministic DataLoaders with PyTorch Generator
+    return train_dataset, valid_dataset, test_dataset, fitted_normalizer
+
+
+def create_flow_dataloaders(
+    split_type: str = "grouped",
+    split_file: Optional[str] = None,
+    history_length: int = 4,
+    horizon: int = 1,
+    stride: int = 1,
+    train_stride: Optional[int] = None,
+    valid_stride: Optional[int] = None,
+    test_stride: Optional[int] = None,
+    downsample_factor: int = 1,
+    batch_size: int = 4,
+    num_workers: int = 0,
+    normalize: bool = True,
+    normalizer: Optional[FieldNormalizer] = None,
+    stats_dir: str = "outputs/normalization",
+    preload_to_memory: bool = False,
+    is_distributed: bool = False,
+    rank: int = 0,
+    world_size: int = 1,
+    seed: int = 42,
+    return_sampler: bool = False,
+) -> Union[
+    Tuple[DataLoader, DataLoader, DataLoader, Optional[FieldNormalizer]],
+    Tuple[DataLoader, DataLoader, DataLoader, Optional[FieldNormalizer], Optional[torch.utils.data.distributed.DistributedSampler]],
+]:
+    """Create reproducible PyTorch DataLoaders with optional DDP DistributedSampler support."""
+    train_ds, valid_ds, test_ds, fitted_normalizer = create_flow_datasets(
+        split_type=split_type,
+        split_file=split_file,
+        history_length=history_length,
+        horizon=horizon,
+        stride=stride,
+        train_stride=train_stride,
+        valid_stride=valid_stride,
+        test_stride=test_stride,
+        downsample_factor=downsample_factor,
+        normalize=normalize,
+        normalizer=normalizer,
+        stats_dir=stats_dir,
+        preload_to_memory=preload_to_memory,
+        seed=seed,
+    )
+
+    train_sampler = None
+    if is_distributed:
+        train_sampler = torch.utils.data.distributed.DistributedSampler(
+            train_ds,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
+            seed=seed,
+        )
+
     g = torch.Generator()
     g.manual_seed(seed)
 
     train_loader = DataLoader(
-        train_dataset,
+        train_ds,
         batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
+        shuffle=(train_sampler is None),
+        sampler=train_sampler,
+        num_workers=num_workers if not preload_to_memory else 0,
         worker_init_fn=seed_worker,
-        generator=g,
+        generator=g if train_sampler is None else None,
         pin_memory=torch.cuda.is_available(),
     )
 
     valid_loader = DataLoader(
-        valid_dataset,
+        valid_ds,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
+        num_workers=num_workers if not preload_to_memory else 0,
         worker_init_fn=seed_worker,
         pin_memory=torch.cuda.is_available(),
     )
 
     test_loader = DataLoader(
-        test_dataset,
+        test_ds,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
+        num_workers=num_workers if not preload_to_memory else 0,
         worker_init_fn=seed_worker,
         pin_memory=torch.cuda.is_available(),
     )
 
+    if return_sampler:
+        return train_loader, valid_loader, test_loader, fitted_normalizer, train_sampler
     return train_loader, valid_loader, test_loader, fitted_normalizer

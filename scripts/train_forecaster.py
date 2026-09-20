@@ -16,6 +16,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from src.baselines.fno import FNO2D
+from src.data.pipeline import create_flow_dataloaders
 from src.data.shear_flow_dataset import ShearFlowDataset
 from src.losses.divergence import DivergenceLoss
 from src.losses.field import FieldLoss
@@ -121,6 +122,11 @@ def train_forecaster(
     data_dir: str = "/root/autodl-tmp/datasets/shear_flow",
     output_dir: str = "outputs/checkpoints/dynamics",
     repr_checkpoint: str = "outputs/checkpoints/representation/best_vrmse_mean.pt",
+    split_type: str = "grouped",
+    split_file: Optional[str] = None,
+    train_stride: int = 2,
+    valid_stride: int = 8,
+    normalize: bool = True,
     freeze_representation: bool = True,
     prediction_mode: str = "direct",
     use_condition: bool = True,
@@ -159,61 +165,27 @@ def train_forecaster(
     if global_rank == 0:
         os.makedirs(output_dir, exist_ok=True)
 
-    def is_valid_hdf5(path: str) -> bool:
-        if os.path.exists(path + ".aria2"):
-            return False
-        try:
-            with h5py.File(path, "r") as h5:
-                return "t0_fields" in h5 or "pressure" in h5
-        except Exception:
-            return False
+    if split_file is None:
+        split_file = f"outputs/splits/{split_type}_split.json"
 
-    train_files = sorted([f for f in glob.glob(os.path.join(data_dir, "**/train/*.hdf5"), recursive=True) if is_valid_hdf5(f)])
-    valid_files = sorted([f for f in glob.glob(os.path.join(data_dir, "**/valid/*.hdf5"), recursive=True) if is_valid_hdf5(f)])
-    test_files = sorted([f for f in glob.glob(os.path.join(data_dir, "**/test/*.hdf5"), recursive=True) if is_valid_hdf5(f)])
-
-    if not train_files:
-        if valid_files and test_files:
-            if global_rank == 0:
-                print(f"Notice: Train files downloading. Using valid partition ({len(valid_files)} file(s)) for training and test partition ({len(test_files)} file(s)) for validation.")
-            train_files = valid_files
-            valid_files = test_files
-        elif valid_files:
-            if global_rank == 0:
-                print(f"Notice: No train files found. Using available valid files for training.")
-            train_files = valid_files
-        else:
-            if global_rank == 0:
-                print(f"No data found in {data_dir}. Please download data first.")
-            return
-
-    train_dataset = ShearFlowDataset(train_files, history_length=4, horizon=horizon, stride=2, preload_to_memory=preload_to_memory)
-    valid_dataset = ShearFlowDataset(valid_files, history_length=4, horizon=horizon, stride=8, preload_to_memory=preload_to_memory)
-
-    train_sampler = None
-    if is_distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(
-            train_dataset,
-            num_replicas=world_size,
-            rank=global_rank,
-            shuffle=True,
-            seed=seed,
-        )
-
-    train_loader = DataLoader(
-        train_dataset,
+    train_loader, valid_loader, test_loader, normalizer, train_sampler = create_flow_dataloaders(
+        split_type=split_type,
+        split_file=split_file,
+        history_length=4,
+        horizon=horizon,
+        train_stride=train_stride,
+        valid_stride=valid_stride,
         batch_size=batch_size,
-        shuffle=(train_sampler is None),
-        sampler=train_sampler,
-        num_workers=num_workers if not preload_to_memory else 0,
-        pin_memory=True,
+        num_workers=num_workers,
+        normalize=normalize,
+        preload_to_memory=preload_to_memory,
+        is_distributed=is_distributed,
+        rank=global_rank,
+        world_size=world_size,
+        seed=seed,
+        return_sampler=True,
     )
-    valid_loader = DataLoader(
-        valid_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers if not preload_to_memory else 0,
-    )
+    valid_dataset = valid_loader.dataset
 
     # Initialize model
     if model_type == "latent_transformer":
@@ -349,7 +321,7 @@ def train_forecaster(
         # Validation only on rank 0
         if global_rank == 0:
             model.eval()
-            val_metrics_sum = {}
+            rollout_step_metrics_sum = {h: {} for h in range(horizon)}
             with torch.no_grad():
                 with torch.amp.autocast('cuda', enabled=use_amp):
                     for batch in valid_loader:
@@ -383,20 +355,57 @@ def train_forecaster(
                                     hist_window = torch.cat([hist_window[:, 1:], step_pred], dim=1)
                                 pred = torch.cat(pred_list, dim=1)
 
-                        step_metrics = evaluate_field_metrics(pred[:, 0], q_future[:, 0])
-                        for k, v in step_metrics.items():
-                            val_metrics_sum[k] = val_metrics_sum.get(k, 0.0) + v * len(q_hist)
+                        # Denormalize to physical units for physical metric evaluation
+                        if normalizer is not None:
+                            pred_eval = normalizer.denormalize(pred)
+                            target_eval = normalizer.denormalize(q_future)
+                        else:
+                            pred_eval = pred
+                            target_eval = q_future
 
-            val_metrics = {k: v / len(valid_dataset) for k, v in val_metrics_sum.items()}
+                        b_samples = len(q_hist)
+                        for h in range(horizon):
+                            step_m = evaluate_field_metrics(pred_eval[:, h], target_eval[:, h])
+                            for k, v in step_m.items():
+                                rollout_step_metrics_sum[h][k] = rollout_step_metrics_sum[h].get(k, 0.0) + v * b_samples
+
+            n_val = len(valid_dataset)
+            val_step_metrics = {
+                h: {k: v / n_val for k, v in rollout_step_metrics_sum[h].items()}
+                for h in range(horizon)
+            }
+
+            # Step 1 metrics
+            val_metrics = dict(val_step_metrics[0])
+
+            # In multi-step rollout, compute overall rollout trajectory mean metrics
+            if horizon > 1:
+                rollout_mean_vrmse = sum(val_step_metrics[h]["vrmse_mean"] for h in range(horizon)) / horizon
+                rollout_mean_rmse = sum(val_step_metrics[h]["rmse_mean"] for h in range(horizon)) / horizon
+                val_metrics["rollout_mean_vrmse"] = rollout_mean_vrmse
+                val_metrics["rollout_mean_rmse"] = rollout_mean_rmse
+                val_criterion = rollout_mean_vrmse
+            else:
+                val_criterion = val_metrics["vrmse_mean"]
 
             vram_gb = torch.cuda.max_memory_allocated(device=device) / (1024**3) if torch.cuda.is_available() else 0.0
-            print(
-                f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {train_loss:.4e} | "
-                f"Val VRMSE Mean: {val_metrics['vrmse_mean']:.4f} "
-                f"(u: {val_metrics['vrmse_u']:.4f}, v: {val_metrics['vrmse_v']:.4f}, "
-                f"p: {val_metrics['vrmse_p']:.4f}, s: {val_metrics['vrmse_s']:.4f}) | "
-                f"Max VRAM: {vram_gb:.2f} GB"
-            )
+            if horizon > 1:
+                print(
+                    f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {train_loss:.4e} | "
+                    f"Val Rollout Mean VRMSE: {val_metrics['rollout_mean_vrmse']:.4f} | "
+                    f"Step 1 VRMSE: {val_metrics['vrmse_mean']:.4f} "
+                    f"(u: {val_metrics['vrmse_u']:.4f}, v: {val_metrics['vrmse_v']:.4f}, "
+                    f"p: {val_metrics['vrmse_p']:.4f}, s: {val_metrics['vrmse_s']:.4f}) | "
+                    f"Max VRAM: {vram_gb:.2f} GB"
+                )
+            else:
+                print(
+                    f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {train_loss:.4e} | "
+                    f"Val VRMSE Mean: {val_metrics['vrmse_mean']:.4f} "
+                    f"(u: {val_metrics['vrmse_u']:.4f}, v: {val_metrics['vrmse_v']:.4f}, "
+                    f"p: {val_metrics['vrmse_p']:.4f}, s: {val_metrics['vrmse_s']:.4f}) | "
+                    f"Max VRAM: {vram_gb:.2f} GB"
+                )
 
             raw_model = model.module if is_distributed else model
             state = {
@@ -405,8 +414,10 @@ def train_forecaster(
                 "model_state_dict": raw_model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "val_metrics": val_metrics,
+                "val_step_metrics": val_step_metrics,
+                "horizon": horizon,
             }
-            tracker.update(val_metrics["vrmse_mean"], state, epoch)
+            tracker.update(val_criterion, state, epoch)
 
     if global_rank == 0 and tracker is not None:
         print(f"Training completed. Best VRMSE: {tracker.best_score:.4f}")
@@ -419,11 +430,20 @@ def train_forecaster(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Stage C & D: Dynamics Model Training.")
     parser.add_argument("--model", type=str, default="latent_transformer", choices=["latent_transformer", "direct_transformer", "fno", "pde_transformer"])
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--output_dir", type=str, default="outputs/checkpoints/dynamics")
     parser.add_argument("--repr_checkpoint", type=str, default="outputs/checkpoints/representation/best_vrmse_mean.pt")
+    parser.add_argument("--split_type", type=str, default="grouped", choices=["grouped", "official"])
+    parser.add_argument("--split_file", type=str, default=None)
+    parser.add_argument("--train_stride", type=int, default=2)
+    parser.add_argument("--valid_stride", type=int, default=8)
+    parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--freeze_representation", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--joint", action="store_true", help="Jointly train representation and dynamics")
+    parser.add_argument("--prediction_mode", type=str, default="direct", choices=["direct", "residual"])
+    parser.add_argument("--use_condition", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--horizon", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=4)
@@ -438,11 +458,22 @@ if __name__ == "__main__":
     parser.add_argument("--use_amp", action="store_true")
     args = parser.parse_args()
 
+    freeze_rep = False if args.joint else args.freeze_representation
+    out_dir = args.output_dir if args.output_dir.endswith(args.model) else os.path.join(args.output_dir, args.model)
+
     train_forecaster(
         model_type=args.model,
         data_dir=args.data_dir,
-        output_dir=os.path.join(args.output_dir, args.model),
+        output_dir=out_dir,
         repr_checkpoint=args.repr_checkpoint,
+        split_type=args.split_type,
+        split_file=args.split_file,
+        train_stride=args.train_stride,
+        valid_stride=args.valid_stride,
+        normalize=args.normalize,
+        freeze_representation=freeze_rep,
+        prediction_mode=args.prediction_mode,
+        use_condition=args.use_condition,
         horizon=args.horizon,
         epochs=args.epochs,
         batch_size=args.batch_size,
