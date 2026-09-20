@@ -58,6 +58,7 @@ def fit_normalizer_on_dataset(
 def create_flow_datasets(
     split_type: str = "grouped",
     split_file: Optional[str] = None,
+    data_root: Optional[str] = None,
     history_length: int = 4,
     horizon: int = 1,
     stride: int = 1,
@@ -76,6 +77,7 @@ def create_flow_datasets(
     Args:
         split_type: 'grouped' (zero-leakage) or 'official'.
         split_file: Optional path to split JSON registry. Defaults to 'outputs/splits/{split_type}_split.json'.
+        data_root: Optional base directory for dataset HDF5 files to resolve relative paths.
         history_length: Historical sequence length L (default: 4).
         horizon: Prediction horizon H (default: 1).
         stride: Default temporal window stride (default: 1).
@@ -114,6 +116,7 @@ def create_flow_datasets(
 
         raw_train_ds = ShearFlowDataset(
             trajectories=train_trajs,
+            data_root=data_root,
             history_length=history_length,
             horizon=horizon,
             stride=t_stride,
@@ -128,6 +131,7 @@ def create_flow_datasets(
 
         raw_train_ds = ShearFlowDataset(
             file_paths=train_files,
+            data_root=data_root,
             history_length=history_length,
             horizon=horizon,
             stride=t_stride,
@@ -159,6 +163,7 @@ def create_flow_datasets(
     if split_type == "grouped":
         valid_dataset = ShearFlowDataset(
             trajectories=valid_trajs,
+            data_root=data_root,
             history_length=history_length,
             horizon=horizon,
             stride=v_stride,
@@ -168,6 +173,7 @@ def create_flow_datasets(
         )
         test_dataset = ShearFlowDataset(
             trajectories=test_trajs,
+            data_root=data_root,
             history_length=history_length,
             horizon=horizon,
             stride=te_stride,
@@ -178,6 +184,7 @@ def create_flow_datasets(
     else:
         valid_dataset = ShearFlowDataset(
             file_paths=valid_files,
+            data_root=data_root,
             history_length=history_length,
             horizon=horizon,
             stride=v_stride,
@@ -187,6 +194,7 @@ def create_flow_datasets(
         )
         test_dataset = ShearFlowDataset(
             file_paths=test_files,
+            data_root=data_root,
             history_length=history_length,
             horizon=horizon,
             stride=te_stride,
@@ -201,6 +209,7 @@ def create_flow_datasets(
 def create_flow_dataloaders(
     split_type: str = "grouped",
     split_file: Optional[str] = None,
+    data_root: Optional[str] = None,
     history_length: int = 4,
     horizon: int = 1,
     stride: int = 1,
@@ -227,6 +236,7 @@ def create_flow_dataloaders(
     train_ds, valid_ds, test_ds, fitted_normalizer = create_flow_datasets(
         split_type=split_type,
         split_file=split_file,
+        data_root=data_root,
         history_length=history_length,
         horizon=horizon,
         stride=stride,

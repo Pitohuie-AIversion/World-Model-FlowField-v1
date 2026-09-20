@@ -38,6 +38,7 @@ def evaluate_model_rollout(
     max_horizon: int = 30,
     eval_steps: list = [1, 5, 10, 20, 30],
     normalizer=None,
+    use_condition: bool = True,
 ) -> dict:
     """Roll out model for max_horizon steps and compute evaluation metrics."""
     model.eval()
@@ -48,8 +49,8 @@ def evaluate_model_rollout(
         for batch in test_loader:
             q_hist = batch["history"].to(device)  # (B, L, 4, Ny, Nx)
             q_future = batch["future"].to(device)  # (B, H, 4, Ny, Nx)
-            re = batch["re"].to(device)
-            sc = batch["sc"].to(device)
+            re = batch["re"].to(device) if use_condition and "re" in batch else None
+            sc = batch["sc"].to(device) if use_condition and "sc" in batch else None
             b = len(q_hist)
             total_samples += b
 
@@ -72,7 +73,6 @@ def evaluate_model_rollout(
 
             else:
                 raise ValueError(f"Unknown model_name: {model_name}")
-
 
             # Denormalize to physical space for metric computation if normalizer is provided
             if normalizer is not None:
@@ -103,12 +103,13 @@ def run_benchmark(
     output_file: str = "outputs/metrics/rollout_benchmark.json",
     split_type: str = "grouped",
     split_file: Optional[str] = None,
+    downsample_factor: int = 2,
     normalize: bool = True,
     max_horizon: int = 30,
+    allow_legacy_data_fallback: bool = False,
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
     latent_ckpt_arg: str = None,
 ):
-
     seed_everything(42)
     device = torch.device(device_str)
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
@@ -122,25 +123,38 @@ def run_benchmark(
         _, _, test_loader, normalizer = create_flow_dataloaders(
             split_type=split_type,
             split_file=split_file,
+            data_root=data_dir,
             history_length=4,
             horizon=max_horizon,
             stride=20,
+            downsample_factor=downsample_factor,
             batch_size=2,
             num_workers=0,
             normalize=normalize,
         )
-    else:
+    elif allow_legacy_data_fallback:
+        print(f"Warning: split_file '{split_file}' not found. Using legacy data fallback as requested.")
         test_files = sorted(glob.glob(os.path.join(data_dir, "**/test/*.hdf5"), recursive=True))
         if not test_files:
             test_files = sorted(glob.glob(os.path.join(data_dir, "**/valid/*.hdf5"), recursive=True))
             if test_files:
                 print(f"Notice: No test files found. Using available valid files for benchmark evaluation.")
             else:
-                print(f"No test/valid files found in {data_dir}.")
-                return
+                raise FileNotFoundError(f"No test/valid files found in {data_dir}.")
 
-        test_dataset = ShearFlowDataset(test_files, history_length=4, horizon=max_horizon, stride=20)
+        test_dataset = ShearFlowDataset(
+            test_files,
+            data_root=data_dir,
+            history_length=4,
+            horizon=max_horizon,
+            stride=20,
+            downsample_factor=downsample_factor,
+        )
         test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False)
+    else:
+        raise FileNotFoundError(
+            f"Split file '{split_file}' not found! Pass a valid --split_file or specify --allow_legacy_data_fallback."
+        )
 
     print(f"Loaded {len(test_loader.dataset)} test trajectories for {max_horizon}-step rollout evaluation.")
 
@@ -149,7 +163,9 @@ def run_benchmark(
     # 1. Baseline: Persistence
     print("\n--- Evaluating Persistence Baseline ---")
     persistence = PersistenceBaseline().to(device)
-    results["persistence"] = evaluate_model_rollout("persistence", persistence, test_loader, device, max_horizon, normalizer=normalizer)
+    results["persistence"] = evaluate_model_rollout(
+        "persistence", persistence, test_loader, device, max_horizon, normalizer=normalizer
+    )
 
     # 2. Main Model: Latent ST Transformer(s)
     candidate_ckpts = []
@@ -169,36 +185,61 @@ def run_benchmark(
     for m_label, ckpt_path in candidate_ckpts:
         if os.path.exists(ckpt_path):
             print(f"\n--- Evaluating Latent ST Transformer [{m_label}] ({ckpt_path}) ---")
+            ckpt_data = torch.load(ckpt_path, map_location="cpu")
+            cfg = ckpt_data.get("config", {})
+            pred_mode = cfg.get("prediction_mode", ckpt_data.get("prediction_mode", "direct"))
+            use_cond = cfg.get("use_condition", ckpt_data.get("use_condition", True))
+            emb_dim = cfg.get("embed_dim", 256)
+            d_depth = cfg.get("depth", 6)
+            n_heads = cfg.get("num_heads", 8)
+            print(f"  [Checkpoint Config] prediction_mode='{pred_mode}', use_condition={use_cond}, embed_dim={emb_dim}, depth={d_depth}, num_heads={n_heads}")
+
             encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
             decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=True)
             transformer = LatentSTTransformer(
-                latent_channels=64, embed_dim=256, cond_dim=128, depth=6, num_heads=8, history_length=4
+                latent_channels=64,
+                embed_dim=emb_dim,
+                cond_dim=128,
+                depth=d_depth,
+                num_heads=n_heads,
+                history_length=4,
+                prediction_mode=pred_mode,
             )
             forecaster = LatentForecaster(encoder=encoder, transformer=transformer, decoder=decoder).to(device)
-            ckpt_data = torch.load(ckpt_path, map_location="cpu")
             if "model_state_dict" in ckpt_data:
                 forecaster.load_state_dict(ckpt_data["model_state_dict"])
-            results[m_label] = evaluate_model_rollout(m_label, forecaster, test_loader, device, max_horizon, normalizer=normalizer)
-
+            results[m_label] = evaluate_model_rollout(
+                m_label, forecaster, test_loader, device, max_horizon, normalizer=normalizer, use_condition=use_cond
+            )
 
     # 3. Ablation Baseline: Direct ST Transformer
     direct_ckpt = "outputs/checkpoints/dynamics/direct_transformer/best_vrmse_mean.pt"
     if os.path.exists(direct_ckpt):
         print("\n--- Evaluating Direct ST Transformer (Ablation Q1 Baseline) ---")
+        ckpt_data = torch.load(direct_ckpt, map_location="cpu")
+        cfg = ckpt_data.get("config", {})
+        pred_mode = cfg.get("prediction_mode", ckpt_data.get("prediction_mode", "direct"))
+        use_cond = cfg.get("use_condition", ckpt_data.get("use_condition", True))
+        emb_dim = cfg.get("embed_dim", 256)
+        d_depth = cfg.get("depth", 6)
+        n_heads = cfg.get("num_heads", 8)
+        print(f"  [Checkpoint Config] prediction_mode='{pred_mode}', use_condition={use_cond}")
+
         direct_model = DirectSTTransformer(
             in_channels=4,
             patch_size=(8, 8),
-            embed_dim=256,
+            embed_dim=emb_dim,
             cond_dim=128,
-            depth=6,
-            num_heads=8,
+            depth=d_depth,
+            num_heads=n_heads,
             history_length=4,
-            prediction_mode="direct",
+            prediction_mode=pred_mode,
         ).to(device)
-        ckpt_data = torch.load(direct_ckpt, map_location="cpu")
         if "model_state_dict" in ckpt_data:
             direct_model.load_state_dict(ckpt_data["model_state_dict"])
-        results["direct_transformer"] = evaluate_model_rollout("direct_transformer", direct_model, test_loader, device, max_horizon, normalizer=normalizer)
+        results["direct_transformer"] = evaluate_model_rollout(
+            "direct_transformer", direct_model, test_loader, device, max_horizon, normalizer=normalizer, use_condition=use_cond
+        )
 
     # 4. Neural Operator Baseline: FNO-2D
     fno_ckpt = "outputs/checkpoints/dynamics/fno_baseline/fno/best_vrmse_mean.pt"
@@ -217,7 +258,9 @@ def run_benchmark(
         ckpt_data = torch.load(fno_ckpt, map_location="cpu")
         if "model_state_dict" in ckpt_data:
             fno_model.load_state_dict(ckpt_data["model_state_dict"])
-        results["fno"] = evaluate_model_rollout("fno", fno_model, test_loader, device, max_horizon, normalizer=normalizer)
+        results["fno"] = evaluate_model_rollout(
+            "fno", fno_model, test_loader, device, max_horizon, normalizer=normalizer
+        )
 
     # Print comprehensive physical summary table
     all_physics_metrics = [
@@ -228,13 +271,14 @@ def run_benchmark(
         ("ke_rel_err", "Kinetic Energy Rel Err"),
         ("enstrophy_rel_err", "Enstrophy Rel Err"),
         ("energy_spectrum_mae", "Energy Spectrum MAE"),
-        ("tracer_var_retention", "Tracer Var Retention"),
-        ("tracer_mass_error", "Tracer Mass Error"),
     ]
 
     print("\n" + "=" * 98)
-    print(f"{'Model':<20} | {'Physical Metric':<24} | {'Step 1':<9} | {'Step 5':<9} | {'Step 10':<9} | {'Step 20':<9} | {'Step 30':<9}")
+    print("MULTI-STEP AUTOREGRESSIVE ROLLOUT BENCHMARK SUMMARY (h in {1, 5, 10, 20, 30})")
+    print("=" * 98)
+    print(f"{'Model':<20} | {'Metric':<24} | {'h=1':<9} | {'h=5':<9} | {'h=10':<9} | {'h=20':<9} | {'h=30':<9}")
     print("-" * 98)
+
     for m_name, m_res in results.items():
         for metric_key, metric_title in all_physics_metrics:
             row = [f"{m_res.get(f'step_{s}', {}).get(metric_key, 0.0):.4f}" for s in [1, 5, 10, 20, 30]]
@@ -260,8 +304,10 @@ if __name__ == "__main__":
     parser.add_argument("--output_file", type=str, default="outputs/metrics/rollout_benchmark.json")
     parser.add_argument("--split_type", type=str, default="grouped", choices=["grouped", "official"])
     parser.add_argument("--split_file", type=str, default=None)
+    parser.add_argument("--downsample_factor", type=int, default=2, help="Spatial downsampling factor (default: 2 for 128x256)")
     parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--horizon", type=int, default=30)
+    parser.add_argument("--allow_legacy_data_fallback", action="store_true", help="Allow fallback to glob search if split_file is missing")
     parser.add_argument("--latent_ckpt", type=str, default=None, help="Custom checkpoint path for Latent ST Transformer")
     args = parser.parse_args()
 
@@ -270,8 +316,9 @@ if __name__ == "__main__":
         output_file=args.output_file,
         split_type=args.split_type,
         split_file=args.split_file,
+        downsample_factor=args.downsample_factor,
         normalize=args.normalize,
         max_horizon=args.horizon,
+        allow_legacy_data_fallback=args.allow_legacy_data_fallback,
         latent_ckpt_arg=args.latent_ckpt,
     )
-

@@ -126,6 +126,7 @@ def train_forecaster(
     split_file: Optional[str] = None,
     train_stride: int = 2,
     valid_stride: int = 8,
+    downsample_factor: int = 2,
     normalize: bool = True,
     freeze_representation: bool = True,
     prediction_mode: str = "direct",
@@ -171,10 +172,12 @@ def train_forecaster(
     train_loader, valid_loader, test_loader, normalizer, train_sampler = create_flow_dataloaders(
         split_type=split_type,
         split_file=split_file,
+        data_root=data_dir,
         history_length=4,
         horizon=horizon,
         train_stride=train_stride,
         valid_stride=valid_stride,
+        downsample_factor=downsample_factor,
         batch_size=batch_size,
         num_workers=num_workers,
         normalize=normalize,
@@ -198,6 +201,17 @@ def train_forecaster(
             if "encoder_state_dict" in ckpt:
                 encoder.load_state_dict(ckpt["encoder_state_dict"])
                 decoder.load_state_dict(ckpt["decoder_state_dict"])
+        elif freeze_representation:
+            raise FileNotFoundError(
+                f"Representation checkpoint '{repr_checkpoint}' does not exist! "
+                f"When freeze_representation=True, a valid pretrained autoencoder checkpoint "
+                f"is strictly required to prevent training against random, frozen latent representations. "
+                f"Please train Stage B representation first or specify --repr_checkpoint."
+            )
+        else:
+            if global_rank == 0:
+                print(f"Notice: repr_checkpoint '{repr_checkpoint}' not found, but --joint training is active. "
+                      f"Initializing representation weights from scratch for joint training.")
 
         transformer = LatentSTTransformer(
             latent_channels=64,
@@ -306,10 +320,19 @@ def train_forecaster(
 
                 loss = rollout_loss_fn(pred, q_future)
 
-                if lambda_div > 0:
-                    loss = loss + lambda_div * div_loss_fn(pred)
-                if lambda_vort > 0:
-                    loss = loss + lambda_vort * vort_loss_fn(pred, q_future)
+                # Physics losses must strictly be computed in physical dimensional space
+                if lambda_div > 0 or lambda_vort > 0:
+                    if normalizer is not None:
+                        pred_phys = normalizer.denormalize(pred)
+                        target_phys = normalizer.denormalize(q_future)
+                    else:
+                        pred_phys = pred
+                        target_phys = q_future
+
+                    if lambda_div > 0:
+                        loss = loss + lambda_div * div_loss_fn(pred_phys)
+                    if lambda_vort > 0:
+                        loss = loss + lambda_vort * vort_loss_fn(pred_phys, target_phys)
 
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -411,6 +434,28 @@ def train_forecaster(
             state = {
                 "epoch": epoch,
                 "model_type": model_type,
+                "prediction_mode": prediction_mode,
+                "use_condition": use_condition,
+                "downsample_factor": downsample_factor,
+                "config": {
+                    "model_type": model_type,
+                    "prediction_mode": prediction_mode,
+                    "use_condition": use_condition,
+                    "downsample_factor": downsample_factor,
+                    "embed_dim": embed_dim,
+                    "depth": depth,
+                    "num_heads": num_heads,
+                    "horizon": horizon,
+                    "freeze_representation": freeze_representation,
+                    "lambda_div": lambda_div,
+                    "lambda_vort": lambda_vort,
+                    "lr": lr,
+                    "batch_size": batch_size,
+                    "train_stride": train_stride,
+                    "valid_stride": valid_stride,
+                    "split_type": split_type,
+                    "normalize": normalize,
+                },
                 "model_state_dict": raw_model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "val_metrics": val_metrics,
@@ -439,6 +484,7 @@ if __name__ == "__main__":
     parser.add_argument("--split_file", type=str, default=None)
     parser.add_argument("--train_stride", type=int, default=2)
     parser.add_argument("--valid_stride", type=int, default=8)
+    parser.add_argument("--downsample_factor", type=int, default=2, help="Spatial downsampling factor (default: 2 for 128x256)")
     parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--freeze_representation", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--joint", action="store_true", help="Jointly train representation and dynamics")
@@ -470,6 +516,7 @@ if __name__ == "__main__":
         split_file=args.split_file,
         train_stride=args.train_stride,
         valid_stride=args.valid_stride,
+        downsample_factor=args.downsample_factor,
         normalize=args.normalize,
         freeze_representation=freeze_rep,
         prediction_mode=args.prediction_mode,

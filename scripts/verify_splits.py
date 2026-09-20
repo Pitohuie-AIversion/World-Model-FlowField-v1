@@ -18,18 +18,19 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 
-def extract_initial_conditions(split_entries):
+def extract_initial_conditions(split_entries, data_root=None):
     """Extract t=0 velocity fields for a list of trajectory entries."""
     ic_list = []
     # Cache open files
     open_files = {}
     for entry in split_entries:
         path = entry["file_path"]
+        actual_path = os.path.join(data_root, path) if data_root and not os.path.isabs(path) else path
         t_idx = entry["traj_idx"]
         cid = entry.get("cluster_id", -1)
-        if path not in open_files:
-            open_files[path] = h5py.File(path, "r")
-        h5 = open_files[path]
+        if actual_path not in open_files:
+            open_files[actual_path] = h5py.File(actual_path, "r")
+        h5 = open_files[actual_path]
         vel_ds = h5["t1_fields/velocity"] if "t1_fields/velocity" in h5 else h5.get("velocity")
         v0 = np.asarray(vel_ds[t_idx, 0], dtype=np.float32)
         ic_list.append({
@@ -44,11 +45,12 @@ def extract_initial_conditions(split_entries):
     return ic_list
 
 
-def extract_initial_conditions_from_files(file_paths):
+def extract_initial_conditions_from_files(file_paths, data_root=None):
     """Extract t=0 velocity fields for all trajectories across a list of files."""
     ic_list = []
     for path in file_paths:
-        with h5py.File(path, "r") as h5:
+        actual_path = os.path.join(data_root, path) if data_root and not os.path.isabs(path) else path
+        with h5py.File(actual_path, "r") as h5:
             vel_ds = h5["t1_fields/velocity"] if "t1_fields/velocity" in h5 else h5.get("velocity")
             n = vel_ds.shape[0]
             v0_all = np.asarray(vel_ds[:, 0], dtype=np.float32)
@@ -78,6 +80,7 @@ def compute_cross_split_leakage(set_a, set_b, tol=1e-4):
 def verify_splits(
     grouped_split_path="outputs/splits/grouped_split.json",
     official_split_path="outputs/splits/official_split.json",
+    data_root=None,
 ):
     print("=" * 80)
     print("DATASET SPLIT AUDIT & IC DATA LEAKAGE VERIFICATION")
@@ -91,9 +94,9 @@ def verify_splits(
     with open(grouped_split_path, "r") as f:
         grouped = json.load(f)
 
-    train_ics_g = extract_initial_conditions(grouped["train"])
-    valid_ics_g = extract_initial_conditions(grouped["valid"])
-    test_ics_g = extract_initial_conditions(grouped["test"])
+    train_ics_g = extract_initial_conditions(grouped["train"], data_root=data_root)
+    valid_ics_g = extract_initial_conditions(grouped["valid"], data_root=data_root)
+    test_ics_g = extract_initial_conditions(grouped["test"], data_root=data_root)
 
     min_tv_g, leaks_tv_g = compute_cross_split_leakage(train_ics_g, valid_ics_g)
     min_tt_g, leaks_tt_g = compute_cross_split_leakage(train_ics_g, test_ics_g)
@@ -120,9 +123,9 @@ def verify_splits(
     with open(official_split_path, "r") as f:
         official = json.load(f)
 
-    train_ics_o = extract_initial_conditions_from_files(official["train"])
-    valid_ics_o = extract_initial_conditions_from_files(official["valid"])
-    test_ics_o = extract_initial_conditions_from_files(official["test"])
+    train_ics_o = extract_initial_conditions_from_files(official["train"], data_root=data_root)
+    valid_ics_o = extract_initial_conditions_from_files(official["valid"], data_root=data_root)
+    test_ics_o = extract_initial_conditions_from_files(official["test"], data_root=data_root)
 
     min_tv_o, leaks_tv_o = compute_cross_split_leakage(train_ics_o, valid_ics_o)
     min_tt_o, leaks_tt_o = compute_cross_split_leakage(train_ics_o, test_ics_o)
@@ -166,8 +169,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--grouped_split", type=str, default="outputs/splits/grouped_split.json")
     parser.add_argument("--official_split", type=str, default="outputs/splits/official_split.json")
+    parser.add_argument("--data_root", type=str, default=None)
     args = parser.parse_args()
 
-    res = verify_splits(args.grouped_split, args.official_split)
+    res = verify_splits(args.grouped_split, args.official_split, data_root=args.data_root)
     if not res["grouped_pass"]:
         sys.exit(1)

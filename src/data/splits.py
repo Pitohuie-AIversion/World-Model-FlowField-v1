@@ -1,7 +1,6 @@
-"""Dataset split strategies: Official, Grouped (IC-leakage-free), and Parameter Holdout."""
-
-from typing import Dict, List, Tuple
+import os
 import re
+from typing import Dict, List, Optional, Tuple
 
 
 def parse_shear_flow_filename(filename: str) -> Dict[str, float]:
@@ -9,7 +8,7 @@ def parse_shear_flow_filename(filename: str) -> Dict[str, float]:
 
     Example filename: 'shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5'
     """
-    clean_name = filename.replace(".hdf5", "").replace(".h5", "")
+    clean_name = os.path.basename(filename).replace(".hdf5", "").replace(".h5", "")
     re_match = re.search(r"Reynolds_([0-9a-zA-Z\.\+\-]+)", clean_name)
     sc_match = re.search(r"Schmidt_([0-9a-zA-Z\.\+\-]+)", clean_name)
 
@@ -41,6 +40,7 @@ class SplitManager:
     @staticmethod
     def cluster_initial_conditions(
         file_paths: List[str],
+        data_root: Optional[str] = None,
         tolerance: float = 1e-4,
     ) -> List[Dict]:
         """Cluster trajectories across files by their physical initial condition (t=0).
@@ -54,11 +54,13 @@ class SplitManager:
 
         clusters = []
         for path in sorted(file_paths):
-            params = parse_shear_flow_filename(re.sub(r".*/", "", path))
+            params = parse_shear_flow_filename(path)
             re_val = params["re"]
             sc_val = params["sc"]
 
-            with h5py.File(path, "r") as h5:
+            actual_path = os.path.join(data_root, path) if data_root and not os.path.isabs(path) else path
+
+            with h5py.File(actual_path, "r") as h5:
                 vel_ds = h5["t1_fields/velocity"] if "t1_fields/velocity" in h5 else h5.get("velocity")
                 if vel_ds is None:
                     continue
@@ -101,6 +103,7 @@ class SplitManager:
     @staticmethod
     def get_grouped_split(
         all_files: List[str],
+        data_root: Optional[str] = None,
         train_ratio: float = 0.77,
         valid_ratio: float = 0.11,
         seed: int = 42,
@@ -115,7 +118,7 @@ class SplitManager:
         """
         import random
 
-        clusters = SplitManager.cluster_initial_conditions(all_files, tolerance=tolerance)
+        clusters = SplitManager.cluster_initial_conditions(all_files, data_root=data_root, tolerance=tolerance)
         num_clusters = len(clusters)
 
         # Deterministic shuffle of clusters
@@ -159,8 +162,8 @@ class SplitManager:
     @staticmethod
     def get_parameter_holdout_split(
         all_files: List[str],
-        holdout_re: float = 1e5,
-        holdout_sc: float = 10.0,
+        holdout_re: Optional[float] = 1e5,
+        holdout_sc: Optional[float] = 10.0,
         valid_ratio: float = 0.1,
     ) -> Dict[str, List[str]]:
         """Strategy 3: Parameter Holdout Split.
@@ -175,19 +178,26 @@ class SplitManager:
         for f in all_files:
             params = parse_shear_flow_filename(f)
             # Check if matching holdout condition (using float tolerance)
-            is_holdout_re = abs(params["re"] - holdout_re) / holdout_re < 1e-4
-            is_holdout_sc = abs(params["sc"] - holdout_sc) / max(holdout_sc, 1e-4) < 1e-4
+            is_holdout_re = holdout_re is not None and abs(params["re"] - holdout_re) / max(holdout_re, 1e-4) < 1e-4
+            is_holdout_sc = holdout_sc is not None and abs(params["sc"] - holdout_sc) / max(holdout_sc, 1e-4) < 1e-4
 
             if is_holdout_re or is_holdout_sc:
                 holdout_test.append(f)
             else:
                 train_pool.append(f)
 
+        if not holdout_test and all_files:
+            import warnings
+            warnings.warn(
+                f"No files matched holdout criteria (holdout_re={holdout_re}, holdout_sc={holdout_sc}). "
+                f"Parameter holdout test set will be empty."
+            )
+
         train_pool = sorted(train_pool)
-        n_valid = max(1, int(len(train_pool) * valid_ratio))
+        n_valid = max(1, int(len(train_pool) * valid_ratio)) if len(train_pool) > 1 else 0
 
         return {
-            "train": train_pool[:-n_valid],
-            "valid": train_pool[-n_valid:],
+            "train": train_pool[:-n_valid] if n_valid > 0 else train_pool,
+            "valid": train_pool[-n_valid:] if n_valid > 0 else [],
             "test": sorted(holdout_test),
         }

@@ -47,8 +47,13 @@ def build_and_save_splits(
         print(f"Warning: No HDF5 files found in {data_dir}. Ensure data is downloaded first.")
         return
 
+    rel_train_files = sorted([os.path.relpath(f, data_dir) for f in train_files])
+    rel_valid_files = sorted([os.path.relpath(f, data_dir) for f in valid_files])
+    rel_test_files = sorted([os.path.relpath(f, data_dir) for f in test_files])
+    rel_all_files = rel_train_files + rel_valid_files + rel_test_files
+
     # 1. Official Split
-    official = SplitManager.get_official_split(train_files, valid_files, test_files)
+    official = SplitManager.get_official_split(rel_train_files, rel_valid_files, rel_test_files)
     off_path = os.path.join(output_dir, "official_split.json")
     with open(off_path, "w") as f:
         json.dump(official, f, indent=2)
@@ -56,7 +61,8 @@ def build_and_save_splits(
 
     # 2. Grouped Split (Zero-IC-Leakage Split)
     grouped = SplitManager.get_grouped_split(
-        all_files=all_files,
+        all_files=rel_all_files,
+        data_root=data_dir,
         train_ratio=0.77,
         valid_ratio=0.11,
         seed=42,
@@ -70,16 +76,23 @@ def build_and_save_splits(
     print(f"  Grouped Test trajectories:  {len(grouped['test'])} across {grouped['metadata']['test_clusters']} clusters")
 
     # 3. Parameter Holdout Split
+    # If the requested holdout parameters aren't found in current subset, auto-detect holdout parameter
+    available_scs = {parse_shear_flow_filename(f)["sc"] for f in rel_all_files}
+    actual_holdout_sc = holdout_sc
+    if holdout_sc not in available_scs and len(available_scs) > 1:
+        actual_holdout_sc = max(available_scs)
+        print(f"Notice: holdout_sc={holdout_sc} not in current files. Using Sc={actual_holdout_sc} as holdout parameter.")
+
     holdout = SplitManager.get_parameter_holdout_split(
-        all_files=all_files,
-        holdout_re=holdout_re,
-        holdout_sc=holdout_sc,
+        all_files=rel_all_files,
+        holdout_re=holdout_re if holdout_re in {parse_shear_flow_filename(f)["re"] for f in rel_all_files} else None,
+        holdout_sc=actual_holdout_sc,
         valid_ratio=0.1,
     )
     hold_path = os.path.join(output_dir, "parameter_holdout_split.json")
     with open(hold_path, "w") as f:
         json.dump(holdout, f, indent=2)
-    print(f"Exported Parameter Holdout Split (Holdout Re={holdout_re}, Sc={holdout_sc}) to: {hold_path}")
+    print(f"Exported Parameter Holdout Split (Holdout Sc={actual_holdout_sc}) to: {hold_path}")
     print(f"  Holdout Train files: {len(holdout['train'])}")
     print(f"  Holdout Valid files: {len(holdout['valid'])}")
     print(f"  Holdout Test files:  {len(holdout['test'])}")
@@ -90,7 +103,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--output_dir", type=str, default="outputs/splits")
     parser.add_argument("--holdout_re", type=float, default=1e5)
-    parser.add_argument("--holdout_sc", type=float, default=10.0)
+    parser.add_argument("--holdout_sc", type=float, default=1.0)
     args = parser.parse_args()
 
     build_and_save_splits(

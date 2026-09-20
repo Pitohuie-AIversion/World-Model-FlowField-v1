@@ -30,6 +30,7 @@ class ShearFlowDataset(Dataset):
         self,
         file_paths: Optional[List[str]] = None,
         trajectories: Optional[List[Dict]] = None,
+        data_root: Optional[str] = None,
         history_length: int = 4,
         horizon: int = 1,
         stride: int = 1,
@@ -41,13 +42,26 @@ class ShearFlowDataset(Dataset):
         if file_paths is None and trajectories is None:
             raise ValueError("Either file_paths or trajectories must be provided.")
 
+        self.data_root = data_root or os.environ.get("SHEAR_FLOW_DATA_DIR")
+
+        def _resolve_path(p: str) -> str:
+            if self.data_root and not os.path.isabs(p):
+                return os.path.join(self.data_root, p)
+            return p
+
         if trajectories is not None:
-            self.trajectories = trajectories
-            self.allowed_set = {(t["file_path"], t["traj_idx"]) for t in trajectories}
-            file_paths = sorted(list(set(t["file_path"] for t in trajectories)))
+            resolved_trajs = []
+            for t in trajectories:
+                item = dict(t)
+                item["file_path"] = _resolve_path(item["file_path"])
+                resolved_trajs.append(item)
+            self.trajectories = resolved_trajs
+            self.allowed_set = {(t["file_path"], t["traj_idx"]) for t in resolved_trajs}
+            file_paths = sorted(list(set(t["file_path"] for t in resolved_trajs)))
         else:
             self.trajectories = None
             self.allowed_set = None
+            file_paths = [_resolve_path(p) for p in file_paths]
 
         self.file_paths = sorted(file_paths)
         self.history_length = history_length

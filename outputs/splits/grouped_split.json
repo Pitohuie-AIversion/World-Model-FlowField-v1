@@ -1,231 +1,231 @@
 {
   "train": [
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 0,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 0
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 2,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 2
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 2,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 2
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 3,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 5
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 4,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 6
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 7,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 8
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 8,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 9
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 9,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 10
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 10,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 11
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 11,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 12
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 12,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 13
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 13,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 14
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 15,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 16
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 17,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 18
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 18,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 19
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 19,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 20
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 20,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 21
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 21,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 22
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 23,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 24
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 24,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 25
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 25,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 26
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 26,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 27
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 27,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 28
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 28,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 29
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 29,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 30
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 30,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 31
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 31,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 32
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 0,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 33
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 1,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 0
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 2,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 14
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 3,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 21
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+      "file_path": "data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
       "traj_idx": 0,
       "re": 10000.0,
       "sc": 1.0,
       "cluster_id": 27
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+      "file_path": "data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
       "traj_idx": 1,
       "re": 10000.0,
       "sc": 1.0,
@@ -234,42 +234,42 @@
   ],
   "valid": [
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 3,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 3
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 0,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 4
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 6,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 4
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 22,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 23
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+      "file_path": "data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
       "traj_idx": 2,
       "re": 10000.0,
       "sc": 1.0,
       "cluster_id": 4
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+      "file_path": "data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
       "traj_idx": 3,
       "re": 10000.0,
       "sc": 1.0,
@@ -278,35 +278,35 @@
   ],
   "test": [
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 1,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 1
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 1,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 1
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 5,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 7
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 14,
       "re": 10000.0,
       "sc": 0.1,
       "cluster_id": 15
     },
     {
-      "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+      "file_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
       "traj_idx": 16,
       "re": 10000.0,
       "sc": 0.1,
