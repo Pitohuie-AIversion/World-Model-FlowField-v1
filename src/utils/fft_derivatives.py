@@ -32,7 +32,8 @@ def spectral_grad_2d(
     # rfft along last dim (x) has size nx//2 + 1
     # fft along second to last dim (y) has size ny
     device = field.device
-    dtype = field.dtype
+    orig_dtype = field.dtype
+    field_f32 = field.float()
 
     # ky = 2 * pi * n / Ly, shape (ny, 1)
     ky = 2.0 * torch.pi * torch.fft.fftfreq(ny, d=ly / ny, device=device)
@@ -43,7 +44,7 @@ def spectral_grad_2d(
     kx = kx.view(*([1] * (field.ndim - 2)), 1, nx // 2 + 1)
 
     # Forward 2D RFFT
-    f_hat = torch.fft.rfft2(field, dim=(-2, -1))
+    f_hat = torch.fft.rfft2(field_f32, dim=(-2, -1))
 
     # Differentiation in Fourier space: d/dx -> i * kx, d/dy -> i * ky
     # Using 1j * k
@@ -59,7 +60,7 @@ def spectral_grad_2d(
     df_dx = torch.fft.irfft2(f_hat_x, s=(ny, nx), dim=(-2, -1))
     df_dy = torch.fft.irfft2(f_hat_y, s=(ny, nx), dim=(-2, -1))
 
-    return df_dy.to(dtype=dtype), df_dx.to(dtype=dtype)
+    return df_dy.to(dtype=orig_dtype), df_dx.to(dtype=orig_dtype)
 
 
 def compute_vorticity(

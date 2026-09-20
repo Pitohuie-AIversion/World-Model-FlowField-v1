@@ -47,13 +47,12 @@ def audit_hdf5_file(file_path: str):
         h5.visititems(visitor)
 
         # Field analysis
-        has_vel = "velocity" in h5
-        has_p = "pressure" in h5
-        has_s = "tracer" in h5
+        vel_ds = h5.get("t1_fields/velocity") or h5.get("velocity")
+        p_ds = h5.get("t0_fields/pressure") or h5.get("pressure")
+        s_ds = h5.get("t0_fields/tracer") or h5.get("tracer")
 
         print("\n--- Physical Fields Analysis ---")
-        if has_vel:
-            vel_ds = h5["velocity"]
+        if vel_ds is not None:
             sample_vel = np.asarray(vel_ds[0, 0], dtype=np.float32)  # First sim, t=0
             print(f"Sample velocity shape at (sim=0, t=0): {sample_vel.shape}")
             if sample_vel.shape[-1] == 2:
@@ -73,14 +72,12 @@ def audit_hdf5_file(file_path: str):
             mean_div = torch.mean(torch.abs(div)).item()
             print(f"  Divergence check at t=0: max |div| = {max_div:.4e}, mean |div| = {mean_div:.4e}")
 
-        if has_p:
-            p_ds = h5["pressure"]
+        if p_ds is not None:
             sample_p = np.asarray(p_ds[0, 0], dtype=np.float32)
             print(f"Sample pressure shape at (sim=0, t=0): {sample_p.shape}")
             print(f"  p: min={sample_p.min():.4e}, max={sample_p.max():.4e}, mean={sample_p.mean():.4e}, std={sample_p.std():.4e}")
 
-        if has_s:
-            s_ds = h5["tracer"]
+        if s_ds is not None:
             sample_s = np.asarray(s_ds[0, 0], dtype=np.float32)
             print(f"Sample tracer shape at (sim=0, t=0): {sample_s.shape}")
             print(f"  s: min={sample_s.min():.4e}, max={sample_s.max():.4e}, mean={sample_s.mean():.4e}, std={sample_s.std():.4e}")

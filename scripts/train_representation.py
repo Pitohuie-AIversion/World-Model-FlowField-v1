@@ -10,6 +10,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+import h5py
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -48,12 +49,30 @@ def train_representation(
     device = torch.device(device_str)
     os.makedirs(output_dir, exist_ok=True)
 
-    train_files = sorted(glob.glob(os.path.join(data_dir, "train", "*.hdf5")))
-    valid_files = sorted(glob.glob(os.path.join(data_dir, "valid", "*.hdf5")))
+    def is_valid_hdf5(path: str) -> bool:
+        if os.path.exists(path + ".aria2"):
+            return False
+        try:
+            with h5py.File(path, "r") as h5:
+                return "t0_fields" in h5 or "pressure" in h5
+        except Exception:
+            return False
+
+    train_files = sorted([f for f in glob.glob(os.path.join(data_dir, "**/train/*.hdf5"), recursive=True) if is_valid_hdf5(f)])
+    valid_files = sorted([f for f in glob.glob(os.path.join(data_dir, "**/valid/*.hdf5"), recursive=True) if is_valid_hdf5(f)])
+    test_files = sorted([f for f in glob.glob(os.path.join(data_dir, "**/test/*.hdf5"), recursive=True) if is_valid_hdf5(f)])
 
     if not train_files:
-        print(f"No train files found in {data_dir}/train. Please download data first.")
-        return
+        if valid_files and test_files:
+            print(f"Notice: Train files downloading. Using valid partition ({len(valid_files)} file(s)) for training and test partition ({len(test_files)} file(s)) for validation.")
+            train_files = valid_files
+            valid_files = test_files
+        elif valid_files:
+            print(f"Notice: No train files found in {data_dir}. Using available valid files for representation learning.")
+            train_files = valid_files
+        else:
+            print(f"No files found in {data_dir}. Please download data first.")
+            return
 
     train_dataset = ShearFlowDataset(train_files, history_length=1, horizon=1, stride=4)
     valid_dataset = ShearFlowDataset(valid_files, history_length=1, horizon=1, stride=8)
@@ -63,7 +82,7 @@ def train_representation(
 
     model = Autoencoder(in_channels=4, latent_channels=64, base_channels=32).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
-    loss_fn = FieldLoss(loss_type="mse")
+    loss_fn = FieldLoss(loss_type="mse").to(device)
     tracker = BestCheckpointTracker(save_dir=output_dir, metric_name="vrmse_mean", mode="min", keep_top_k=3)
 
     print(f"Starting Representation Training on {device} | Epochs: {epochs} | Train samples: {len(train_dataset)}")

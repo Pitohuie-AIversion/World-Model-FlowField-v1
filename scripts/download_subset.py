@@ -8,6 +8,9 @@ import argparse
 import os
 import sys
 
+# Configure Hugging Face mirror for fast and stable access
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 # Ensure local project root is at the very front of sys.path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -23,6 +26,7 @@ def download_shear_flow_subset(
     reynolds_subset: tuple = (1e4, 1e5),
     schmidt_subset: tuple = (0.1, 1.0, 5.0, 10.0),
     single_sample: bool = False,
+    max_files_per_split: int = None,
 ):
     """Download matching HDF5 files from polymathic-ai/shear_flow."""
     os.makedirs(target_dir, exist_ok=True)
@@ -64,30 +68,73 @@ def download_shear_flow_subset(
         matching_files = [f for f in matching_files if f[0] == "valid"][:1]
         print(f"Single sample mode selected: {matching_files[0][1]}")
 
-    for idx, (split_name, filename, remote_path) in enumerate(matching_files, 1):
-        dest_dir = os.path.join(target_dir, split_name)
-        os.makedirs(dest_dir, exist_ok=True)
-        dest_path = os.path.join(dest_dir, filename)
+    if max_files_per_split is not None:
+        filtered = []
+        counts = {}
+        for item in matching_files:
+            split_name = item[0]
+            counts[split_name] = counts.get(split_name, 0)
+            if counts[split_name] < max_files_per_split:
+                filtered.append(item)
+                counts[split_name] += 1
+        matching_files = filtered
+        print(f"Limited matching files to {max_files_per_split} per split. Total: {len(matching_files)}.")
 
-        if os.path.exists(dest_path):
-            print(f"[{idx}/{len(matching_files)}] File already exists: {dest_path}")
+    import shutil
+    import subprocess
+
+    has_aria2 = shutil.which("aria2c") is not None
+
+    for idx, (split_name, filename, remote_path) in enumerate(matching_files, 1):
+        actual_path = os.path.join(target_dir, remote_path)
+        dest_dir = os.path.dirname(actual_path)
+        os.makedirs(dest_dir, exist_ok=True)
+
+        if os.path.exists(actual_path) and os.path.getsize(actual_path) > 10 * 1024 * 1024:
+            print(f"[{idx}/{len(matching_files)}] File already exists ({os.path.getsize(actual_path)/(1024**3):.2f} GB): {actual_path}")
             continue
 
-        print(f"[{idx}/{len(matching_files)}] Downloading {remote_path} to {dest_path}...")
-        downloaded = hf_hub_download(
-            repo_id=repo_id,
-            filename=remote_path,
-            repo_type="dataset",
-            local_dir=target_dir,
-            local_dir_use_symlinks=False,
-        )
-        print(f"Successfully downloaded to: {downloaded}")
+        print(f"[{idx}/{len(matching_files)}] Downloading {remote_path} to {actual_path}...")
+        if has_aria2:
+            url = f"https://hf-mirror.com/datasets/{repo_id}/resolve/main/{remote_path}"
+            cmd = [
+                "aria2c",
+                "-x", "16",
+                "-s", "16",
+                "-k", "1M",
+                "-c",
+                url,
+                "-d", dest_dir,
+                "-o", filename,
+            ]
+            print("Executing:", " ".join(cmd))
+            ret = subprocess.run(cmd)
+            if ret.returncode != 0:
+                print(f"aria2c returned code {ret.returncode}, falling back to hf_hub_download...")
+                downloaded = hf_hub_download(
+                    repo_id=repo_id,
+                    filename=remote_path,
+                    repo_type="dataset",
+                    local_dir=target_dir,
+                    local_dir_use_symlinks=False,
+                )
+                print(f"Successfully downloaded to: {downloaded}")
+        else:
+            downloaded = hf_hub_download(
+                repo_id=repo_id,
+                filename=remote_path,
+                repo_type="dataset",
+                local_dir=target_dir,
+                local_dir_use_symlinks=False,
+            )
+            print(f"Successfully downloaded to: {downloaded}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Download The Well shear_flow subset.")
     parser.add_argument("--target_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--single_sample", action="store_true", help="Download just one validation file for audit.")
+    parser.add_argument("--max_files_per_split", type=int, default=None, help="Maximum number of files to download per split.")
     parser.add_argument("--splits", nargs="+", default=["valid", "test", "train"])
     args = parser.parse_args()
 
@@ -95,4 +142,5 @@ if __name__ == "__main__":
         target_dir=args.target_dir,
         splits=tuple(args.splits),
         single_sample=args.single_sample,
+        max_files_per_split=args.max_files_per_split,
     )

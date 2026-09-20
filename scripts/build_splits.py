@@ -22,12 +22,23 @@ def build_and_save_splits(
     """Scan available HDF5 files and construct reproducible split JSON registries."""
     os.makedirs(output_dir, exist_ok=True)
 
-    train_files = sorted(glob.glob(os.path.join(data_dir, "train", "*.hdf5")))
-    valid_files = sorted(glob.glob(os.path.join(data_dir, "valid", "*.hdf5")))
-    test_files = sorted(glob.glob(os.path.join(data_dir, "test", "*.hdf5")))
+    import h5py
+
+    def is_valid_hdf5(path: str) -> bool:
+        if os.path.exists(path + ".aria2"):
+            return False
+        try:
+            with h5py.File(path, "r") as h5:
+                return "t0_fields" in h5 or "pressure" in h5
+        except Exception:
+            return False
+
+    train_files = sorted([f for f in glob.glob(os.path.join(data_dir, "**/train/*.hdf5"), recursive=True) if is_valid_hdf5(f)])
+    valid_files = sorted([f for f in glob.glob(os.path.join(data_dir, "**/valid/*.hdf5"), recursive=True) if is_valid_hdf5(f)])
+    test_files = sorted([f for f in glob.glob(os.path.join(data_dir, "**/test/*.hdf5"), recursive=True) if is_valid_hdf5(f)])
 
     all_files = train_files + valid_files + test_files
-    print(f"Total HDF5 files located: {len(all_files)}")
+    print(f"Total verified HDF5 files located: {len(all_files)}")
     print(f"  Train partition files: {len(train_files)}")
     print(f"  Valid partition files: {len(valid_files)}")
     print(f"  Test partition files:  {len(test_files)}")

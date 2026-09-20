@@ -52,6 +52,13 @@ class ShearFlowDataset(Dataset):
 
         self._build_index()
 
+    @staticmethod
+    def _find_dset(h5, candidates: List[str]):
+        for c in candidates:
+            if c in h5:
+                return h5[c]
+        return None
+
     def _build_index(self):
         for f_idx, path in enumerate(self.file_paths):
             if not os.path.exists(path):
@@ -61,10 +68,9 @@ class ShearFlowDataset(Dataset):
             sc_val = params["sc"]
 
             with h5py.File(path, "r") as h5:
-                # Find number of simulations and time steps
-                # Check known key candidates
-                key = next(k for k in ["velocity", "tracer", "u", "data"] if k in h5)
-                dset = h5[key]
+                dset = self._find_dset(h5, ["t1_fields/velocity", "velocity", "t0_fields/tracer", "tracer", "u"])
+                if dset is None:
+                    raise KeyError(f"No valid field dataset found in {path}")
                 shape = dset.shape
 
                 # If shape is (N_sim, T, ...)
@@ -72,11 +78,9 @@ class ShearFlowDataset(Dataset):
                     n_sims = shape[0]
                     t_steps = shape[1]
                 else:
-                    # Single simulation per file (T, ...)
                     n_sims = 1
                     t_steps = shape[0]
 
-                # Generate temporal window slices for this trajectory
                 windows = generate_window_indices(
                     total_timesteps=t_steps,
                     history_length=self.history_length,
@@ -94,10 +98,10 @@ class ShearFlowDataset(Dataset):
     def _load_full_file(self, path: str) -> np.ndarray:
         """Load full file fields [u, v, p, s] into memory as float32 array (N_sim, T, 4, Ny, Nx)."""
         with h5py.File(path, "r") as h5:
-            # Velocity: usually (N_sim, T, Ny, Nx, 2) or (N_sim, T, 2, Ny, Nx)
-            if "velocity" in h5:
-                vel = np.asarray(h5["velocity"], dtype=np.float32)
-                if vel.shape[-1] == 2:  # Last dim is component (u_x, u_z)
+            vel_ds = self._find_dset(h5, ["t1_fields/velocity", "velocity"])
+            if vel_ds is not None:
+                vel = np.asarray(vel_ds, dtype=np.float32)
+                if vel.shape[-1] == 2:
                     u = vel[..., 0]
                     v = vel[..., 1]
                 elif vel.shape[2] == 2:
@@ -112,16 +116,18 @@ class ShearFlowDataset(Dataset):
                 raise KeyError(f"Cannot find velocity fields in {path}")
 
             # Pressure
-            if "pressure" in h5:
-                p = np.asarray(h5["pressure"], dtype=np.float32)
+            p_ds = self._find_dset(h5, ["t0_fields/pressure", "pressure"])
+            if p_ds is not None:
+                p = np.asarray(p_ds, dtype=np.float32)
                 if p.ndim == u.ndim + 1 and p.shape[-1] == 1:
                     p = p.squeeze(-1)
             else:
                 p = np.zeros_like(u)
 
             # Tracer
-            if "tracer" in h5:
-                s = np.asarray(h5["tracer"], dtype=np.float32)
+            s_ds = self._find_dset(h5, ["t0_fields/tracer", "tracer"])
+            if s_ds is not None:
+                s = np.asarray(s_ds, dtype=np.float32)
                 if s.ndim == u.ndim + 1 and s.shape[-1] == 1:
                     s = s.squeeze(-1)
             elif "s" in h5:
@@ -129,9 +135,7 @@ class ShearFlowDataset(Dataset):
             else:
                 s = np.zeros_like(u)
 
-            # Stack into (N_sim, T, 4, Ny, Nx)
-            stacked = np.stack([u, v, p, s], axis=2)  # Insert channel dim at index 2
-            return stacked
+            return np.stack([u, v, p, s], axis=2)
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -143,26 +147,37 @@ class ShearFlowDataset(Dataset):
             full_data = self._cached_data[f_idx]
             traj_slice = full_data[sim_idx, start_t:end_t]  # (L + H, 4, Ny, Nx)
         else:
-            # On-the-fly read
             path = self.file_paths[f_idx]
             with h5py.File(path, "r") as h5:
-                vel = h5["velocity"]
-                if vel.shape[-1] == 2:
-                    u = np.asarray(vel[sim_idx, start_t:end_t, ..., 0], dtype=np.float32)
-                    v = np.asarray(vel[sim_idx, start_t:end_t, ..., 1], dtype=np.float32)
+                vel_ds = self._find_dset(h5, ["t1_fields/velocity", "velocity"])
+                if vel_ds is not None:
+                    if vel_ds.shape[-1] == 2:
+                        u = np.asarray(vel_ds[sim_idx, start_t:end_t, ..., 0], dtype=np.float32)
+                        v = np.asarray(vel_ds[sim_idx, start_t:end_t, ..., 1], dtype=np.float32)
+                    else:
+                        u = np.asarray(vel_ds[sim_idx, start_t:end_t, 0], dtype=np.float32)
+                        v = np.asarray(vel_ds[sim_idx, start_t:end_t, 1], dtype=np.float32)
                 else:
-                    u = np.asarray(vel[sim_idx, start_t:end_t, 0], dtype=np.float32)
-                    v = np.asarray(vel[sim_idx, start_t:end_t, 1], dtype=np.float32)
+                    u = np.asarray(h5["u"][sim_idx, start_t:end_t], dtype=np.float32)
+                    v = np.asarray(h5["v"][sim_idx, start_t:end_t], dtype=np.float32)
 
-                p = np.asarray(h5["pressure"][sim_idx, start_t:end_t], dtype=np.float32)
-                if p.ndim == 4 and p.shape[-1] == 1:
-                    p = p.squeeze(-1)
+                p_ds = self._find_dset(h5, ["t0_fields/pressure", "pressure"])
+                if p_ds is not None:
+                    p = np.asarray(p_ds[sim_idx, start_t:end_t], dtype=np.float32)
+                    if p.ndim == 4 and p.shape[-1] == 1:
+                        p = p.squeeze(-1)
+                else:
+                    p = np.zeros_like(u)
 
-                s = np.asarray(h5["tracer"][sim_idx, start_t:end_t], dtype=np.float32)
-                if s.ndim == 4 and s.shape[-1] == 1:
-                    s = s.squeeze(-1)
+                s_ds = self._find_dset(h5, ["t0_fields/tracer", "tracer"])
+                if s_ds is not None:
+                    s = np.asarray(s_ds[sim_idx, start_t:end_t], dtype=np.float32)
+                    if s.ndim == 4 and s.shape[-1] == 1:
+                        s = s.squeeze(-1)
+                else:
+                    s = np.zeros_like(u)
 
-                traj_slice = np.stack([u, v, p, s], axis=1)  # (L + H, 4, Ny, Nx)
+                traj_slice = np.stack([u, v, p, s], axis=1)
 
         tensor_slice = torch.from_numpy(traj_slice)
 

@@ -38,7 +38,7 @@ class FieldLoss(nn.Module):
         """
         assert pred.shape == target.shape, f"Shape mismatch: {pred.shape} vs {target.shape}"
 
-        weights = self.weights
+        weights = self.weights.to(pred.device)
         if pred.ndim == 5 and weights.ndim == 4:
             weights = weights.unsqueeze(1)  # (1, 1, C, 1, 1)
 
@@ -53,7 +53,7 @@ class FieldLoss(nn.Module):
             target_norm = torch.norm(target, p=2, dim=(-2, -1))
             rel_err = diff_norm / (target_norm + self.eps)
             # Weights applied to channel dim
-            w = self.weights.view(1, -1)
+            w = self.weights.to(pred.device).view(1, -1)
             if rel_err.ndim == 3:  # (B, T, C)
                 w = w.unsqueeze(1)
             return (rel_err * w).mean()

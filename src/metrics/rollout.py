@@ -12,23 +12,16 @@ from src.utils.fft_derivatives import (
 )
 
 
+from src.metrics.spectral import compute_spectral_error
+
+
 def evaluate_rollout_trajectory(
     pred_trajectory: torch.Tensor,
     target_trajectory: torch.Tensor,
     evaluation_steps: Optional[List[int]] = None,
     domain_size: tuple = (2.0, 1.0),
 ) -> Dict[str, Dict[str, float]]:
-    """Evaluates multi-step predicted trajectory against target trajectory.
-
-    Args:
-        pred_trajectory: Predicted sequence (B, H, C, Ny, Nx).
-        target_trajectory: Ground truth sequence (B, H, C, Ny, Nx).
-        evaluation_steps: Horizon steps to record (1-indexed, e.g. [1, 5, 10, 20, 30]).
-        domain_size: (Ly, Lx).
-
-    Returns:
-        Dictionary mapping step name (e.g. 'step_1', 'step_5') to metric dicts.
-    """
+    """Evaluates multi-step predicted trajectory against target trajectory."""
     total_steps = pred_trajectory.shape[1]
     if evaluation_steps is None:
         evaluation_steps = [s for s in [1, 5, 10, 20, 30] if s <= total_steps]
@@ -62,13 +55,18 @@ def evaluate_rollout_trajectory(
         ke_rel_err = torch.abs(ke_pred - ke_targ) / (torch.abs(ke_targ) + 1e-6)
         step_res["ke_rel_err"] = float(ke_rel_err.mean().item())
 
-        # 5. Enstrophy evolution error
+        # 5. Vorticity RMSE & Enstrophy
         vort_pred = compute_vorticity(p[:, 0], p[:, 1], domain_size=domain_size)
         vort_targ = compute_vorticity(t[:, 0], t[:, 1], domain_size=domain_size)
+        step_res["vort_rmse"] = float(torch.sqrt(torch.mean((vort_pred - vort_targ)**2)).item())
         ens_pred = compute_enstrophy(vort_pred)
         ens_targ = compute_enstrophy(vort_targ)
         ens_rel_err = torch.abs(ens_pred - ens_targ) / (torch.abs(ens_targ) + 1e-6)
         step_res["enstrophy_rel_err"] = float(ens_rel_err.mean().item())
+
+        # 6. Energy Spectrum MAE
+        spec_res = compute_spectral_error(p[:, 0], p[:, 1], t[:, 0], t[:, 1], domain_size=domain_size)
+        step_res["energy_spectrum_mae"] = float(spec_res["spec_err_total"])
 
         results[f"step_{step}"] = step_res
 

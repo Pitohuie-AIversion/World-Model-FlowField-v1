@@ -23,6 +23,7 @@ from src.models.direct_transformer import DirectSTTransformer
 from src.models.encoder import Encoder2D
 from src.models.history_buffer import HistoryBuffer
 from src.models.latent_transformer import LatentSTTransformer
+from src.models.latent_forecaster import LatentForecaster
 from src.utils.checkpoint import load_checkpoint
 from src.utils.reproducibility import seed_everything
 
@@ -92,12 +93,16 @@ def run_benchmark(
     device = torch.device(device_str)
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
-    test_files = sorted(glob.glob(os.path.join(data_dir, "test", "*.hdf5")))
+    test_files = sorted(glob.glob(os.path.join(data_dir, "**/test/*.hdf5"), recursive=True))
     if not test_files:
-        print(f"No test files found in {data_dir}/test.")
-        return
+        test_files = sorted(glob.glob(os.path.join(data_dir, "**/valid/*.hdf5"), recursive=True))
+        if test_files:
+            print(f"Notice: No test files found. Using available valid files for benchmark evaluation.")
+        else:
+            print(f"No test/valid files found in {data_dir}.")
+            return
 
-    test_dataset = ShearFlowDataset(test_files, history_length=4, horizon=max_horizon, stride=15)
+    test_dataset = ShearFlowDataset(test_files, history_length=4, horizon=max_horizon, stride=20)
     test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False)
 
     print(f"Loaded {len(test_dataset)} test trajectories for {max_horizon}-step rollout evaluation.")
@@ -109,14 +114,49 @@ def run_benchmark(
     persistence = PersistenceBaseline().to(device)
     results["persistence"] = evaluate_model_rollout("persistence", persistence, test_loader, device, max_horizon)
 
+    # 2. Main Model: Latent ST Transformer (if checkpoint exists)
+    latent_ckpt = "outputs/checkpoints/dynamics/latent_transformer/best_vrmse_mean.pt"
+    if os.path.exists(latent_ckpt):
+        print("\n--- Evaluating Latent ST Transformer ---")
+        encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
+        decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=True)
+        transformer = LatentSTTransformer(
+            latent_channels=64, embed_dim=256, cond_dim=128, depth=6, num_heads=8, history_length=4
+        )
+        forecaster = LatentForecaster(encoder=encoder, transformer=transformer, decoder=decoder).to(device)
+        ckpt_data = torch.load(latent_ckpt, map_location="cpu")
+        if "model_state_dict" in ckpt_data:
+            forecaster.load_state_dict(ckpt_data["model_state_dict"])
+        results["latent_transformer"] = evaluate_model_rollout("latent_transformer", forecaster, test_loader, device, max_horizon)
+
+    # 3. Ablation Baseline: Direct ST Transformer
+    direct_ckpt = "outputs/checkpoints/dynamics/direct_transformer/best_vrmse_mean.pt"
+    if os.path.exists(direct_ckpt):
+        print("\n--- Evaluating Direct ST Transformer (Ablation Q1 Baseline) ---")
+        direct_model = DirectSTTransformer(
+            in_channels=4,
+            patch_size=(8, 8),
+            embed_dim=256,
+            cond_dim=128,
+            depth=6,
+            num_heads=8,
+            history_length=4,
+            prediction_mode="direct",
+        ).to(device)
+        ckpt_data = torch.load(direct_ckpt, map_location="cpu")
+        if "model_state_dict" in ckpt_data:
+            direct_model.load_state_dict(ckpt_data["model_state_dict"])
+        results["direct_transformer"] = evaluate_model_rollout("direct_transformer", direct_model, test_loader, device, max_horizon)
+
     # Print summary table
     print("\n" + "=" * 90)
-    print(f"{'Model':<20} | {'Metric':<15} | {'Step 1':<10} | {'Step 5':<10} | {'Step 10':<10} | {'Step 20':<10} | {'Step 30':<10}")
+    print(f"{'Model':<20} | {'Metric':<22} | {'Step 1':<10} | {'Step 5':<10} | {'Step 10':<10} | {'Step 20':<10} | {'Step 30':<10}")
     print("-" * 90)
     for m_name, m_res in results.items():
-        for metric in ["vrmse_mean", "div_rmse", "tracer_var_retention"]:
+        for metric in ["vrmse_mean", "div_rmse", "vort_rmse", "tracer_var_retention", "energy_spectrum_mae"]:
             row = [f"{m_res.get(f'step_{s}', {}).get(metric, 0.0):.4f}" for s in [1, 5, 10, 20, 30]]
-            print(f"{m_name:<20} | {metric:<15} | {row[0]:<10} | {row[1]:<10} | {row[2]:<10} | {row[3]:<10} | {row[4]:<10}")
+            print(f"{m_name:<20} | {metric:<22} | {row[0]:<10} | {row[1]:<10} | {row[2]:<10} | {row[3]:<10} | {row[4]:<10}")
+        print("-" * 90)
 
     with open(output_file, "w") as f:
         json.dump(results, f, indent=2)

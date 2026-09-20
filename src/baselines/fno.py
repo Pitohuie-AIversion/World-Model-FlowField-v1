@@ -25,6 +25,8 @@ class SpectralConv2d(nn.Module):
         return torch.einsum("bixy,ioxy->boxy", input, weights)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        orig_dtype = x.dtype
+        x = x.float()
         batchsize = x.shape[0]
         # Compute 2D Fourier coefficients
         x_ft = torch.fft.rfft2(x, norm="ortho")
@@ -48,7 +50,7 @@ class SpectralConv2d(nn.Module):
 
         # Return to spatial domain
         x_out = torch.fft.irfft2(out_ft, s=(x.size(-2), x.size(-1)), norm="ortho")
-        return x_out
+        return x_out.to(dtype=orig_dtype)
 
 
 class FNO2D(nn.Module):
