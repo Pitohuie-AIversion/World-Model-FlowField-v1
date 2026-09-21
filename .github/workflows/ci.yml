@@ -23,7 +23,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install torch numpy scipy h5py pytest pyyaml hydra-core anyio
+        pip install -e ".[test]"
 
     - name: Run PyTest Test Suite
       run: |

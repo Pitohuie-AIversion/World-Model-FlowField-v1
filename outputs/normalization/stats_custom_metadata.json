@@ -1,7 +1,7 @@
 {
   "fit_protocol": "trajectory-reference-v2",
   "split_type": "custom",
-  "split_hash": "f2843e29d8e1a3b907436bf8464a84199489166ee59a6fb1b5e211aa3d000589",
+  "split_hash": "079cce74ed80e87fe6411c0e0a3024f6b194f8a9629a0c69f4411345764cfc1f",
   "downsample_factor": 2,
   "channels": [
     "u",
@@ -21,5 +21,5 @@
     0.050328560173511505,
     9.999999974752427e-07
   ],
-  "timestamp": "2026-09-21 14:44:07"
+  "timestamp": "2026-09-21 15:23:05"
 }
