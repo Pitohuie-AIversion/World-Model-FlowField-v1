@@ -9,6 +9,7 @@ Provides end-to-end DataLoader creation with:
 
 import json
 import os
+import time
 from typing import Dict, List, Optional, Tuple, Union
 import torch
 from torch.utils.data import DataLoader
@@ -156,14 +157,28 @@ def create_flow_datasets(
     if normalize:
         os.makedirs(stats_dir, exist_ok=True)
         stats_path = os.path.join(stats_dir, f"stats_{split_type}.pt")
+        meta_path = os.path.join(stats_dir, f"stats_{split_type}_metadata.json")
 
+        valid_cached = False
         if normalizer is not None:
             fitted_normalizer = normalizer
-        elif os.path.exists(stats_path):
-            state = torch.load(stats_path, weights_only=True)
-            fitted_normalizer = FieldNormalizer()
-            fitted_normalizer.load_state_dict(state)
-        else:
+            valid_cached = True
+        elif os.path.exists(stats_path) and os.path.exists(meta_path):
+            try:
+                with open(meta_path, "r") as mf:
+                    meta = json.load(mf)
+                if (
+                    meta.get("fit_protocol") == "trajectory-reference-v2"
+                    and meta.get("downsample_factor") == downsample_factor
+                ):
+                    state = torch.load(stats_path, weights_only=True)
+                    fitted_normalizer = FieldNormalizer()
+                    fitted_normalizer.load_state_dict(state)
+                    valid_cached = True
+            except Exception:
+                valid_cached = False
+
+        if not valid_cached:
             # Build an invariant reference dataset with L=1, H=1, stride=1 to fit normalizer
             # This guarantees statistics are 100% horizon-invariant and stride-invariant
             if is_dict_trajs:
@@ -190,6 +205,18 @@ def create_flow_datasets(
                 )
             fitted_normalizer = fit_normalizer_on_dataset(ref_norm_ds)
             torch.save(fitted_normalizer.state_dict(), stats_path)
+
+            metadata = {
+                "fit_protocol": "trajectory-reference-v2",
+                "split_type": split_type,
+                "downsample_factor": downsample_factor,
+                "channels": ["u", "v", "p", "s"],
+                "mean": fitted_normalizer.mean.view(-1).tolist() if fitted_normalizer.mean is not None else None,
+                "std": fitted_normalizer.std.view(-1).tolist() if fitted_normalizer.std is not None else None,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            with open(meta_path, "w") as mf:
+                json.dump(metadata, mf, indent=2)
 
     raw_train_ds.normalizer = fitted_normalizer
     train_dataset = raw_train_ds

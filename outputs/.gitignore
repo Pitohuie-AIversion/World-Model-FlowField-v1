@@ -40,4 +40,5 @@ logs/*
 !splits/*.json
 !metrics/*.json
 !normalization/*.pt
+!normalization/*.json
 !figures/*.png

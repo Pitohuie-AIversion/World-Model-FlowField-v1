@@ -75,12 +75,22 @@
 - **已达成项 (PASS)**：
   1. **主链架构与算子完备**：成功构建 $64\times$ 潜流形自编码器、双向周期卷积、非就地零均值压力投影与因子化时空解耦 Transformer；
   2. **物理守恒正则化显著**：引入 FFT 谱导数物理损失后，Step 10 相对误差降低 92.0%，Step 30 真实场误差降至 0.1774（学习型模型中表现最佳），有效压制高频数值发散；
-  3. **数据协议与代码治理收口**：已统一数据加载流（`create_flow_dataloaders` + 相对路径 `grouped_split.json` + 训练集拟合 `FieldNormalizer`）；
-  4. **工程健壮性与协议契约**：单元测试 **45/45 项 100% 绿灯 PASS**；完成 6 项核心协议治理（P1-1 场值优化空间契约、P1-2 物理空间零均值压力 Gauge、P1-3 预训练权重 Fail-Closed 校验、P1-4 Normalizer 窗口超参解耦不变性、P1-5 & P1-6 Reynolds 动力学与 Schmidt 示踪输运参数留出划分独立全线打通）；CI 工作流与测试 Fixture 彻底解耦外部真实数据集。
+  3. **数据协议与代码治理全链收口 (Closure-R2)**：
+     - 全部训练与评估入口（`train_representation`, `train_forecaster`, `evaluate_rollout`, `evaluate_physics_ablation`, `analyze_failure_cases`）全面对齐单一实验契约（Single Experiment Contract）；
+     - 接入统一数据加载流（`create_flow_dataloaders` + 相对路径 split manifest + 空间下采样 $2\times$ + 反归一化物理压力 Gauge）；
+     - `FieldNormalizer` 引入自描述元数据契约（`stats_{split}_metadata.json`，`fit_protocol: trajectory-reference-v2`），具备协议版本强校验与陈旧缓存自动重算能力；
+     - `evaluate_rollout` 建立 Checkpoint 预检机制，自动对齐并强校验数据协议；
+     - 消融评估器全面升级至 E0~E4 五组对齐协议；
+  4. **工程健壮性与测试验证**：
+     - 真实端到端集成测试通过，覆盖各脚本入口契约、真实 Loader Fail-Closed 机制与数据协议一致性；
+     - CI 工作流与测试 Fixture 彻底解耦外部真实数据集（Hermetic Synthetic Fixture）。
 - **条件待补项 (CONDITIONS)**：
-  1. **消融实验框架 PASS，大盘重跑 PENDING**：消融实验调度流水线与协议已全部冻结就绪，待按新协议执行全量长程训练与重跑（Frozen vs Joint、Direct vs Residual、State-only vs Condition-aware 以及 E0 vs E1-E4 对照）；
-  2. **课程式自由滚动覆盖**：完成 $H=4$ 和 $H=8$ 的自由滚动长训并固化终局权重与指标。
-  （待上述超参长跑任务完成后，更新为终局正式 PASS）。
+  1. **参数泛化物理实验数据阻塞 (BLOCKED BY DATA)**：
+     - 代码层：已完备实现 Reynolds 数与 Schmidt 数解耦划分（`parameter_holdout_re` 与 `parameter_holdout_sc`）；
+     - 真实数据层：当前本地与下载子集仅包含单一雷诺数（$Re=10^4$），因此 `parameter_holdout_re.json` 真实测试集目前为空，显式标记为 `status: "BLOCKED_BY_DATA"`。待后续补充 $Re=10^5$ 真实切片后执行泛化实测；
+  2. **消融实验与长程大盘重跑 PENDING**：消融实验调度流水线与协议已全部冻结就绪，待按 Closure-R2 新协议执行全量长程重跑（Frozen vs Joint、Direct vs Residual、State-only vs Condition-aware 以及 E0 vs E1-E4 对照）；
+  3. **课程式自由滚动覆盖**：完成 $H=4$ 和 $H=8$ 的自由滚动长训并固化终局权重与指标。
+  （待上述数据补充与实验重跑完成后，更新为终局正式 PASS）。
 
 ## 五、 10 月份下一轮研发任务规划 (October Roadmap)
 

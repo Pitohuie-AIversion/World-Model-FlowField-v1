@@ -8,5 +8,6 @@
   ],
   "test": [
     "data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5"
-  ]
+  ],
+  "status": "READY"
 }

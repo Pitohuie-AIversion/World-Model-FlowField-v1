@@ -1,23 +1,28 @@
 # 流场世界模型 V1 研发路线图与工程 TodoList
 
 > **项目名称**：World-Model-FlowField-v1  
+> **基准数据集**：The Well `shear_flow` (2D 不可压缩剪切流 + 被动示踪�> **项目名称**：World-Model-FlowField-v1  
 > **基准数据集**：The Well `shear_flow` (2D 不可压缩剪切流 + 被动示踪标量)  
 > **计算环境**：NVIDIA vGPU-32GB × 2 (CUDA 13.0, PyTorch 2.10.0+cu128)  
-> **工程测试基线**：全套自动化测试套件通过（40/40 tests passed）
+> **工程测试基线**：全套自动化测试套件通过（45/45 tests passed，含协议契约测试）
 
 ---
 
 ## 一、 整体研发路线图总览看板
 
 | 阶段 | 核心任务 | 关键目标 / 验证标准 | 状态 |
-| :--- | :--- | :--- | :---: |
-| **Stage 1** | 数据基座与物理规范 | HDF5 数据审计、时间滑动窗口、物理参数归一化、测试集防泄漏协议 | <font color="#2ea44f">● 已完成 (DONE)</font> |
-| **Stage 2** | 空间潜状态编码器与解码器 | 8x 下采样卷积结构、双向周期边界、压力零均值非就地投影、四场重建闭环 | <font color="#2ea44f">● 已完成 (DONE)</font> |
+| :--- | :--- | :--- | :--- |
+| **Stage 1** | 数据基座与物理规范 | HDF5 数据审计、时间滑动窗口、物理参数归一化、测试集防泄漏协议（Sc 留出就绪，Re 留出因本地单参数标记为 BLOCKED_BY_DATA） | <font color="#2ea44f">● 已完成 (DONE)</font> |
+| **Stage 2** | 空间潜状态编码器与解码器 | 8x 下采样卷积结构、双向周期边界、压力零均值非就地投影（评估阶段）、四场重建闭环 | <font color="#2ea44f">● 已完成 (DONE)</font> |
 | **Stage 3** | 物理条件层与因子化 Transformer | $Re, Sc \to \text{log} \to \text{MLP} \to \text{AdaLN}$、时空解耦注意力、潜状态残差更新 | <font color="#2ea44f">● 已完成 (DONE)</font> |
-| **基线体系** | 统一基线与公平评测竞技场 | Persistence、FNO-2D、PDE-Transformer (Direct ST Transformer) 接口统一 | <font color="#2ea44f">● 已完成 (DONE)</font> |
+| **基线体系** | 统一基线与公平评测竞技场 | Persistence、FNO-2D、Direct ST Transformer 接口统一 | <font color="#2ea44f">● 已完成 (DONE)</font> |
 | **Stage 4.1** | 潜空间自由滚动机制 | `HistoryBuffer` 纯潜空间自回归推演、30 步滚动评测矩阵构建 | <font color="#2ea44f">● 已完成 (DONE)</font> |
 | **Stage 4.2** | 双卡 DDP 短程自由滚动长训练 | 引入多步滚动监督 ($H=2$) 抑制自回归自激发散、双卡分布式训练 30 Epochs | <font color="#2ea44f">● 已完成 (DONE)</font> |
 | **Stage 4.3** | 自由滚动收敛复评 | 载入单步底座与滚动长训双模型展开 30 步评测，确认单步误差暴降 80.5% | <font color="#2ea44f">● 已完成 (DONE)</font> |
+| **Stage 5** | 物理守恒损失消融实验 (E0 - E4) | 实验流水线就绪（旧四组实验为 Historical；Closure-R2 E0-E4 全量重跑待调度） | <font color="#d29922">● 流水线 PASS / 跑批 PENDING</font> |
+| **Stage 6** | 周期 FFT 导数与独立物理评价系统 | 二维周期谱导数与拉普拉斯算子、全量物理衍生量、8 联排出版级 Rollout 看板导出 | <font color="#2ea44f">● 已完成 (DONE)</font> |
+| **V1 全链验收** | 汇总主模型与基线、失败案例审计、架构规范与 V1 验收 | 协议契约全面冻结（P1-1~P1-7 闭环），待执行最终 E0-E4 与 H=4/8 统一超参重跑 | <font color="#d29922">● 进行中 (IN PROGRESS)</font> |
+| **10 月路线图** | 课程式长推演、潜流形扩散、宽域泛化与三维预研 | 50~100 步课程式自回归、Latent Diffusion 湍流随机分岔、Re 宽域外推与 3D 周期谱导数 | <font color="#8c959f">○ 待进行 (PENDING)</font> |30 步评测，确认单步误差暴降 80.5% | <font color="#2ea44f">● 已完成 (DONE)</font> |
 | **Stage 5** | 物理守恒损失消融实验 ($L_{\text{field}}$, $+L_{\text{div}}$, $+L_\omega$, $+L_{\text{div}}+L_\omega$) | 四组消融双卡并发训练、30 步多尺度推演、单步与长期滚动物理守恒对比 | <font color="#2ea44f">● 已完成 (DONE)</font> |
 | **Stage 6** | 周期 FFT 导数与独立物理评价系统 | 二维周期谱导数与拉普拉斯算子、全量物理衍生量、8 联排出版级 Rollout 看板导出 | <font color="#2ea44f">● 已完成 (DONE)</font> |
 | **V1 全链验收** | 汇总主模型与基线、失败案例审计、架构规范与 V1 验收 | 全模型横向竞技大盘、极端边界误差归因、系统架构更新、形成 V1 阶段验收通过定论 | <font color="#2ea44f">● 已完成 (DONE)</font> |

@@ -133,6 +133,7 @@ outputs/*
 !outputs/splits/*.json
 !outputs/metrics/*.json
 !outputs/normalization/*.pt
+!outputs/normalization/*.json
 !outputs/figures/*.png
 
 # ------------------------------------------------------------------------------

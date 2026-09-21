@@ -89,10 +89,22 @@ def build_and_save_splits(
         )
     else:
         holdout_re_split = SplitManager.get_parameter_holdout_re_split(rel_all_files, holdout_re=1e5, valid_ratio=0.1)
+
+    if len(holdout_re_split["test"]) == 0:
+        holdout_re_split["status"] = "BLOCKED_BY_DATA"
+        holdout_re_split["reason"] = (
+            f"Only {len(available_res)} distinct Reynolds number(s) {sorted(list(available_res))} found in local dataset. "
+            f"At least two distinct Re values are strictly required to form a valid out-of-distribution holdout test set. "
+            f"Please download trajectories with Re=1e5 or Re=5e4."
+        )
+        print(f"  [NOTICE] Re Parameter Holdout: {holdout_re_split['reason']}")
+    else:
+        holdout_re_split["status"] = "READY"
+
     re_path = os.path.join(output_dir, "parameter_holdout_re.json")
     with open(re_path, "w") as f:
         json.dump(holdout_re_split, f, indent=2)
-    print(f"Exported Re Parameter Holdout Split (Holdout Re={actual_holdout_re}) to: {re_path}")
+    print(f"Exported Re Parameter Holdout Split (Status: {holdout_re_split['status']}) to: {re_path}")
     print(f"  Holdout Re Train: {len(holdout_re_split['train'])}, Valid: {len(holdout_re_split['valid'])}, Test: {len(holdout_re_split['test'])}")
 
     # 3B. Schmidt Holdout Split (OOD Scalar Transport)
@@ -105,10 +117,18 @@ def build_and_save_splits(
         )
     else:
         holdout_sc_split = SplitManager.get_parameter_holdout_sc_split(rel_all_files, holdout_sc=1.0, valid_ratio=0.1)
+
+    if len(holdout_sc_split["test"]) == 0:
+        holdout_sc_split["status"] = "BLOCKED_BY_DATA"
+        holdout_sc_split["reason"] = "No distinct Schmidt number found to form holdout test set."
+        print(f"  [NOTICE] Sc Parameter Holdout: {holdout_sc_split['reason']}")
+    else:
+        holdout_sc_split["status"] = "READY"
+
     sc_path = os.path.join(output_dir, "parameter_holdout_sc.json")
     with open(sc_path, "w") as f:
         json.dump(holdout_sc_split, f, indent=2)
-    print(f"Exported Sc Parameter Holdout Split (Holdout Sc={actual_holdout_sc}) to: {sc_path}")
+    print(f"Exported Sc Parameter Holdout Split (Status: {holdout_sc_split['status']}) to: {sc_path}")
     print(f"  Holdout Sc Train: {len(holdout_sc_split['train'])}, Valid: {len(holdout_sc_split['valid'])}, Test: {len(holdout_sc_split['test'])}")
 
     # 3C. General Holdout Split (Backward compatibility)

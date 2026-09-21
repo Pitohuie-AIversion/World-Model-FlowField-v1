@@ -1,25 +1,28 @@
-"""Analyze failure cases and boundary scenarios on 30-step rollout trajectories.
+"""Analyze failure and boundary cases across test trajectories under canonical pipeline.
 
-Identifies worst (highest error) and best trajectories across the test set,
-visualizes spatial error fields (vorticity, tracer, velocity), and analyzes
-physical root causes of degradation.
+Extracts best, median, and worst failure cases across 30-step autoregressive rollouts,
+computing trajectory metrics in denormalized physical space, and exports publication figures
+and diagnostic JSON metadata.
 """
 
 import argparse
-import glob
 import json
 import os
 import sys
-import matplotlib.pyplot as plt
-import numpy as np
-import torch
-from torch.utils.data import DataLoader
+import time
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.data.shear_flow_dataset import ShearFlowDataset
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+
+from src.data.pipeline import create_flow_dataloaders
 from src.metrics.field import evaluate_field_metrics
 from src.models.decoder import Decoder2D
 from src.models.encoder import Encoder2D
@@ -30,10 +33,15 @@ from src.utils.reproducibility import seed_everything
 
 
 def analyze_failure_cases(
-    model_path: str = "outputs/checkpoints/dynamics/ablation_plus_L_div_vort/latent_transformer/best_vrmse_mean.pt",
+    model_path: str = "outputs/checkpoints/dynamics/ablation_E4_full_physics/best_vrmse_mean.pt",
     data_dir: str = "/root/autodl-tmp/datasets/shear_flow",
+    split_type: str = "grouped",
+    split_file: str = None,
     output_dir: str = "outputs",
     max_horizon: int = 30,
+    stride: int = 20,
+    downsample_factor: int = 2,
+    normalize: bool = True,
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
 ):
     seed_everything(42)
@@ -43,27 +51,84 @@ def analyze_failure_cases(
     os.makedirs(fig_dir, exist_ok=True)
     os.makedirs(metrics_dir, exist_ok=True)
 
-    test_files = sorted(glob.glob(os.path.join(data_dir, "**/test/*.hdf5"), recursive=True))
-    if not test_files:
-        test_files = sorted(glob.glob(os.path.join(data_dir, "**/valid/*.hdf5"), recursive=True))
+    # Resolve candidate model path with fallback
+    if not os.path.exists(model_path):
+        legacy_candidates = [
+            "outputs/checkpoints/dynamics/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/ablation_plus_L_div_vort/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/ablation_plus_L_div_vort/latent_transformer/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/latent_transformer/best_vrmse_mean.pt",
+        ]
+        for cand in legacy_candidates:
+            if os.path.exists(cand):
+                model_path = cand
+                break
 
-    # Stride=20 ensures we get individual distinct trajectories across the test partition
-    test_dataset = ShearFlowDataset(test_files, history_length=4, horizon=max_horizon, stride=20)
-    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Checkpoint not found at {model_path}. Train a model first!")
 
-    print(f"Analyzing {len(test_dataset)} test trajectories with model {model_path}...")
+    print(f"Loading checkpoint config from {model_path}...")
+    ckpt = torch.load(model_path, map_location="cpu")
+    cfg = ckpt.get("config", {})
 
-    # Load Model
+    # Self-describing config recovery
+    embed_dim = cfg.get("embed_dim", 256)
+    depth = cfg.get("depth", 6)
+    num_heads = cfg.get("num_heads", 8)
+    prediction_mode = cfg.get("prediction_mode", ckpt.get("prediction_mode", "direct"))
+    use_condition = cfg.get("use_condition", ckpt.get("use_condition", True))
+    ds_factor = cfg.get("downsample_factor", downsample_factor)
+    norm_flag = cfg.get("normalize", normalize)
+    s_type = cfg.get("split_type", split_type)
+
+    print(f"Recovered model config: embed_dim={embed_dim}, depth={depth}, num_heads={num_heads}, "
+          f"prediction_mode='{prediction_mode}', use_condition={use_condition}, downsample={ds_factor}")
+
+    if split_file is None:
+        if s_type.endswith(".json"):
+            split_file = s_type
+        elif s_type.startswith("outputs/splits/"):
+            split_file = s_type
+        else:
+            cand = f"outputs/splits/{s_type}.json"
+            split_file = cand if os.path.exists(cand) else f"outputs/splits/{s_type}_split.json"
+
+    # Canonical data pipeline
+    _, _, test_loader, normalizer = create_flow_dataloaders(
+        split_type=s_type,
+        split_file=split_file,
+        data_root=data_dir,
+        history_length=4,
+        horizon=max_horizon,
+        stride=stride,
+        downsample_factor=ds_factor,
+        batch_size=1,
+        num_workers=0,
+        normalize=norm_flag,
+    )
+
+    print(f"Loaded {len(test_loader.dataset)} test trajectories for failure case analysis...")
+
+    # Load Model with unprojected decoder
     encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
     decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=False)
     transformer = LatentSTTransformer(
-        latent_channels=64, embed_dim=256, cond_dim=128, depth=6, num_heads=8, history_length=4
+        latent_channels=64,
+        embed_dim=embed_dim,
+        cond_dim=128,
+        depth=depth,
+        num_heads=num_heads,
+        history_length=4,
+        prediction_mode=prediction_mode,
     )
     model = LatentForecaster(encoder=encoder, transformer=transformer, decoder=decoder).to(device)
 
-    ckpt = torch.load(model_path, map_location="cpu")
     if "model_state_dict" in ckpt:
         model.load_state_dict(ckpt["model_state_dict"])
+    elif "encoder_state_dict" in ckpt and "transformer_state_dict" in ckpt:
+        model.encoder.load_state_dict(ckpt["encoder_state_dict"])
+        model.transformer.load_state_dict(ckpt["transformer_state_dict"])
+        model.decoder.load_state_dict(ckpt["decoder_state_dict"])
     model.eval()
 
     trajectory_records = []
@@ -72,24 +137,32 @@ def analyze_failure_cases(
         for traj_idx, batch in enumerate(test_loader):
             q_hist = batch["history"].to(device)
             q_future = batch["future"].to(device)
-            re = batch["re"].to(device)
-            sc = batch["sc"].to(device)
+            re = batch["re"].to(device) if use_condition and "re" in batch else None
+            sc = batch["sc"].to(device) if use_condition and "sc" in batch else None
 
             pred_traj = model.forward_rollout(q_hist, re, sc, horizon=max_horizon)
+
+            # Denormalize to physical units for diagnostic analysis
+            if normalizer is not None:
+                pred_eval = normalizer.denormalize(pred_traj)
+                gt_eval = normalizer.denormalize(q_future)
+            else:
+                pred_eval = pred_traj
+                gt_eval = q_future
+
             # Enforce zero-mean pressure gauge in physical space
-            pred_traj[:, :, 2:3, :, :] = pred_traj[:, :, 2:3, :, :] - pred_traj[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
-            q_future_gauge = q_future.clone()
-            q_future_gauge[:, :, 2:3, :, :] = q_future_gauge[:, :, 2:3, :, :] - q_future_gauge[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
+            pred_eval[:, :, 2:3, :, :] = pred_eval[:, :, 2:3, :, :] - pred_eval[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
+            gt_eval[:, :, 2:3, :, :] = gt_eval[:, :, 2:3, :, :] - gt_eval[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
 
             # Evaluate trajectory level metrics
-            step30_pred = pred_traj[:, -1]
-            step30_gt = q_future_gauge[:, -1]
+            step30_pred = pred_eval[:, -1]
+            step30_gt = gt_eval[:, -1]
             metrics_step30 = evaluate_field_metrics(step30_pred, step30_gt)
 
-            # Also evaluate cumulative VRMSE across all 30 steps
+            # Cumulative VRMSE across all 30 steps
             all_vrmse = []
             for t in range(max_horizon):
-                step_m = evaluate_field_metrics(pred_traj[:, t], q_future_gauge[:, t])
+                step_m = evaluate_field_metrics(pred_eval[:, t], gt_eval[:, t])
                 all_vrmse.append(step_m["vrmse_mean"])
 
             div_err = compute_divergence(step30_pred[0, 0], step30_pred[0, 1]).pow(2).mean().sqrt().item()
@@ -97,57 +170,52 @@ def analyze_failure_cases(
             vort_gt = compute_vorticity(step30_gt[0, 0], step30_gt[0, 1])
             vort_err = (vort_pred - vort_gt).pow(2).mean().sqrt().item()
 
-            trajectory_records.append(
-                {
-                    "traj_idx": traj_idx,
-                    "re": re.item(),
-                    "sc": sc.item(),
-                    "step30_vrmse": metrics_step30["vrmse_mean"],
-                    "step30_rmse": metrics_step30["rmse_mean"],
-                    "mean_rollout_vrmse": float(np.mean(all_vrmse)),
-                    "step30_div_rmse": div_err,
-                    "step30_vort_rmse": vort_err,
-                    "all_vrmse": all_vrmse,
-                    "pred_step30": step30_pred.cpu().numpy()[0],
-                    "gt_step30": step30_gt.cpu().numpy()[0],
-                }
-            )
+            rec = {
+                "traj_idx": traj_idx,
+                "re": float(re[0].item()) if re is not None else 1e4,
+                "sc": float(sc[0].item()) if sc is not None else 1.0,
+                "mean_vrmse": float(np.mean(all_vrmse)),
+                "step30_vrmse": float(metrics_step30["vrmse_mean"]),
+                "step30_rmse": float(metrics_step30["rmse_mean"]),
+                "step30_div_err": float(div_err),
+                "step30_vort_rmse": float(vort_err),
+                "all_vrmse": all_vrmse,
+                "pred_step30": step30_pred[0].cpu().numpy(),
+                "gt_step30": step30_gt[0].cpu().numpy(),
+            }
+            trajectory_records.append(rec)
 
-    # Sort trajectories by mean_rollout_vrmse
-    sorted_trajs = sorted(trajectory_records, key=lambda x: x["mean_rollout_vrmse"])
+    # Sort trajectories by cumulative 30-step VRMSE
+    sorted_trajs = sorted(trajectory_records, key=lambda x: x["mean_vrmse"])
     best_case = sorted_trajs[0]
-    worst_case = sorted_trajs[-1]
     median_case = sorted_trajs[len(sorted_trajs) // 2]
+    worst_case = sorted_trajs[-1]
 
-    print(f"\n--- Trajectory Error Ranking ---")
-    print(f"Best  Traj #{best_case['traj_idx']}  | Re={best_case['re']:.0f}, Sc={best_case['sc']:.1f} | Mean VRMSE: {best_case['mean_rollout_vrmse']:.4f} | Step30 VRMSE: {best_case['step30_vrmse']:.4f}")
-    print(f"Median Traj #{median_case['traj_idx']} | Re={median_case['re']:.0f}, Sc={median_case['sc']:.1f} | Mean VRMSE: {median_case['mean_rollout_vrmse']:.4f} | Step30 VRMSE: {median_case['step30_vrmse']:.4f}")
-    print(f"Worst Traj #{worst_case['traj_idx']} | Re={worst_case['re']:.0f}, Sc={worst_case['sc']:.1f} | Mean VRMSE: {worst_case['mean_rollout_vrmse']:.4f} | Step30 VRMSE: {worst_case['step30_vrmse']:.4f}")
+    print("\n" + "=" * 80)
+    print("FAILURE CASE AUDIT RESULTS (30-STEP AUTOREGRESSIVE ROLLOUT)")
+    print("=" * 80)
+    print(f"BEST CASE   (# {best_case['traj_idx']:02d}): Re={best_case['re']:.0f}, Sc={best_case['sc']:.1f} | Mean VRMSE: {best_case['mean_vrmse']:.4f} | Step30 VRMSE: {best_case['step30_vrmse']:.4f} | DivErr: {best_case['step30_div_err']:.6f}")
+    print(f"MEDIAN CASE (# {median_case['traj_idx']:02d}): Re={median_case['re']:.0f}, Sc={median_case['sc']:.1f} | Mean VRMSE: {median_case['mean_vrmse']:.4f} | Step30 VRMSE: {median_case['step30_vrmse']:.4f} | DivErr: {median_case['step30_div_err']:.6f}")
+    print(f"WORST CASE  (# {worst_case['traj_idx']:02d}): Re={worst_case['re']:.0f}, Sc={worst_case['sc']:.1f} | Mean VRMSE: {worst_case['mean_vrmse']:.4f} | Step30 VRMSE: {worst_case['step30_vrmse']:.4f} | DivErr: {worst_case['step30_div_err']:.6f}")
 
-    # Plot failure case spatial analysis figure
-    fig, axes = plt.subplots(3, 4, figsize=(18, 12), dpi=200)
-
-    cases = [
-        ("Best Case (Traj #" + str(best_case["traj_idx"]) + ")", best_case),
-        ("Median Case (Traj #" + str(median_case["traj_idx"]) + ")", median_case),
-        ("Worst Failure Case (Traj #" + str(worst_case["traj_idx"]) + ")", worst_case),
+    # Visualization
+    cases_to_plot = [
+        ("Best Case (Lowest VRMSE)", best_case),
+        ("Median Typical Case", median_case),
+        ("Worst Failure Case (Highest VRMSE)", worst_case),
     ]
 
-    for row_idx, (case_title, case_data) in enumerate(cases):
+    fig, axes = plt.subplots(3, 4, figsize=(20, 11), dpi=150)
+
+    for row_idx, (case_title, case_data) in enumerate(cases_to_plot):
         gt = case_data["gt_step30"]
         pred = case_data["pred_step30"]
 
-        # Calculate vorticity for ground truth and prediction
-        # u is channel 0, v is channel 1
         gt_t = torch.from_numpy(gt).unsqueeze(0)
         pred_t = torch.from_numpy(pred).unsqueeze(0)
         vort_gt = compute_vorticity(gt_t[:, 0], gt_t[:, 1])[0].numpy()
         vort_pred = compute_vorticity(pred_t[:, 0], pred_t[:, 1])[0].numpy()
         vort_diff = np.abs(vort_pred - vort_gt)
-
-        tracer_gt = gt[3]
-        tracer_pred = pred[3]
-        tracer_diff = np.abs(tracer_pred - tracer_gt)
 
         # 1. Vorticity GT
         im0 = axes[row_idx, 0].imshow(vort_gt, cmap="RdBu_r")
@@ -202,4 +270,20 @@ def analyze_failure_cases(
 
 
 if __name__ == "__main__":
-    analyze_failure_cases()
+    parser = argparse.ArgumentParser(description="Failure and boundary case analysis.")
+    parser.add_argument("--model_path", type=str, default="outputs/checkpoints/dynamics/ablation_E4_full_physics/best_vrmse_mean.pt")
+    parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
+    parser.add_argument("--split_type", type=str, default="grouped")
+    parser.add_argument("--split_file", type=str, default=None)
+    parser.add_argument("--output_dir", type=str, default="outputs")
+    parser.add_argument("--horizon", type=int, default=30)
+    args = parser.parse_args()
+
+    analyze_failure_cases(
+        model_path=args.model_path,
+        data_dir=args.data_dir,
+        split_type=args.split_type,
+        split_file=args.split_file,
+        output_dir=args.output_dir,
+        max_horizon=args.horizon,
+    )

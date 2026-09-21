@@ -7,5 +7,7 @@
   "valid": [
     "data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5"
   ],
-  "test": []
+  "test": [],
+  "status": "BLOCKED_BY_DATA",
+  "reason": "Only 1 distinct Reynolds number(s) [10000.0] found in local dataset. At least two distinct Re values are strictly required to form a valid out-of-distribution holdout test set. Please download trajectories with Re=1e5 or Re=5e4."
 }

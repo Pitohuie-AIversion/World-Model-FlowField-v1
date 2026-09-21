@@ -12,7 +12,7 @@ import json
 import os
 import sys
 import time
-from typing import Dict
+from typing import Dict, Optional
 
 import torch
 import torch.nn as nn
@@ -39,7 +39,7 @@ class Autoencoder(nn.Module):
         in_channels: int = 4,
         latent_channels: int = 64,
         base_channels: int = 32,
-        project_pressure: bool = True,
+        project_pressure: bool = False,
     ):
         super().__init__()
         self.encoder = Encoder2D(
@@ -91,6 +91,12 @@ def evaluate_autoencoder(
                 x_phys = x
                 recon_phys = recon
 
+            # Enforce physical zero-mean pressure gauge on denormalized fields
+            x_phys = x_phys.clone()
+            recon_phys = recon_phys.clone()
+            x_phys[:, 2] = x_phys[:, 2] - x_phys[:, 2].mean(dim=(-2, -1), keepdim=True)
+            recon_phys[:, 2] = recon_phys[:, 2] - recon_phys[:, 2].mean(dim=(-2, -1), keepdim=True)
+
             b_size = x.shape[0]
             total_samples += b_size
 
@@ -108,8 +114,8 @@ def evaluate_autoencoder(
                 vrmse_sum[c_name] += float(vrmse.item() * b_size)
                 max_err_max[c_name] = max(max_err_max[c_name], float(max_err.item()))
 
-            # Check pressure spatial mean
-            p_recon = recon_phys[:, 2] # (B, Ny, Nx)
+            # Check pressure spatial mean after gauge
+            p_recon = recon_phys[:, 2]  # (B, Ny, Nx)
             p_mean = torch.mean(p_recon, dim=(-2, -1)).abs()
             p_mean_abs_sum += float(p_mean.sum().item())
 
@@ -137,7 +143,9 @@ def evaluate_autoencoder(
 
 
 def run_representation_pipeline(
+    data_dir: str = "/root/autodl-tmp/datasets/shear_flow",
     split_type: str = "grouped",
+    split_file: Optional[str] = None,
     output_dir: str = "outputs/checkpoints/representation",
     metrics_dir: str = "outputs/metrics",
     epochs: int = 20,
@@ -158,10 +166,24 @@ def run_representation_pipeline(
     print("=" * 80)
     print("STAGE 2 / 5: SPATIAL AUTOENCODER (q -> Z -> q_tilde) RECONSTRUCTION")
     print("=" * 80)
-    print(f"Device: {device} | Split: {split_type} | Downsample: {downsample_factor}x")
+    print(f"Device: {device} | Split: {split_type} | Downsample: {downsample_factor}x | Data Root: {data_dir}")
+
+    if split_file is None:
+        if split_type.endswith(".json"):
+            split_file = split_type
+        elif split_type.startswith("outputs/splits/"):
+            split_file = split_type
+        else:
+            candidate = f"outputs/splits/{split_type}.json"
+            if os.path.exists(candidate):
+                split_file = candidate
+            else:
+                split_file = f"outputs/splits/{split_type}_split.json"
 
     train_loader, valid_loader, test_loader, normalizer = create_flow_dataloaders(
         split_type=split_type,
+        split_file=split_file,
+        data_root=data_dir,
         history_length=1,
         horizon=1,
         stride=stride,
@@ -176,7 +198,7 @@ def run_representation_pipeline(
         in_channels=4,
         latent_channels=64,
         base_channels=32,
-        project_pressure=True,
+        project_pressure=False,
     ).to(device)
 
     best_ckpt_path = os.path.join(output_dir, "best_autoencoder.pt")
@@ -232,6 +254,16 @@ def run_representation_pipeline(
 
             state = {
                 "epoch": epoch,
+                "config": {
+                    "in_channels": 4,
+                    "latent_channels": 64,
+                    "base_channels": 32,
+                    "downsample_factor": downsample_factor,
+                    "split_type": split_type,
+                    "data_root": data_dir,
+                    "normalize": True,
+                    "project_pressure": False,
+                },
                 "model_state_dict": model.state_dict(),
                 "encoder_state_dict": model.encoder.state_dict(),
                 "decoder_state_dict": model.decoder.state_dict(),
@@ -290,7 +322,9 @@ def run_representation_pipeline(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train and evaluate Autoencoder representation.")
+    parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--split_type", type=str, default="grouped")
+    parser.add_argument("--split_file", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="outputs/checkpoints/representation")
     parser.add_argument("--metrics_dir", type=str, default="outputs/metrics")
     parser.add_argument("--epochs", type=int, default=15)
@@ -303,7 +337,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_representation_pipeline(
+        data_dir=args.data_dir,
         split_type=args.split_type,
+        split_file=args.split_file,
         output_dir=args.output_dir,
         metrics_dir=args.metrics_dir,
         epochs=args.epochs,

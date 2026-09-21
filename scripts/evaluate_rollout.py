@@ -118,6 +118,28 @@ def run_benchmark(
     device = torch.device(device_str)
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
+    # Experiment Self-Describing Protocol: Inspect checkpoint config before building DataLoader
+    target_ckpt_to_inspect = latent_ckpt_arg
+    if not target_ckpt_to_inspect:
+        step1_ckpt = "outputs/checkpoints/dynamics/latent_transformer/best_vrmse_mean.pt"
+        rollout_ckpt = "outputs/checkpoints/dynamics/stage4_latent_rollout_ddp/latent_transformer/best_vrmse_mean.pt"
+        if os.path.exists(rollout_ckpt):
+            target_ckpt_to_inspect = rollout_ckpt
+        elif os.path.exists(step1_ckpt):
+            target_ckpt_to_inspect = step1_ckpt
+
+    if target_ckpt_to_inspect and os.path.exists(target_ckpt_to_inspect):
+        ckpt_meta = torch.load(target_ckpt_to_inspect, map_location="cpu")
+        ckpt_cfg = ckpt_meta.get("config", {})
+        if "downsample_factor" in ckpt_cfg and downsample_factor != ckpt_cfg["downsample_factor"]:
+            print(f"Notice: Overriding downsample_factor from checkpoint config: {ckpt_cfg['downsample_factor']}")
+            downsample_factor = ckpt_cfg["downsample_factor"]
+        if "normalize" in ckpt_cfg and normalize != ckpt_cfg["normalize"]:
+            print(f"Notice: Overriding normalize from checkpoint config: {ckpt_cfg['normalize']}")
+            normalize = ckpt_cfg["normalize"]
+        if split_file is None and "split_type" in ckpt_cfg and split_type == "grouped":
+            split_type = ckpt_cfg["split_type"]
+
     if split_file is None:
         if split_type.endswith(".json"):
             split_file = split_type
