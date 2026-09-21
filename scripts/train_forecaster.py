@@ -137,6 +137,7 @@ def train_forecaster(
     lr: float = 1e-4,
     lambda_div: float = 0.0,
     lambda_vort: float = 0.0,
+    field_loss_space: str = "normalized",
     seed: int = 42,
     preload_to_memory: bool = False,
     num_workers: int = 4,
@@ -167,7 +168,16 @@ def train_forecaster(
         os.makedirs(output_dir, exist_ok=True)
 
     if split_file is None:
-        split_file = f"outputs/splits/{split_type}_split.json"
+        if split_type.endswith(".json"):
+            split_file = split_type
+        elif split_type.startswith("outputs/splits/"):
+            split_file = split_type
+        else:
+            candidate = f"outputs/splits/{split_type}.json"
+            if os.path.exists(candidate):
+                split_file = candidate
+            else:
+                split_file = f"outputs/splits/{split_type}_split.json"
 
     train_loader, valid_loader, test_loader, normalizer, train_sampler = create_flow_dataloaders(
         split_type=split_type,
@@ -193,14 +203,21 @@ def train_forecaster(
     # Initialize model
     if model_type == "latent_transformer":
         encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
-        decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=True)
+        # Pressure gauge projection is performed on denormalized physical fields, keep decoder raw
+        decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=False)
         if os.path.exists(repr_checkpoint):
             if global_rank == 0:
                 print(f"Loading pretrained representation weights from {repr_checkpoint}")
             ckpt = torch.load(repr_checkpoint, map_location="cpu")
-            if "encoder_state_dict" in ckpt:
-                encoder.load_state_dict(ckpt["encoder_state_dict"])
-                decoder.load_state_dict(ckpt["decoder_state_dict"])
+            required_keys = {"encoder_state_dict", "decoder_state_dict"}
+            missing_keys = required_keys - set(ckpt.keys())
+            if missing_keys:
+                raise KeyError(
+                    f"Representation checkpoint at '{repr_checkpoint}' is missing required keys: {sorted(list(missing_keys))}. "
+                    f"Keys found: {list(ckpt.keys())}. Aborting to avoid training with uninitialized/random frozen weights!"
+                )
+            encoder.load_state_dict(ckpt["encoder_state_dict"])
+            decoder.load_state_dict(ckpt["decoder_state_dict"])
         elif freeze_representation:
             raise FileNotFoundError(
                 f"Representation checkpoint '{repr_checkpoint}' does not exist! "
@@ -318,7 +335,14 @@ def train_forecaster(
                             hist_window = torch.cat([hist_window[:, 1:], step_pred], dim=1)
                         pred = torch.cat(pred_list, dim=1)  # (B, H, C, Ny, Nx)
 
-                loss = rollout_loss_fn(pred, q_future)
+                if field_loss_space == "physical" and normalizer is not None:
+                    pred_field_loss = normalizer.denormalize(pred)
+                    target_field_loss = normalizer.denormalize(q_future)
+                else:
+                    pred_field_loss = pred
+                    target_field_loss = q_future
+
+                loss = rollout_loss_fn(pred_field_loss, target_field_loss)
 
                 # Physics losses must strictly be computed in physical dimensional space
                 if lambda_div > 0 or lambda_vort > 0:
@@ -386,6 +410,10 @@ def train_forecaster(
                             pred_eval = pred
                             target_eval = q_future
 
+                        # Enforce zero-mean pressure gauge in physical space
+                        pred_eval[:, :, 2:3, :, :] = pred_eval[:, :, 2:3, :, :] - pred_eval[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
+                        target_eval[:, :, 2:3, :, :] = target_eval[:, :, 2:3, :, :] - target_eval[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
+
                         b_samples = len(q_hist)
                         for h in range(horizon):
                             step_m = evaluate_field_metrics(pred_eval[:, h], target_eval[:, h])
@@ -449,6 +477,7 @@ def train_forecaster(
                     "freeze_representation": freeze_representation,
                     "lambda_div": lambda_div,
                     "lambda_vort": lambda_vort,
+                    "field_loss_space": field_loss_space,
                     "lr": lr,
                     "batch_size": batch_size,
                     "train_stride": train_stride,
@@ -480,7 +509,12 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--output_dir", type=str, default="outputs/checkpoints/dynamics")
     parser.add_argument("--repr_checkpoint", type=str, default="outputs/checkpoints/representation/best_vrmse_mean.pt")
-    parser.add_argument("--split_type", type=str, default="grouped", choices=["grouped", "official"])
+    parser.add_argument(
+        "--split_type",
+        type=str,
+        default="grouped",
+        choices=["grouped", "official", "parameter_holdout_re", "parameter_holdout_sc", "parameter_holdout_split"],
+    )
     parser.add_argument("--split_file", type=str, default=None)
     parser.add_argument("--train_stride", type=int, default=2)
     parser.add_argument("--valid_stride", type=int, default=8)
@@ -496,6 +530,13 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--lambda_div", type=float, default=0.0)
     parser.add_argument("--lambda_vort", type=float, default=0.0)
+    parser.add_argument(
+        "--field_loss_space",
+        type=str,
+        default="normalized",
+        choices=["normalized", "physical"],
+        help="Space to compute field prediction loss: 'normalized' (balanced channel variance) or 'physical'.",
+    )
     parser.add_argument("--embed_dim", type=int, default=256)
     parser.add_argument("--depth", type=int, default=6)
     parser.add_argument("--num_heads", type=int, default=8)
@@ -527,6 +568,7 @@ if __name__ == "__main__":
         lr=args.lr,
         lambda_div=args.lambda_div,
         lambda_vort=args.lambda_vort,
+        field_loss_space=args.field_loss_space,
         embed_dim=args.embed_dim,
         depth=args.depth,
         num_heads=args.num_heads,

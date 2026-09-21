@@ -55,7 +55,7 @@ def analyze_failure_cases(
 
     # Load Model
     encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
-    decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=True)
+    decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=False)
     transformer = LatentSTTransformer(
         latent_channels=64, embed_dim=256, cond_dim=128, depth=6, num_heads=8, history_length=4
     )
@@ -76,16 +76,20 @@ def analyze_failure_cases(
             sc = batch["sc"].to(device)
 
             pred_traj = model.forward_rollout(q_hist, re, sc, horizon=max_horizon)
+            # Enforce zero-mean pressure gauge in physical space
+            pred_traj[:, :, 2:3, :, :] = pred_traj[:, :, 2:3, :, :] - pred_traj[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
+            q_future_gauge = q_future.clone()
+            q_future_gauge[:, :, 2:3, :, :] = q_future_gauge[:, :, 2:3, :, :] - q_future_gauge[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
 
             # Evaluate trajectory level metrics
             step30_pred = pred_traj[:, -1]
-            step30_gt = q_future[:, -1]
+            step30_gt = q_future_gauge[:, -1]
             metrics_step30 = evaluate_field_metrics(step30_pred, step30_gt)
 
             # Also evaluate cumulative VRMSE across all 30 steps
             all_vrmse = []
             for t in range(max_horizon):
-                step_m = evaluate_field_metrics(pred_traj[:, t], q_future[:, t])
+                step_m = evaluate_field_metrics(pred_traj[:, t], q_future_gauge[:, t])
                 all_vrmse.append(step_m["vrmse_mean"])
 
             div_err = compute_divergence(step30_pred[0, 0], step30_pred[0, 1]).pow(2).mean().sqrt().item()

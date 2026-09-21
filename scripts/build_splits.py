@@ -75,27 +75,53 @@ def build_and_save_splits(
     print(f"  Grouped Valid trajectories: {len(grouped['valid'])} across {grouped['metadata']['valid_clusters']} clusters")
     print(f"  Grouped Test trajectories:  {len(grouped['test'])} across {grouped['metadata']['test_clusters']} clusters")
 
-    # 3. Parameter Holdout Split
-    # If the requested holdout parameters aren't found in current subset, auto-detect holdout parameter
+    # 3. Parameter Holdout Splits (Separated by physical mechanism: Re for Dynamics, Sc for Transport)
+    available_res = {parse_shear_flow_filename(f)["re"] for f in rel_all_files}
     available_scs = {parse_shear_flow_filename(f)["sc"] for f in rel_all_files}
-    actual_holdout_sc = holdout_sc
-    if holdout_sc not in available_scs and len(available_scs) > 1:
-        actual_holdout_sc = max(available_scs)
-        print(f"Notice: holdout_sc={holdout_sc} not in current files. Using Sc={actual_holdout_sc} as holdout parameter.")
 
+    # 3A. Reynolds Holdout Split (OOD Dynamics)
+    actual_holdout_re = holdout_re if holdout_re in available_res else (max(available_res) if len(available_res) > 1 else None)
+    if actual_holdout_re is not None:
+        holdout_re_split = SplitManager.get_parameter_holdout_re_split(
+            all_files=rel_all_files,
+            holdout_re=actual_holdout_re,
+            valid_ratio=0.1,
+        )
+    else:
+        holdout_re_split = SplitManager.get_parameter_holdout_re_split(rel_all_files, holdout_re=1e5, valid_ratio=0.1)
+    re_path = os.path.join(output_dir, "parameter_holdout_re.json")
+    with open(re_path, "w") as f:
+        json.dump(holdout_re_split, f, indent=2)
+    print(f"Exported Re Parameter Holdout Split (Holdout Re={actual_holdout_re}) to: {re_path}")
+    print(f"  Holdout Re Train: {len(holdout_re_split['train'])}, Valid: {len(holdout_re_split['valid'])}, Test: {len(holdout_re_split['test'])}")
+
+    # 3B. Schmidt Holdout Split (OOD Scalar Transport)
+    actual_holdout_sc = holdout_sc if holdout_sc in available_scs else (max(available_scs) if len(available_scs) > 1 else None)
+    if actual_holdout_sc is not None:
+        holdout_sc_split = SplitManager.get_parameter_holdout_sc_split(
+            all_files=rel_all_files,
+            holdout_sc=actual_holdout_sc,
+            valid_ratio=0.1,
+        )
+    else:
+        holdout_sc_split = SplitManager.get_parameter_holdout_sc_split(rel_all_files, holdout_sc=1.0, valid_ratio=0.1)
+    sc_path = os.path.join(output_dir, "parameter_holdout_sc.json")
+    with open(sc_path, "w") as f:
+        json.dump(holdout_sc_split, f, indent=2)
+    print(f"Exported Sc Parameter Holdout Split (Holdout Sc={actual_holdout_sc}) to: {sc_path}")
+    print(f"  Holdout Sc Train: {len(holdout_sc_split['train'])}, Valid: {len(holdout_sc_split['valid'])}, Test: {len(holdout_sc_split['test'])}")
+
+    # 3C. General Holdout Split (Backward compatibility)
     holdout = SplitManager.get_parameter_holdout_split(
         all_files=rel_all_files,
-        holdout_re=holdout_re if holdout_re in {parse_shear_flow_filename(f)["re"] for f in rel_all_files} else None,
+        holdout_re=actual_holdout_re if len(available_res) > 1 else None,
         holdout_sc=actual_holdout_sc,
         valid_ratio=0.1,
     )
     hold_path = os.path.join(output_dir, "parameter_holdout_split.json")
     with open(hold_path, "w") as f:
         json.dump(holdout, f, indent=2)
-    print(f"Exported Parameter Holdout Split (Holdout Sc={actual_holdout_sc}) to: {hold_path}")
-    print(f"  Holdout Train files: {len(holdout['train'])}")
-    print(f"  Holdout Valid files: {len(holdout['valid'])}")
-    print(f"  Holdout Test files:  {len(holdout['test'])}")
+    print(f"Exported Combined Parameter Holdout Split to: {hold_path}")
 
 
 if __name__ == "__main__":

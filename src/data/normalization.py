@@ -72,6 +72,9 @@ class FieldNormalizer(nn.Module):
 
         mean = self.mean.to(x.device)
         std = self.std.to(x.device)
+        if mean.ndim == 1:
+            mean = mean.view(1, -1, 1, 1)
+            std = std.view(1, -1, 1, 1)
         if x.ndim == 5 and mean.ndim == 4:
             mean = mean.unsqueeze(1)
             std = std.unsqueeze(1)
@@ -85,6 +88,9 @@ class FieldNormalizer(nn.Module):
 
         mean = self.mean.to(x.device)
         std = self.std.to(x.device)
+        if mean.ndim == 1:
+            mean = mean.view(1, -1, 1, 1)
+            std = std.view(1, -1, 1, 1)
         if x.ndim == 5 and mean.ndim == 4:
             mean = mean.unsqueeze(1)
             std = std.unsqueeze(1)

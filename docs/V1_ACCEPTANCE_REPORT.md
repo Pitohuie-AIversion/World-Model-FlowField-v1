@@ -1,10 +1,10 @@
 # 流场世界模型 V1 阶段全链验收报告与 10 月任务规划
 
-> **报告日期**：2026-09-20  
+> **报告日期**：2026-09-21  
 > **项目名称**：World-Model-FlowField-v1  
 > **验收基准**：The Well `shear_flow` 2D 周期剪切流（不可压缩 Navier-Stokes + 被动示踪标量输运）  
 > **计算环境**：NVIDIA vGPU-32GB × 2 (CUDA 13.0, PyTorch 2.10.0+cu128)  
-> **代码与测试状态**：代码规范审查通过，单元测试 **40/40 项 100% 绿灯 PASS**  
+> **代码与测试状态**：代码规范审查通过，单元测试 **45/45 项 100% 绿灯 PASS**  
 
 ---
 
@@ -17,7 +17,7 @@
 | **Stage 1** | 数据基座与防泄漏划分 | `src/data/shear_flow_dataset.py`<br>`outputs/splits/grouped_split.json` | 隔离跨 $Sc$ 轨迹流场泄漏缺陷，归一化对数变换映射 | **PASS** |
 | **Stage 2** | 空间潜流形编码与解码 | `src/models/encoder.py`<br>`src/models/decoder.py` | 64x 空间特征压缩，双向周期卷积，压力零均值绝对误差 $< 2.5 \times 10^{-7}$ | **PASS** |
 | **Stage 3** | 时空 Transformer 与物理条件 | `src/models/latent_transformer.py`<br>`src/models/conditioning.py` | 因子化时空自注意力，AdaLN-Zero 调制，冷启动平稳训练 | **PASS** |
-| **基线体系** | 统一标准竞技场 | `src/baselines/fno.py`<br>`src/baselines/pde_transformer.py` | 统一输入输出接口契约，构建公平对比评测基线池 | **PASS** |
+| **基线体系** | 统一标准竞技场 | `src/baselines/fno.py`<br>`src/models/direct_transformer.py` | 统一输入输出接口契约，构建公平对比评测基线池 | **PASS** |
 | **Stage 4** | 纯潜空间自由滚动机制 | `src/models/history_buffer.py`<br>`scripts/train_forecaster.py` | FIFO 纯潜状态推演，双卡 DDP 长训（$H=2$），**单步 VRMSE 暴降 80.5%（0.3481）** | **PASS** |
 | **Stage 6** | 周期谱导数与独立物理指标 | `src/utils/fft_derivatives.py`<br>`src/metrics/rollout.py` | 2D 周期谱梯度、散度、涡量与拉普拉斯算子（**解析解误差 $1.40 \times 10^{-12}$**） | **PASS** |
 | **消融分析** | 物理损失消融实验 (E0-E4) | `scripts/run_physics_ablation.py`<br>`outputs/figures/physics_ablation_curves.png` | 双卡并发调度，**单步散度降低 84.5%，Step 10 相对误差降低 92.0%，Step 30 场 RMSE 达 0.1774（学习型模型中最优）** | **PASS** |
@@ -32,7 +32,7 @@
 | 模型架构 (Model) | 机制特性 | Step 1 VRMSE | Step 10 VRMSE | Step 30 VRMSE | Step 30 散度 RMSE | Step 30 涡量 RMSE | Step 30 场 RMSE | 30 步动力学行为综合评定 |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 | **Persistence (B0)** | 恒等惯性基准 | 0.0299 | 0.2294 | 0.4879 | 4.6998 | 0.4630 | 0.1623 | 物理演化零响应，仅作静态参考下界 |
-| **PDE-Transformer (B2)** | 物理网格切片直接预测 | 0.8511 | 6.3670 | 26.8328 | **89.7318** | **81.1527** | 0.9457 | 数值失稳：高频数值色散失控，速度场撕裂严重 |
+| **Direct ST Transformer (B2)** | 物理网格切片直接预测 | 0.8511 | 6.3670 | 26.8328 | **89.7318** | **81.1527** | 0.9457 | 数值失稳：高频数值色散失控，速度场撕裂严重 |
 | **FNO-2D (B1)** | 复数谱域卷积神经算子 | 0.6450 | **0.8385** | **1.0720** | 0.0389 | 0.7961 | 0.3336 | 频带截断，扩散平滑，缺乏小尺度旋涡细节 |
 | **Latent Transformer**<br>*(单步训练底座)* | 纯数据驱动潜流形 | 1.7842 | 13.1239 | 4.5429 | **0.0062** | 0.9941 | 0.4305 | 潜空间阻隔网格色散，散度自然闭环收敛 |
 | **Latent World Model**<br>*(H=2 短程滚动监督)* | 多步自回归时序反传 | **0.3481** | 154.6342 | 117.4685 | 2.3881 | 3.9316 | 0.5716 | **学习模型中单步精度最优（VRMSE 0.3481，场 RMSE 0.0048）**，但长程缺乏物理正则化存在累积发散 |
@@ -76,11 +76,11 @@
   1. **主链架构与算子完备**：成功构建 $64\times$ 潜流形自编码器、双向周期卷积、非就地零均值压力投影与因子化时空解耦 Transformer；
   2. **物理守恒正则化显著**：引入 FFT 谱导数物理损失后，Step 10 相对误差降低 92.0%，Step 30 真实场误差降至 0.1774（学习型模型中表现最佳），有效压制高频数值发散；
   3. **数据协议与代码治理收口**：已统一数据加载流（`create_flow_dataloaders` + 相对路径 `grouped_split.json` + 训练集拟合 `FieldNormalizer`）；
-  4. **工程健壮性与测试**：单元测试 **40/40 项 100% 绿灯 PASS**，多步展开验证以整段 Rollout 平均 VRMSE 选优，物理损失严格在反归一化物理量纲空间计算，CI 工作流与测试 Fixture 彻底解耦外部真实数据集。
+  4. **工程健壮性与协议契约**：单元测试 **45/45 项 100% 绿灯 PASS**；完成 6 项核心协议治理（P1-1 场值优化空间契约、P1-2 物理空间零均值压力 Gauge、P1-3 预训练权重 Fail-Closed 校验、P1-4 Normalizer 窗口超参解耦不变性、P1-5 & P1-6 Reynolds 动力学与 Schmidt 示踪输运参数留出划分独立全线打通）；CI 工作流与测试 Fixture 彻底解耦外部真实数据集。
 - **条件待补项 (CONDITIONS)**：
-  1. **课程式自由滚动覆盖**：除 $H=2$ 外，需完成 $H=4$ 和 $H=8$ 的自由滚动长训并固化权重与指标；
-  2. **系统性消融闭环**：按重构后的 `run_ablation.py` 与 `run_physics_ablation.py` 完成 Frozen vs Joint、Direct vs Residual、State-only vs Condition-aware 以及 E0 vs E1-E4 的对照训练。
-  （待上述条件项训练产出落盘后，更新为终局正式 PASS）。
+  1. **消融实验框架 PASS，大盘重跑 PENDING**：消融实验调度流水线与协议已全部冻结就绪，待按新协议执行全量长程训练与重跑（Frozen vs Joint、Direct vs Residual、State-only vs Condition-aware 以及 E0 vs E1-E4 对照）；
+  2. **课程式自由滚动覆盖**：完成 $H=4$ 和 $H=8$ 的自由滚动长训并固化终局权重与指标。
+  （待上述超参长跑任务完成后，更新为终局正式 PASS）。
 
 ## 五、 10 月份下一轮研发任务规划 (October Roadmap)
 

@@ -61,13 +61,15 @@ q(x + L_x, y, t) = q(x, y, t), \quad q(x, y + L_y, t) = q(x, y, t)
 \]
 编解码器中所有 2D 卷积和转置卷积层均显式采用 `padding_mode="circular"`，彻底消除了常规零填充在边界处引发的非物理虚假剪切层与局部数值反射。
 
-### 2.3 压力规范正交投影 (Zero-Mean Pressure Projection)
-Navier-Stokes 方程中不可压缩速度场仅取决于压力梯度 $\nabla p$，绝对压力具有规范自由度（Gauge Freedom $\int_\Omega p \, dx dy = 0$）。
-解码器在输出端集成了非就地（Out-of-place）压力投影操作：
+### 2.3 压力规范正交投影契约 (Zero-Mean Pressure Projection Policy)
+Navier-Stokes 方程中不可压缩速度场仅取决于压力梯度 $\nabla p$，绝对压力具有物理规范自由度（Gauge Freedom $\int_\Omega p \, dx dy = 0$）。
+在协议治理升级后（Protocol P1-2）：
+1. **Decoder 保持纯净特征表达**：`Decoder2D` 采用未投影输出（`project_pressure=False`），避免在归一化特征空间强行去均值后因反归一化偏置重新引入均值漂移；
+2. **反归一化物理空间正交投影**：在反归一化至真实物理空间后（或在物理评估阶段），严格施加非就地物理压力投影：
 \[
 p_{\text{proj}}(x, y) = p(x, y) - \frac{1}{|\Omega|}\iint_\Omega p(x', y') \, dx' dy'
 \]
-该操作采用微分图可追踪的张量拼接实现，既满足了 Dedalus 求解器的物理基准定义，又确保了反向传播梯度的无损流动。
+该设计同时满足了 Dedalus 谱方法求解器的零积分压力基准定义，又确保了特征空间梯度流动的完整性。
 
 ---
 
@@ -116,12 +118,14 @@ p_{\text{proj}}(x, y) = p(x, y) - \frac{1}{|\Omega|}\iint_\Omega p(x', y') \, dx
 - **速度散度**：$\nabla \cdot \mathbf{u} = \frac{\partial u}{\partial x} + \frac{\partial v}{\partial y}$
 - **涡量场**：$\omega = \nabla \times \mathbf{u} = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}$
 
-### 5.2 物理守恒损失穿透与反向传播
-在训练推演阶段，将预测物理场送入守恒损失函数：
+### 5.2 物理守恒损失穿透与反向传播空间契约 (Protocol P1-1)
+在训练推演阶段，将预测输出与真值送入联合损失函数：
 \[
 \mathcal{L}_{\text{total}} = \mathcal{L}_{\text{field}} + \lambda_{\text{div}} \frac{1}{|\Omega|} \iint \|\nabla \cdot \mathbf{u}\|^2 dx dy + \lambda_{\omega} \frac{1}{|\Omega|} \iint \|\omega - \omega^*\|^2 dx dy
 \]
-由于 Decoder 内部完全采用标准可微卷积与激活层，即使在微调阶段冻结 Decoder 参数，物理梯度的雅可比链式法则仍能无损穿透至潜状态：
+- **$\mathcal{L}_{\text{field}}$ 优化空间**：默认在标准化特征空间（Normalized Space）计算，相当于按各通道方差的倒数 $1/\sigma_c^2$ 进行马氏加权，有效避免压力通道小方差（$\sim 10^{-4}$）导致的梯度淹没；
+- **物理微分损失空间**：速度散度与涡量守恒约束具备明确物理量纲，**严格且始终在反归一化物理场上计算**；
+- **梯度穿透**：由于 Decoder 内部完全采用标准可微卷积与激活层，即使在微调阶段冻结 Decoder 参数，物理梯度的雅可比链式法则仍能无损穿透至潜状态：
 \[
 \frac{\partial \mathcal{L}_{\text{div}}}{\partial Z} = \left( \frac{\partial q}{\partial Z} \right)^T \frac{\partial \mathcal{L}_{\text{div}}}{\partial q}
 \]

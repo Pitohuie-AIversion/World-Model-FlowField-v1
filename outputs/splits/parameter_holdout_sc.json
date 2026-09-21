@@ -1,0 +1,12 @@
+{
+  "train": [
+    "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+    "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5"
+  ],
+  "valid": [
+    "data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5"
+  ],
+  "test": [
+    "data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5"
+  ]
+}

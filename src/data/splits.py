@@ -160,24 +160,78 @@ class SplitManager:
         }
 
     @staticmethod
-    def get_parameter_holdout_split(
+    def get_parameter_holdout_re_split(
         all_files: List[str],
-        holdout_re: Optional[float] = 1e5,
-        holdout_sc: Optional[float] = 10.0,
+        holdout_re: float = 1e5,
         valid_ratio: float = 0.1,
     ) -> Dict[str, List[str]]:
-        """Strategy 3: Parameter Holdout Split.
+        """Strategy 3A: Reynolds Parameter Holdout Split.
 
-        All trajectories containing holdout_re OR holdout_sc are reserved strictly
-        for zero-shot generalization testing and never seen during training.
-        Remaining parameter combinations are split into train and valid sets.
+        Trajectories matching holdout_re are reserved exclusively for out-of-distribution
+        dynamics generalization testing. Remaining parameters are split into train/valid.
         """
         train_pool = []
         holdout_test = []
 
         for f in all_files:
             params = parse_shear_flow_filename(f)
-            # Check if matching holdout condition (using float tolerance)
+            if abs(params["re"] - holdout_re) / max(holdout_re, 1e-4) < 1e-4:
+                holdout_test.append(f)
+            else:
+                train_pool.append(f)
+
+        train_pool = sorted(train_pool)
+        n_valid = max(1, int(len(train_pool) * valid_ratio)) if len(train_pool) > 1 else 0
+
+        return {
+            "train": train_pool[:-n_valid] if n_valid > 0 else train_pool,
+            "valid": train_pool[-n_valid:] if n_valid > 0 else [],
+            "test": sorted(holdout_test),
+        }
+
+    @staticmethod
+    def get_parameter_holdout_sc_split(
+        all_files: List[str],
+        holdout_sc: float = 1.0,
+        valid_ratio: float = 0.1,
+    ) -> Dict[str, List[str]]:
+        """Strategy 3B: Schmidt Parameter Holdout Split.
+
+        Trajectories matching holdout_sc are reserved exclusively for out-of-distribution
+        scalar transport/diffusion generalization testing.
+        """
+        train_pool = []
+        holdout_test = []
+
+        for f in all_files:
+            params = parse_shear_flow_filename(f)
+            if abs(params["sc"] - holdout_sc) / max(holdout_sc, 1e-4) < 1e-4:
+                holdout_test.append(f)
+            else:
+                train_pool.append(f)
+
+        train_pool = sorted(train_pool)
+        n_valid = max(1, int(len(train_pool) * valid_ratio)) if len(train_pool) > 1 else 0
+
+        return {
+            "train": train_pool[:-n_valid] if n_valid > 0 else train_pool,
+            "valid": train_pool[-n_valid:] if n_valid > 0 else [],
+            "test": sorted(holdout_test),
+        }
+
+    @staticmethod
+    def get_parameter_holdout_split(
+        all_files: List[str],
+        holdout_re: Optional[float] = None,
+        holdout_sc: Optional[float] = 1.0,
+        valid_ratio: float = 0.1,
+    ) -> Dict[str, List[str]]:
+        """Strategy 3: General Parameter Holdout Split (backward compatible)."""
+        train_pool = []
+        holdout_test = []
+
+        for f in all_files:
+            params = parse_shear_flow_filename(f)
             is_holdout_re = holdout_re is not None and abs(params["re"] - holdout_re) / max(holdout_re, 1e-4) < 1e-4
             is_holdout_sc = holdout_sc is not None and abs(params["sc"] - holdout_sc) / max(holdout_sc, 1e-4) < 1e-4
 
@@ -185,13 +239,6 @@ class SplitManager:
                 holdout_test.append(f)
             else:
                 train_pool.append(f)
-
-        if not holdout_test and all_files:
-            import warnings
-            warnings.warn(
-                f"No files matched holdout criteria (holdout_re={holdout_re}, holdout_sc={holdout_sc}). "
-                f"Parameter holdout test set will be empty."
-            )
 
         train_pool = sorted(train_pool)
         n_valid = max(1, int(len(train_pool) * valid_ratio)) if len(train_pool) > 1 else 0

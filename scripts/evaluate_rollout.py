@@ -82,6 +82,10 @@ def evaluate_model_rollout(
                 pred_eval = pred_traj
                 future_eval = q_future
 
+            # Enforce zero-mean pressure gauge in physical space
+            pred_eval[:, :, 2:3, :, :] = pred_eval[:, :, 2:3, :, :] - pred_eval[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
+            future_eval[:, :, 2:3, :, :] = future_eval[:, :, 2:3, :, :] - future_eval[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
+
             # Evaluate metrics at designated steps
             batch_res = evaluate_rollout_trajectory(pred_eval, future_eval, evaluation_steps=eval_steps)
             for step_key, step_data in batch_res.items():
@@ -115,7 +119,16 @@ def run_benchmark(
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     if split_file is None:
-        split_file = f"outputs/splits/{split_type}_split.json"
+        if split_type.endswith(".json"):
+            split_file = split_type
+        elif split_type.startswith("outputs/splits/"):
+            split_file = split_type
+        else:
+            candidate = f"outputs/splits/{split_type}.json"
+            if os.path.exists(candidate):
+                split_file = candidate
+            else:
+                split_file = f"outputs/splits/{split_type}_split.json"
 
     normalizer = None
     if os.path.exists(split_file):
@@ -195,7 +208,7 @@ def run_benchmark(
             print(f"  [Checkpoint Config] prediction_mode='{pred_mode}', use_condition={use_cond}, embed_dim={emb_dim}, depth={d_depth}, num_heads={n_heads}")
 
             encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
-            decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=True)
+            decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=False)
             transformer = LatentSTTransformer(
                 latent_channels=64,
                 embed_dim=emb_dim,
@@ -302,7 +315,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate multi-step autoregressive rollouts.")
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--output_file", type=str, default="outputs/metrics/rollout_benchmark.json")
-    parser.add_argument("--split_type", type=str, default="grouped", choices=["grouped", "official"])
+    parser.add_argument(
+        "--split_type",
+        type=str,
+        default="grouped",
+        choices=["grouped", "official", "parameter_holdout_re", "parameter_holdout_sc", "parameter_holdout_split"],
+    )
     parser.add_argument("--split_file", type=str, default=None)
     parser.add_argument("--downsample_factor", type=int, default=2, help="Spatial downsampling factor (default: 2 for 128x256)")
     parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True)

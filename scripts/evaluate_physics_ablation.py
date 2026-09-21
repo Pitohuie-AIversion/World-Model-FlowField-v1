@@ -36,7 +36,10 @@ def evaluate_single_ablation(model, test_loader, device, max_horizon=30, eval_st
             total_samples += b
 
             pred_traj = model.forward_rollout(q_hist, re, sc, horizon=max_horizon)
-            batch_res = evaluate_rollout_trajectory(pred_traj, q_future, evaluation_steps=eval_steps)
+            pred_traj[:, :, 2:3, :, :] = pred_traj[:, :, 2:3, :, :] - pred_traj[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
+            q_future_gauge = q_future.clone()
+            q_future_gauge[:, :, 2:3, :, :] = q_future_gauge[:, :, 2:3, :, :] - q_future_gauge[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
+            batch_res = evaluate_rollout_trajectory(pred_traj, q_future_gauge, evaluation_steps=eval_steps)
 
             for step_key, step_data in batch_res.items():
                 for m_key, m_val in step_data.items():
@@ -101,7 +104,7 @@ def run_physics_ablation_eval(
 
         print(f"\n--- Evaluating Ablation Model [{name}] ({ckpt_path}) ---")
         encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
-        decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=True)
+        decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=False)
         transformer = LatentSTTransformer(
             latent_channels=64, embed_dim=256, cond_dim=128, depth=6, num_heads=8, history_length=4
         )
