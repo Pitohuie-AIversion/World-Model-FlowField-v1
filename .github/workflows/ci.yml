@@ -5,7 +5,10 @@ on:
     branches: [ main ]
     paths-ignore:
       - 'docs/**'
-      - 'outputs/**'
+      - 'outputs/checkpoints/**'
+      - 'outputs/figures/**'
+      - 'outputs/metrics/**'
+      - 'outputs/*.log'
       - '*.md'
       - 'LICENSE'
   pull_request:
