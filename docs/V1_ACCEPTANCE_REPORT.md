@@ -4,7 +4,7 @@
 > **项目名称**：World-Model-FlowField-v1  
 > **验收基准**：The Well `shear_flow` 2D 周期剪切流（不可压缩 Navier-Stokes + 被动示踪标量输运）  
 > **计算环境**：NVIDIA vGPU-32GB × 2 (CUDA 13.0, PyTorch 2.10.0+cu128)  
-> **代码与测试状态**：代码规范审查通过，单元测试 **45/45 项 100% 绿灯 PASS**  
+> **代码与测试状态**：代码规范审查通过，自动化契约与单元测试 **56/56 项 100% 绿灯 PASS**  
 
 ---
 
@@ -14,20 +14,20 @@
 
 | 阶段 | 核心任务 | 交付物与代码位置 | 实测关键指标 | 验收结论 |
 | :--- | :--- | :--- | :--- | :---: |
-| **Stage 1** | 数据基座与防泄漏划分 | `src/data/shear_flow_dataset.py`<br>`outputs/splits/grouped_split.json` | 隔离跨 $Sc$ 轨迹流场泄漏缺陷，归一化对数变换映射 | **PASS** |
-| **Stage 2** | 空间潜流形编码与解码 | `src/models/encoder.py`<br>`src/models/decoder.py` | 64x 空间特征压缩，双向周期卷积，压力零均值绝对误差 $< 2.5 \times 10^{-7}$ | **PASS** |
+| **Stage 1** | 数据基座与防泄漏划分 | `src/data/shear_flow_dataset.py`<br>`outputs/splits/grouped_split.json` | 隔离跨 $Sc$ 轨迹流场泄漏缺陷，归一化对数变换映射，支持 Normalizer Hash 校验 | **PASS** |
+| **Stage 2** | 空间潜流形编码与解码 | `src/models/encoder.py`<br>`src/models/decoder.py` | 64x 空间特征压缩，双向周期卷积，解码器解耦压力投影，评估阶段实施物理零均值 | **PASS** |
 | **Stage 3** | 时空 Transformer 与物理条件 | `src/models/latent_transformer.py`<br>`src/models/conditioning.py` | 因子化时空自注意力，AdaLN-Zero 调制，冷启动平稳训练 | **PASS** |
-| **基线体系** | 统一标准竞技场 | `src/baselines/fno.py`<br>`src/models/direct_transformer.py` | 统一输入输出接口契约，构建公平对比评测基线池 | **PASS** |
+| **基线体系** | 统一标准竞技场 | `src/baselines/fno.py`<br>`src/models/direct_transformer.py` | 统一输入输出接口契约与 Benchmark 数据协议一致性强校验 | **PASS** |
 | **Stage 4** | 纯潜空间自由滚动机制 | `src/models/history_buffer.py`<br>`scripts/train_forecaster.py` | FIFO 纯潜状态推演，双卡 DDP 长训（$H=2$），**单步 VRMSE 暴降 80.5%（0.3481）** | **PASS** |
 | **Stage 6** | 周期谱导数与独立物理指标 | `src/utils/fft_derivatives.py`<br>`src/metrics/rollout.py` | 2D 周期谱梯度、散度、涡量与拉普拉斯算子（**解析解误差 $1.40 \times 10^{-12}$**） | **PASS** |
-| **消融分析** | 物理损失消融实验 (E0-E4) | `scripts/run_physics_ablation.py`<br>`outputs/figures/physics_ablation_curves.png` | 双卡并发调度，**单步散度降低 84.5%，Step 10 相对误差降低 92.0%，Step 30 场 RMSE 达 0.1774（学习型模型中最优）** | **PASS** |
+| **消融分析** | 物理消融体系 (E0-E4) | `scripts/evaluate_physics_ablation.py`<br>`outputs/figures/physics_ablation_curves.png` | 消融评测流水线规范就绪（Closure-R1 历史基准归档 ARCHIVED；Closure-R2 E0-E4 全量重跑 PENDING） | **PASS WITH CONDITIONS** |
 
 ---
 
 ## 二、 全模型与基线横向竞技大盘（30 步滚动全量实测）
 
 > **实验协议说明**：
-> 下表展示之定量数值来源于协议升级前（Closure-R1）的历史评测基准，仅供架构对照参考。在长程展开中，Persistence Baseline 作为恒等惯性参考提供了静态参考下界（Step 30 场 RMSE 0.1623），但因其对物理演化零响应，无法反映流动结构变化；在所有学习型神经模型中，Latent World Model 在引入谱导数双重物理守恒约束后，有效消除了空间色散与高频发散，在学习型模型中达到最优演化稳定性。
+> 下表展示之定量数值来源于协议升级前（Closure-R1）的历史评测基准（**ARCHIVED 历史归档**），仅供架构对照参考，**不代表 Closure-R2/R3 最终重跑结果**。当前已完成实验协议身份治理（Normalizer SHA-256 指纹校验、Fail-Closed 防御与跨模型 Benchmark 契约一致性校验），全量 Closure-R2 基准重跑（H=4/8, E0-E4）处于待调度状态（**PENDING**）。在长程展开中，Persistence Baseline 作为恒等惯性参考提供了静态参考下界（Step 30 场 RMSE 0.1623），但因其对物理演化零响应，无法反映流动结构变化；在所有学习型神经模型中，Latent World Model 在引入谱导数双重物理守恒约束后，有效消除了空间色散与高频发散，在学习型模型中达到最优演化稳定性。
 
 | 模型架构 (Model) | 机制特性 | Step 1 VRMSE | Step 10 VRMSE | Step 30 VRMSE | Step 30 散度 RMSE | Step 30 涡量 RMSE | Step 30 场 RMSE | 30 步动力学行为综合评定 |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |

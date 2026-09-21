@@ -30,6 +30,41 @@ from src.utils.checkpoint import load_checkpoint
 from src.utils.reproducibility import seed_everything
 
 
+def verify_checkpoint_contract(
+    model_name: str,
+    ckpt_path: str,
+    ckpt_cfg: dict,
+    benchmark_contract: dict,
+):
+    """Verify that a candidate checkpoint strictly satisfies the benchmark data contract."""
+    mismatches = []
+
+    ckpt_ds = ckpt_cfg.get("downsample_factor")
+    if ckpt_ds is not None and ckpt_ds != benchmark_contract["downsample_factor"]:
+        mismatches.append(
+            f"downsample_factor: checkpoint={ckpt_ds} vs benchmark={benchmark_contract['downsample_factor']}"
+        )
+
+    ckpt_norm = ckpt_cfg.get("normalize")
+    if ckpt_norm is not None and ckpt_norm != benchmark_contract["normalize"]:
+        mismatches.append(
+            f"normalize: checkpoint={ckpt_norm} vs benchmark={benchmark_contract['normalize']}"
+        )
+
+    ckpt_split = ckpt_cfg.get("split_type")
+    if ckpt_split is not None and ckpt_split != benchmark_contract["split_type"]:
+        mismatches.append(
+            f"split_type: checkpoint='{ckpt_split}' vs benchmark='{benchmark_contract['split_type']}'"
+        )
+
+    if mismatches:
+        raise ValueError(
+            f"Benchmark data contract violation for model '{model_name}' ({ckpt_path})!\n"
+            + "\n".join(f"  - {m}" for m in mismatches)
+            + f"\nAll models evaluated in a unified benchmark MUST share identical data contracts: {benchmark_contract}."
+        )
+
+
 def evaluate_model_rollout(
     model_name: str,
     model: torch.nn.Module,
@@ -193,7 +228,15 @@ def run_benchmark(
 
     print(f"Loaded {len(test_loader.dataset)} test trajectories for {max_horizon}-step rollout evaluation.")
 
+    benchmark_contract = {
+        "split_type": split_type,
+        "downsample_factor": downsample_factor,
+        "normalize": normalize,
+    }
+    print(f"Unified Benchmark Data Contract: {benchmark_contract}")
+
     results = {}
+    results["__benchmark_contract__"] = benchmark_contract
 
     # 1. Baseline: Persistence
     print("\n--- Evaluating Persistence Baseline ---")
@@ -222,6 +265,7 @@ def run_benchmark(
             print(f"\n--- Evaluating Latent ST Transformer [{m_label}] ({ckpt_path}) ---")
             ckpt_data = torch.load(ckpt_path, map_location="cpu")
             cfg = ckpt_data.get("config", {})
+            verify_checkpoint_contract(m_label, ckpt_path, cfg, benchmark_contract)
             pred_mode = cfg.get("prediction_mode", ckpt_data.get("prediction_mode", "direct"))
             use_cond = cfg.get("use_condition", ckpt_data.get("use_condition", True))
             emb_dim = cfg.get("embed_dim", 256)
@@ -253,6 +297,7 @@ def run_benchmark(
         print("\n--- Evaluating Direct ST Transformer (Ablation Q1 Baseline) ---")
         ckpt_data = torch.load(direct_ckpt, map_location="cpu")
         cfg = ckpt_data.get("config", {})
+        verify_checkpoint_contract("direct_transformer", direct_ckpt, cfg, benchmark_contract)
         pred_mode = cfg.get("prediction_mode", ckpt_data.get("prediction_mode", "direct"))
         use_cond = cfg.get("use_condition", ckpt_data.get("use_condition", True))
         emb_dim = cfg.get("embed_dim", 256)
@@ -282,6 +327,9 @@ def run_benchmark(
         fno_ckpt = "outputs/checkpoints/dynamics/fno/best_vrmse_mean.pt"
     if os.path.exists(fno_ckpt):
         print("\n--- Evaluating FNO-2D Baseline ---")
+        ckpt_data = torch.load(fno_ckpt, map_location="cpu")
+        cfg = ckpt_data.get("config", {})
+        verify_checkpoint_contract("fno", fno_ckpt, cfg, benchmark_contract)
         fno_model = FNO2D(
             in_channels=16,
             out_channels=4,
@@ -290,7 +338,6 @@ def run_benchmark(
             width=64,
             num_layers=4,
         ).to(device)
-        ckpt_data = torch.load(fno_ckpt, map_location="cpu")
         if "model_state_dict" in ckpt_data:
             fno_model.load_state_dict(ckpt_data["model_state_dict"])
         results["fno"] = evaluate_model_rollout(
@@ -315,6 +362,8 @@ def run_benchmark(
     print("-" * 98)
 
     for m_name, m_res in results.items():
+        if m_name.startswith("__"):
+            continue
         for metric_key, metric_title in all_physics_metrics:
             row = [f"{m_res.get(f'step_{s}', {}).get(metric_key, 0.0):.4f}" for s in [1, 5, 10, 20, 30]]
             print(f"{m_name:<20} | {metric_title:<24} | {row[0]:<9} | {row[1]:<9} | {row[2]:<9} | {row[3]:<9} | {row[4]:<9}")

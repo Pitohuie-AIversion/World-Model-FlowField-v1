@@ -99,6 +99,8 @@ def plot_benchmark_curves(
             ax.axhline(ref_val, color="gray", linestyle="--", linewidth=1.0, alpha=0.7, label="Ideal Reference" if idx == 6 else None)
 
         for model_name, m_dict in data.items():
+            if model_name.startswith("__"):
+                continue
             vals = [m_dict.get(f"step_{s}", {}).get(m_key, np.nan) for s in steps]
             cfg = styles.get(
                 model_name,

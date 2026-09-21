@@ -7,6 +7,7 @@ Provides end-to-end DataLoader creation with:
 - Fully deterministic batch sequencing across epochs
 """
 
+import hashlib
 import json
 import os
 import time
@@ -17,6 +18,13 @@ from torch.utils.data import DataLoader
 from src.data.normalization import FieldNormalizer
 from src.data.shear_flow_dataset import ShearFlowDataset
 from src.utils.reproducibility import seed_everything
+
+
+def compute_split_hash(split_data: dict) -> str:
+    """Compute deterministic SHA-256 fingerprint of split manifest content."""
+    # Deterministic JSON serialization with sorted keys
+    serialized = json.dumps(split_data, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def seed_worker(worker_id: int):
@@ -120,6 +128,15 @@ def create_flow_datasets(
     with open(split_file, "r") as f:
         split_data = json.load(f)
 
+    if split_data.get("status") == "BLOCKED_BY_DATA":
+        reason = split_data.get("reason", "Dataset partition marked as BLOCKED_BY_DATA")
+        raise RuntimeError(
+            f"Split '{split_type}' is marked as BLOCKED_BY_DATA: {reason}. "
+            f"Cannot create flow datasets/dataloaders on a blocked split."
+        )
+
+    split_hash = compute_split_hash(split_data)
+
     t_stride = train_stride if train_stride is not None else stride
     v_stride = valid_stride if valid_stride is not None else stride
     te_stride = test_stride if test_stride is not None else stride
@@ -170,6 +187,8 @@ def create_flow_datasets(
                 if (
                     meta.get("fit_protocol") == "trajectory-reference-v2"
                     and meta.get("downsample_factor") == downsample_factor
+                    and meta.get("split_hash") == split_hash
+                    and meta.get("channels") == ["u", "v", "p", "s"]
                 ):
                     state = torch.load(stats_path, weights_only=True)
                     fitted_normalizer = FieldNormalizer()
@@ -209,6 +228,7 @@ def create_flow_datasets(
             metadata = {
                 "fit_protocol": "trajectory-reference-v2",
                 "split_type": split_type,
+                "split_hash": split_hash,
                 "downsample_factor": downsample_factor,
                 "channels": ["u", "v", "p", "s"],
                 "mean": fitted_normalizer.mean.view(-1).tolist() if fitted_normalizer.mean is not None else None,

@@ -42,6 +42,7 @@ def analyze_failure_cases(
     stride: int = 20,
     downsample_factor: int = 2,
     normalize: bool = True,
+    allow_legacy_checkpoint: bool = False,
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
 ):
     seed_everything(42)
@@ -51,23 +52,37 @@ def analyze_failure_cases(
     os.makedirs(fig_dir, exist_ok=True)
     os.makedirs(metrics_dir, exist_ok=True)
 
-    # Resolve candidate model path with fallback
+    # Resolve candidate model path with strict fail-closed protocol
+    is_legacy = False
+    if not os.path.exists(model_path):
+        canonical_alt = "outputs/checkpoints/dynamics/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt"
+        if model_path == "outputs/checkpoints/dynamics/ablation_E4_full_physics/best_vrmse_mean.pt" and os.path.exists(canonical_alt):
+            model_path = canonical_alt
+
     if not os.path.exists(model_path):
         legacy_candidates = [
-            "outputs/checkpoints/dynamics/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt",
             "outputs/checkpoints/dynamics/ablation_plus_L_div_vort/best_vrmse_mean.pt",
             "outputs/checkpoints/dynamics/ablation_plus_L_div_vort/latent_transformer/best_vrmse_mean.pt",
             "outputs/checkpoints/dynamics/latent_transformer/best_vrmse_mean.pt",
         ]
+        found_legacy = None
         for cand in legacy_candidates:
             if os.path.exists(cand):
-                model_path = cand
+                found_legacy = cand
                 break
 
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Checkpoint not found at {model_path}. Train a model first!")
+        if allow_legacy_checkpoint and found_legacy:
+            model_path = found_legacy
+            is_legacy = True
+            print(f"Notice: Using Closure-R1 legacy checkpoint: {model_path} (explicit opt-in enabled)")
+        else:
+            hint = ""
+            if found_legacy:
+                hint = f" Found legacy checkpoint '{found_legacy}', but legacy fallback is disabled by default. Pass --allow_legacy_checkpoint to explicitly opt-in."
+            raise FileNotFoundError(f"Checkpoint not found at '{model_path}'.{hint}")
 
-    print(f"Loading checkpoint config from {model_path}...")
+    proto_str = "Closure-R1-legacy" if is_legacy else "Closure-R2"
+    print(f"Loading checkpoint config from {model_path} [{proto_str}]...")
     ckpt = torch.load(model_path, map_location="cpu")
     cfg = ckpt.get("config", {})
 
@@ -252,6 +267,13 @@ def analyze_failure_cases(
 
     # Serialize JSON
     summary_data = {
+        "metadata": {
+            "model_path": model_path,
+            "protocol": proto_str,
+            "is_legacy": is_legacy,
+            "split_type": s_type,
+            "downsample_factor": ds_factor,
+        },
         "best_case": {k: v for k, v in best_case.items() if k not in ["pred_step30", "gt_step30"]},
         "median_case": {k: v for k, v in median_case.items() if k not in ["pred_step30", "gt_step30"]},
         "worst_case": {k: v for k, v in worst_case.items() if k not in ["pred_step30", "gt_step30"]},
@@ -277,6 +299,7 @@ if __name__ == "__main__":
     parser.add_argument("--split_file", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="outputs")
     parser.add_argument("--horizon", type=int, default=30)
+    parser.add_argument("--allow_legacy_checkpoint", action="store_true", default=False, help="Allow opt-in fallback to Closure-R1 legacy checkpoint")
     args = parser.parse_args()
 
     analyze_failure_cases(
@@ -286,4 +309,5 @@ if __name__ == "__main__":
         split_file=args.split_file,
         output_dir=args.output_dir,
         max_horizon=args.horizon,
+        allow_legacy_checkpoint=args.allow_legacy_checkpoint,
     )
