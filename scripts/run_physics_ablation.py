@@ -66,7 +66,7 @@ ABLATION_CONFIGS = {
 }
 
 
-def run_single_ablation(group_name: str, gpu_id: int, epochs: int = 10, batch_size: int = 8):
+def run_single_ablation(group_name: str, gpu_id: int, epochs: int = 30, batch_size: int = 8):
     cfg = ABLATION_CONFIGS[group_name]
     os.makedirs(cfg["output_dir"], exist_ok=True)
     os.makedirs("outputs", exist_ok=True)
@@ -103,7 +103,7 @@ def run_worker(groups, gpu_id, epochs, batch_size):
 
 def main():
     parser = argparse.ArgumentParser(description="Run complete E0-E4 physical loss ablation study.")
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--sequential", action="store_true", help="Run sequentially on single GPU")
     args = parser.parse_args()

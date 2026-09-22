@@ -14,6 +14,8 @@ from src.utils.physics_contract import (
     PHYSICS_PROTOCOL,
     SPATIAL_AXIS_CONTRACT,
     SHEAR_FLOW_DOMAIN_SIZE_XY,
+    ABLATION_SEMANTIC_SPECS,
+    validate_ablation_checkpoint_semantics,
 )
 
 __all__ = [
@@ -28,5 +30,7 @@ __all__ = [
     "PHYSICS_PROTOCOL",
     "SPATIAL_AXIS_CONTRACT",
     "SHEAR_FLOW_DOMAIN_SIZE_XY",
+    "ABLATION_SEMANTIC_SPECS",
+    "validate_ablation_checkpoint_semantics",
 ]
 

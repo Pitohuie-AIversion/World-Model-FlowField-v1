@@ -20,6 +20,12 @@ import torch
 from scripts.evaluate_rollout import verify_checkpoint_contract
 from scripts.evaluate_physics_ablation import ABLATION_GROUPS
 from src.data.pipeline import compute_split_hash, create_flow_datasets
+from src.utils.physics_contract import (
+    PHYSICS_PROTOCOL,
+    SPATIAL_AXIS_CONTRACT,
+    SHEAR_FLOW_DOMAIN_SIZE_XY,
+    validate_ablation_checkpoint_semantics,
+)
 
 
 def _create_mock_h5(path: str, n_trajs: int = 2, nt: int = 6, ny: int = 16, nx: int = 32):
@@ -208,12 +214,148 @@ def test_benchmark_rejects_mixed_data_contracts():
         "lambda_div": 0.01,
         "lambda_vort": 0.0,
         "physics_protocol": "Closure-R3",
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
     }
     with pytest.raises(ValueError) as exc:
         verify_checkpoint_contract("poisoned_model", "old_e2.pt", poisoned_physics_cfg, benchmark_contract)
     assert "physics_protocol" in str(exc.value)
 
-    # 6. The same non-zero physics loss is valid when trained under Closure-R4.
+    # 6. Checkpoint with wrong spatial_axis_contract is rejected
+    wrong_axis_cfg = dict(poisoned_physics_cfg)
+    wrong_axis_cfg["physics_protocol"] = PHYSICS_PROTOCOL
+    wrong_axis_cfg["spatial_axis_contract"] = "tensor(...,Ny,Nx):dim-2=y,dim-1=x"
+    with pytest.raises(ValueError) as exc:
+        verify_checkpoint_contract("wrong_axis_model", "axis_err.pt", wrong_axis_cfg, benchmark_contract)
+    assert "spatial_axis_contract" in str(exc.value)
+
+    # 7. Checkpoint with wrong physics_domain_size_xy is rejected
+    wrong_domain_cfg = dict(poisoned_physics_cfg)
+    wrong_domain_cfg["physics_protocol"] = PHYSICS_PROTOCOL
+    wrong_domain_cfg["physics_domain_size_xy"] = [2.0, 1.0]
+    with pytest.raises(ValueError) as exc:
+        verify_checkpoint_contract("wrong_domain_model", "domain_err.pt", wrong_domain_cfg, benchmark_contract)
+    assert "physics_domain_size_xy" in str(exc.value)
+
+    # 8. Complete valid Closure-R4 physics checkpoint is accepted
     valid_r4_physics_cfg = dict(poisoned_physics_cfg)
-    valid_r4_physics_cfg["physics_protocol"] = "Closure-R4"
+    valid_r4_physics_cfg["physics_protocol"] = PHYSICS_PROTOCOL
     verify_checkpoint_contract("r4_model", "r4_e2.pt", valid_r4_physics_cfg, benchmark_contract)
+
+
+def test_ablation_checkpoint_semantic_validation():
+    """Verify strict semantic validation for E0-E4 ablation checkpoints."""
+    # 1. E2 with horizon=1 is rejected
+    e2_wrong_h = {
+        "horizon": 1,
+        "lambda_div": 0.01,
+        "lambda_vort": 0.0,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+    }
+    with pytest.raises(ValueError) as exc:
+        validate_ablation_checkpoint_semantics("E2_plus_L_div", e2_wrong_h)
+    assert "horizon" in str(exc.value)
+
+    # 2. E2 with lambda_div=0 is rejected
+    e2_missing_div = {
+        "horizon": 2,
+        "lambda_div": 0.0,
+        "lambda_vort": 0.0,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+    }
+    with pytest.raises(ValueError) as exc:
+        validate_ablation_checkpoint_semantics("E2_plus_L_div", e2_missing_div)
+    assert "lambda_div" in str(exc.value)
+
+    # 3. E3 with lambda_vort=0 is rejected
+    e3_missing_vort = {
+        "horizon": 2,
+        "lambda_div": 0.0,
+        "lambda_vort": 0.0,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+    }
+    with pytest.raises(ValueError) as exc:
+        validate_ablation_checkpoint_semantics("E3_plus_L_vort", e3_missing_vort)
+    assert "lambda_vort" in str(exc.value)
+
+    # 4. E4 missing lambda_div or lambda_vort is rejected
+    e4_missing_div = {
+        "horizon": 2,
+        "lambda_div": 0.0,
+        "lambda_vort": 0.05,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+    }
+    with pytest.raises(ValueError) as exc:
+        validate_ablation_checkpoint_semantics("E4_full_physics", e4_missing_div)
+    assert "lambda_div" in str(exc.value)
+
+    e4_missing_vort = {
+        "horizon": 2,
+        "lambda_div": 0.01,
+        "lambda_vort": 0.0,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+    }
+    with pytest.raises(ValueError) as exc:
+        validate_ablation_checkpoint_semantics("E4_full_physics", e4_missing_vort)
+    assert "lambda_vort" in str(exc.value)
+
+    # 5. Valid E0 - E4 checkpoints pass without error
+    valid_e0 = {
+        "horizon": 1,
+        "lambda_div": 0.0,
+        "lambda_vort": 0.0,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+    }
+    validate_ablation_checkpoint_semantics("E0_single_step", valid_e0)
+
+    valid_e1 = {
+        "horizon": 2,
+        "lambda_div": 0.0,
+        "lambda_vort": 0.0,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+    }
+    validate_ablation_checkpoint_semantics("E1_rollout_field", valid_e1)
+
+    valid_e2 = {
+        "horizon": 2,
+        "lambda_div": 0.01,
+        "lambda_vort": 0.0,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+    }
+    validate_ablation_checkpoint_semantics("E2_plus_L_div", valid_e2)
+
+    valid_e3 = {
+        "horizon": 2,
+        "lambda_div": 0.0,
+        "lambda_vort": 0.05,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+    }
+    validate_ablation_checkpoint_semantics("E3_plus_L_vort", valid_e3)
+
+    valid_e4 = {
+        "horizon": 2,
+        "lambda_div": 0.01,
+        "lambda_vort": 0.05,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+    }
+    validate_ablation_checkpoint_semantics("E4_full_physics", valid_e4)

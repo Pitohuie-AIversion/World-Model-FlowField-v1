@@ -63,16 +63,29 @@ def verify_checkpoint_contract(
         )
 
     # Field-only pre-R4 checkpoints may be re-evaluated with corrected metrics,
-    # but any checkpoint trained with physics losses must itself be Closure-R4.
+    # but any checkpoint trained with physics losses must strictly comply with Closure-R4.
     lambda_div = float(ckpt_cfg.get("lambda_div", 0.0) or 0.0)
     lambda_vort = float(ckpt_cfg.get("lambda_vort", 0.0) or 0.0)
-    ckpt_physics_protocol = ckpt_cfg.get("physics_protocol")
-    if (lambda_div != 0.0 or lambda_vort != 0.0) and ckpt_physics_protocol != PHYSICS_PROTOCOL:
-        mismatches.append(
-            "physics_protocol: checkpoint uses non-zero divergence/vorticity loss "
-            f"(lambda_div={lambda_div}, lambda_vort={lambda_vort}) but protocol="
-            f"{ckpt_physics_protocol!r}; required {PHYSICS_PROTOCOL!r}"
-        )
+    if lambda_div != 0.0 or lambda_vort != 0.0:
+        ckpt_physics_protocol = ckpt_cfg.get("physics_protocol")
+        if ckpt_physics_protocol != PHYSICS_PROTOCOL:
+            mismatches.append(
+                "physics_protocol: checkpoint uses non-zero divergence/vorticity loss "
+                f"(lambda_div={lambda_div}, lambda_vort={lambda_vort}) but protocol="
+                f"{ckpt_physics_protocol!r}; required {PHYSICS_PROTOCOL!r}"
+            )
+
+        ckpt_axis_contract = ckpt_cfg.get("spatial_axis_contract")
+        if ckpt_axis_contract != SPATIAL_AXIS_CONTRACT:
+            mismatches.append(
+                f"spatial_axis_contract: checkpoint={ckpt_axis_contract!r} vs required={SPATIAL_AXIS_CONTRACT!r}"
+            )
+
+        ckpt_domain_size = ckpt_cfg.get("physics_domain_size_xy")
+        if ckpt_domain_size is None or list(ckpt_domain_size) != list(SHEAR_FLOW_DOMAIN_SIZE_XY):
+            mismatches.append(
+                f"physics_domain_size_xy: checkpoint={ckpt_domain_size!r} vs required={list(SHEAR_FLOW_DOMAIN_SIZE_XY)!r}"
+            )
 
     if mismatches:
         raise ValueError(

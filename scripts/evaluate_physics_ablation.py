@@ -36,6 +36,7 @@ from src.utils.physics_contract import (
     PHYSICS_PROTOCOL,
     SPATIAL_AXIS_CONTRACT,
     SHEAR_FLOW_DOMAIN_SIZE_XY,
+    validate_ablation_checkpoint_semantics,
 )
 
 
@@ -234,17 +235,8 @@ def run_physics_ablation_eval(
         ckpt_data = torch.load(ckpt_path, map_location="cpu")
         cfg = ckpt_data.get("config", {})
 
-        # Safety check: if checkpoint uses physics losses, verify it was trained under Closure-R4
-        lambda_div = float(cfg.get("lambda_div", 0.0) or 0.0)
-        lambda_vort = float(cfg.get("lambda_vort", 0.0) or 0.0)
-        ckpt_physics_protocol = cfg.get("physics_protocol")
-
-        if (lambda_div != 0.0 or lambda_vort != 0.0) and ckpt_physics_protocol != PHYSICS_PROTOCOL:
-            raise ValueError(
-                f"Checkpoint '{ckpt_path}' for {group_key} was trained with non-zero physics losses "
-                f"(lambda_div={lambda_div}, lambda_vort={lambda_vort}) under protocol={ckpt_physics_protocol!r}, "
-                f"which is invalid under {PHYSICS_PROTOCOL}! Re-training under {PHYSICS_PROTOCOL} is required."
-            )
+        # Safety & Semantic validation: verify checkpoint strictly complies with Closure-R4 and group spec
+        validate_ablation_checkpoint_semantics(group_key, cfg, is_legacy=is_legacy)
 
         checkpoint_training_protocol = "pre-R4-field-only" if is_legacy else PHYSICS_PROTOCOL
         print(
