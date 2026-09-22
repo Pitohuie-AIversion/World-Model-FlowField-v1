@@ -28,6 +28,7 @@ from src.models.latent_transformer import LatentSTTransformer
 from src.models.latent_forecaster import LatentForecaster
 from src.utils.checkpoint import load_checkpoint
 from src.utils.reproducibility import seed_everything
+from src.utils.physics_contract import PHYSICS_PROTOCOL, SPATIAL_AXIS_CONTRACT, SHEAR_FLOW_DOMAIN_SIZE_XY
 
 
 def verify_checkpoint_contract(
@@ -57,6 +58,18 @@ def verify_checkpoint_contract(
             f"split_type: checkpoint='{ckpt_split}' vs benchmark='{benchmark_contract['split_type']}'"
         )
 
+    # Field-only pre-R4 checkpoints may be re-evaluated with corrected metrics,
+    # but any checkpoint trained with physics losses must itself be Closure-R4.
+    lambda_div = float(ckpt_cfg.get("lambda_div", 0.0) or 0.0)
+    lambda_vort = float(ckpt_cfg.get("lambda_vort", 0.0) or 0.0)
+    ckpt_physics_protocol = ckpt_cfg.get("physics_protocol")
+    if (lambda_div != 0.0 or lambda_vort != 0.0) and ckpt_physics_protocol != PHYSICS_PROTOCOL:
+        mismatches.append(
+            "physics_protocol: checkpoint uses non-zero divergence/vorticity loss "
+            f"(lambda_div={lambda_div}, lambda_vort={lambda_vort}) but protocol="
+            f"{ckpt_physics_protocol!r}; required {PHYSICS_PROTOCOL!r}"
+        )
+
     if mismatches:
         raise ValueError(
             f"Benchmark data contract violation for model '{model_name}' ({ckpt_path})!\n"
@@ -82,8 +95,8 @@ def evaluate_model_rollout(
 
     with torch.no_grad():
         for batch in test_loader:
-            q_hist = batch["history"].to(device)  # (B, L, 4, Ny, Nx)
-            q_future = batch["future"].to(device)  # (B, H, 4, Ny, Nx)
+            q_hist = batch["history"].to(device)  # (B, L, 4, Nx, Ny)
+            q_future = batch["future"].to(device)  # (B, H, 4, Nx, Ny)
             re = batch["re"].to(device) if use_condition and "re" in batch else None
             sc = batch["sc"].to(device) if use_condition and "sc" in batch else None
             b = len(q_hist)
@@ -139,7 +152,7 @@ def evaluate_model_rollout(
 
 def run_benchmark(
     data_dir: str = "/root/autodl-tmp/datasets/shear_flow",
-    output_file: str = "outputs/metrics/rollout_benchmark.json",
+    output_file: str = "outputs/metrics/closure_r4_rollout_benchmark.json",
     split_type: str = "grouped",
     split_file: Optional[str] = None,
     downsample_factor: int = 2,
@@ -232,6 +245,9 @@ def run_benchmark(
         "split_type": split_type,
         "downsample_factor": downsample_factor,
         "normalize": normalize,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
     }
     print(f"Unified Benchmark Data Contract: {benchmark_contract}")
 
@@ -385,7 +401,7 @@ def run_benchmark(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate multi-step autoregressive rollouts.")
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
-    parser.add_argument("--output_file", type=str, default="outputs/metrics/rollout_benchmark.json")
+    parser.add_argument("--output_file", type=str, default="outputs/metrics/closure_r4_rollout_benchmark.json")
     parser.add_argument(
         "--split_type",
         type=str,

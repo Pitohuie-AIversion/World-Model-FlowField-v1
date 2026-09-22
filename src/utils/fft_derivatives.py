@@ -1,187 +1,121 @@
-"""Spectral spatial derivative utilities on 2D periodic domains using FFT.
+"""Spectral derivative utilities for the canonical shear_flow tensor layout.
 
-Domain specifications for The Well shear_flow:
-    x in [0, 1] (horizontal, periodic, Nx = 256 or 512)
-    y in [-1, 1] (vertical, periodic, Ny = 128 or 256)
-    Lx = 1.0, Ly = 2.0
+Closure-R4 contract:
+    field shape (..., Nx, Ny)
+    dim -2 -> x, Lx = 1
+    dim -1 -> y, Ly = 2
 """
 
 from typing import Tuple
 import torch
 import torch.fft
 
+from src.utils.physics_contract import SHEAR_FLOW_DOMAIN_SIZE_XY
 
-def spectral_grad_2d(
+
+def spectral_grad_xy(
     field: torch.Tensor,
-    domain_size: Tuple[float, float] = (2.0, 1.0),
+    domain_size: Tuple[float, float] = SHEAR_FLOW_DOMAIN_SIZE_XY,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Compute 2D spatial gradients (df/dy, df/dx) via real-to-complex FFT.
-
-    Args:
-        field: Tensor of shape (..., Ny, Nx), real-valued.
-        domain_size: (Ly, Lx) extent of domain. Defaults to (2.0, 1.0) for shear_flow.
-
-    Returns:
-        df_dy: Gradient along vertical dimension (same shape as field).
-        df_dx: Gradient along horizontal dimension (same shape as field).
-    """
-    ny, nx = field.shape[-2], field.shape[-1]
-    ly, lx = domain_size
-
-    # Wavenumber grids
-    # rfft along last dim (x) has size nx//2 + 1
-    # fft along second to last dim (y) has size ny
+    """Compute (df/dx, df/dy) for fields stored as (..., Nx, Ny)."""
+    nx, ny = field.shape[-2], field.shape[-1]
+    lx, ly = domain_size
     device = field.device
     orig_dtype = field.dtype
     calc_dtype = torch.float64 if orig_dtype == torch.float64 else torch.float32
     field_calc = field.to(dtype=calc_dtype)
 
-    # ky = 2 * pi * n / Ly, shape (ny, 1)
-    ky = 2.0 * torch.pi * torch.fft.fftfreq(ny, d=ly / ny, device=device, dtype=calc_dtype)
-    ky = ky.view(*([1] * (field.ndim - 2)), ny, 1)
+    kx = 2.0 * torch.pi * torch.fft.fftfreq(
+        nx, d=lx / nx, device=device, dtype=calc_dtype
+    )
+    kx = kx.view(*([1] * (field.ndim - 2)), nx, 1)
 
-    # kx = 2 * pi * n / Lx, shape (1, nx//2 + 1)
-    kx = 2.0 * torch.pi * torch.fft.rfftfreq(nx, d=lx / nx, device=device, dtype=calc_dtype)
-    kx = kx.view(*([1] * (field.ndim - 2)), 1, nx // 2 + 1)
+    ky = 2.0 * torch.pi * torch.fft.rfftfreq(
+        ny, d=ly / ny, device=device, dtype=calc_dtype
+    )
+    ky = ky.view(*([1] * (field.ndim - 2)), 1, ny // 2 + 1)
 
-    # Forward 2D RFFT
     f_hat = torch.fft.rfft2(field_calc, dim=(-2, -1))
-
-    # Differentiation in Fourier space: d/dx -> i * kx, d/dy -> i * ky
-    # Using 1j * k
     f_hat_x = 1j * kx * f_hat
     f_hat_y = 1j * ky * f_hat
 
-    # For even ny / nx, zero out the Nyquist frequency derivative to preserve reality and avoid artifacts
-    if ny % 2 == 0:
-        f_hat_y[..., ny // 2, :] = 0.0
     if nx % 2 == 0:
-        f_hat_x[..., :, nx // 2] = 0.0
+        f_hat_x[..., nx // 2, :] = 0.0
+    if ny % 2 == 0:
+        f_hat_y[..., :, ny // 2] = 0.0
 
-    df_dx = torch.fft.irfft2(f_hat_x, s=(ny, nx), dim=(-2, -1))
-    df_dy = torch.fft.irfft2(f_hat_y, s=(ny, nx), dim=(-2, -1))
+    df_dx = torch.fft.irfft2(f_hat_x, s=(nx, ny), dim=(-2, -1))
+    df_dy = torch.fft.irfft2(f_hat_y, s=(nx, ny), dim=(-2, -1))
+    return df_dx.to(dtype=orig_dtype), df_dy.to(dtype=orig_dtype)
 
-    return df_dy.to(dtype=orig_dtype), df_dx.to(dtype=orig_dtype)
 
+def spectral_grad_2d(
+    field: torch.Tensor,
+    domain_size: Tuple[float, float] = SHEAR_FLOW_DOMAIN_SIZE_XY,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Compatibility name using Closure-R4 semantics; returns (df/dx, df/dy)."""
+    return spectral_grad_xy(field, domain_size=domain_size)
 
 
 def compute_vorticity(
     u: torch.Tensor,
     v: torch.Tensor,
-    domain_size: Tuple[float, float] = (2.0, 1.0),
+    domain_size: Tuple[float, float] = SHEAR_FLOW_DOMAIN_SIZE_XY,
 ) -> torch.Tensor:
-    """Compute 2D vorticity: omega = dv/dx - du/dy.
-
-    Args:
-        u: Horizontal velocity, shape (..., Ny, Nx).
-        v: Vertical velocity, shape (..., Ny, Nx).
-        domain_size: (Ly, Lx), defaults to (2.0, 1.0).
-
-    Returns:
-        omega: Vorticity scalar field, shape (..., Ny, Nx).
-    """
-    du_dy, _ = spectral_grad_2d(u, domain_size=domain_size)
-    _, dv_dx = spectral_grad_2d(v, domain_size=domain_size)
+    """Compute omega = dv/dx - du/dy."""
+    _, du_dy = spectral_grad_xy(u, domain_size=domain_size)
+    dv_dx, _ = spectral_grad_xy(v, domain_size=domain_size)
     return dv_dx - du_dy
 
 
 def compute_divergence(
     u: torch.Tensor,
     v: torch.Tensor,
-    domain_size: Tuple[float, float] = (2.0, 1.0),
+    domain_size: Tuple[float, float] = SHEAR_FLOW_DOMAIN_SIZE_XY,
 ) -> torch.Tensor:
-    """Compute 2D divergence: div = du/dx + dv/dy.
-
-    Args:
-        u: Horizontal velocity, shape (..., Ny, Nx).
-        v: Vertical velocity, shape (..., Ny, Nx).
-        domain_size: (Ly, Lx), defaults to (2.0, 1.0).
-
-    Returns:
-        div: Divergence field, shape (..., Ny, Nx). Should be ~0 for incompressible flow.
-    """
-    _, du_dx = spectral_grad_2d(u, domain_size=domain_size)
-    dv_dy, _ = spectral_grad_2d(v, domain_size=domain_size)
+    """Compute div(u) = du/dx + dv/dy."""
+    du_dx, _ = spectral_grad_xy(u, domain_size=domain_size)
+    _, dv_dy = spectral_grad_xy(v, domain_size=domain_size)
     return du_dx + dv_dy
 
 
 def project_zero_mean_pressure(p: torch.Tensor) -> torch.Tensor:
-    """Project pressure field to zero spatial mean gauge: p <- p - mean(p).
-
-    Args:
-        p: Pressure field, shape (..., Ny, Nx).
-
-    Returns:
-        Zero-mean normalized pressure.
-    """
-    mean_p = p.mean(dim=(-2, -1), keepdim=True)
-    return p - mean_p
+    """Project pressure to zero spatial mean gauge."""
+    return p - p.mean(dim=(-2, -1), keepdim=True)
 
 
 def compute_kinetic_energy(u: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-    """Compute mean kinetic energy density: E_k = 0.5 * mean(u^2 + v^2).
-
-    Args:
-        u: Horizontal velocity, shape (..., Ny, Nx).
-        v: Vertical velocity, shape (..., Ny, Nx).
-
-    Returns:
-        E_k: Scalar or shape (...) tensor.
-    """
+    """Compute mean kinetic energy density."""
     return 0.5 * torch.mean(u**2 + v**2, dim=(-2, -1))
 
 
 def compute_enstrophy(omega: torch.Tensor) -> torch.Tensor:
-    """Compute mean enstrophy density: Omega = 0.5 * mean(omega^2).
-
-    Args:
-        omega: Vorticity field, shape (..., Ny, Nx).
-
-    Returns:
-        Enstrophy: Scalar or shape (...) tensor.
-    """
+    """Compute mean enstrophy density."""
     return 0.5 * torch.mean(omega**2, dim=(-2, -1))
 
 
 def compute_laplacian_2d(
     field: torch.Tensor,
-    domain_size: Tuple[float, float] = (2.0, 1.0),
+    domain_size: Tuple[float, float] = SHEAR_FLOW_DOMAIN_SIZE_XY,
 ) -> torch.Tensor:
-    """Compute 2D spatial Laplacian: laplacian = d^2f/dx^2 + d^2f/dy^2 via RFFT.
-
-    Args:
-        field: Tensor of shape (..., Ny, Nx), real-valued.
-        domain_size: (Ly, Lx) extent of domain.
-
-    Returns:
-        laplacian: Tensor of same shape as field.
-    """
-    ny, nx = field.shape[-2], field.shape[-1]
-    ly, lx = domain_size
+    """Compute d2f/dx2 + d2f/dy2 for (..., Nx, Ny)."""
+    nx, ny = field.shape[-2], field.shape[-1]
+    lx, ly = domain_size
     device = field.device
     orig_dtype = field.dtype
     calc_dtype = torch.float64 if orig_dtype == torch.float64 else torch.float32
     field_calc = field.to(dtype=calc_dtype)
 
-    ky = 2.0 * torch.pi * torch.fft.fftfreq(ny, d=ly / ny, device=device, dtype=calc_dtype)
-    ky = ky.view(*([1] * (field.ndim - 2)), ny, 1)
-
-    kx = 2.0 * torch.pi * torch.fft.rfftfreq(nx, d=lx / nx, device=device, dtype=calc_dtype)
-    kx = kx.view(*([1] * (field.ndim - 2)), 1, nx // 2 + 1)
-
-    # -(kx^2 + ky^2)
-    k_sq = kx**2 + ky**2
+    kx = 2.0 * torch.pi * torch.fft.fftfreq(
+        nx, d=lx / nx, device=device, dtype=calc_dtype
+    )
+    kx = kx.view(*([1] * (field.ndim - 2)), nx, 1)
+    ky = 2.0 * torch.pi * torch.fft.rfftfreq(
+        ny, d=ly / ny, device=device, dtype=calc_dtype
+    )
+    ky = ky.view(*([1] * (field.ndim - 2)), 1, ny // 2 + 1)
 
     f_hat = torch.fft.rfft2(field_calc, dim=(-2, -1))
-    f_hat_lap = -k_sq * f_hat
-
-    # Zero Nyquist frequencies if even
-    if ny % 2 == 0:
-        f_hat_lap[..., ny // 2, :] = 0.0
-    if nx % 2 == 0:
-        f_hat_lap[..., :, nx // 2] = 0.0
-
-    laplacian = torch.fft.irfft2(f_hat_lap, s=(ny, nx), dim=(-2, -1))
+    f_hat_lap = -(kx**2 + ky**2) * f_hat
+    laplacian = torch.fft.irfft2(f_hat_lap, s=(nx, ny), dim=(-2, -1))
     return laplacian.to(dtype=orig_dtype)
-
-

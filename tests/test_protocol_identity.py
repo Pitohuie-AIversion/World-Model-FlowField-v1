@@ -115,21 +115,15 @@ def test_blocked_holdout_evaluation_fails_closed():
 
 
 def test_ablation_legacy_checkpoint_requires_opt_in():
-    """P1-2: ABLATION_GROUPS separates Closure-R2 candidates from legacy Closure-R1 candidates."""
-    # E0 should have no legacy candidates
-    assert "legacy_candidates" in ABLATION_GROUPS["E0_single_step"]
-    assert len(ABLATION_GROUPS["E0_single_step"]["legacy_candidates"]) == 0
+    """Closure-R4 permits pre-R4 field-only reuse but blocks poisoned physics weights."""
+    assert ABLATION_GROUPS["E0_single_step"]["legacy_candidates"]
+    assert ABLATION_GROUPS["E1_rollout_field"]["legacy_candidates"]
 
-    # E1 - E4 candidates must only point to ablation_E* Closure-R2 paths by default
-    for g_key in ["E1_rollout_field", "E2_plus_L_div", "E3_plus_L_vort", "E4_full_physics"]:
-        group = ABLATION_GROUPS[g_key]
-        for c in group["candidates"]:
-            assert "ablation_E" in c, f"Candidate {c} in {g_key} must be a Closure-R2 ablation_E path!"
-
-        # Legacy candidates are isolated in separate list
-        assert len(group["legacy_candidates"]) > 0
-        for lc in group["legacy_candidates"]:
-            assert ("ablation_L_field" in lc or "ablation_plus" in lc)
+    for key in ["E2_plus_L_div", "E3_plus_L_vort", "E4_full_physics"]:
+        group = ABLATION_GROUPS[key]
+        assert group["legacy_candidates"] == []
+        assert group["invalid_axis_candidates"]
+        assert all("closure_r4" in p for p in group["candidates"])
 
 
 def test_failure_analysis_legacy_checkpoint_requires_opt_in():
@@ -193,3 +187,21 @@ def test_benchmark_rejects_mixed_data_contracts():
     with pytest.raises(ValueError) as exc:
         verify_checkpoint_contract("test_model", "ckpt.pt", mismatched_split_cfg, benchmark_contract)
     assert "split_type" in str(exc.value)
+
+    # 5. Pre-R4 checkpoints trained with physics losses are scientifically invalid.
+    poisoned_physics_cfg = {
+        "split_type": "grouped",
+        "downsample_factor": 2,
+        "normalize": True,
+        "lambda_div": 0.01,
+        "lambda_vort": 0.0,
+        "physics_protocol": "Closure-R3",
+    }
+    with pytest.raises(ValueError) as exc:
+        verify_checkpoint_contract("poisoned_model", "old_e2.pt", poisoned_physics_cfg, benchmark_contract)
+    assert "physics_protocol" in str(exc.value)
+
+    # 6. The same non-zero physics loss is valid when trained under Closure-R4.
+    valid_r4_physics_cfg = dict(poisoned_physics_cfg)
+    valid_r4_physics_cfg["physics_protocol"] = "Closure-R4"
+    verify_checkpoint_contract("r4_model", "r4_e2.pt", valid_r4_physics_cfg, benchmark_contract)
