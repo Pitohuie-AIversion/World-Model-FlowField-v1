@@ -58,6 +58,18 @@ def verify_checkpoint_contract(
             f"split_type: checkpoint='{ckpt_split}' vs benchmark='{benchmark_contract['split_type']}'"
         )
 
+    # Field-only pre-R4 checkpoints may be re-evaluated with corrected metrics,
+    # but any checkpoint trained with physics losses must itself be Closure-R4.
+    lambda_div = float(ckpt_cfg.get("lambda_div", 0.0) or 0.0)
+    lambda_vort = float(ckpt_cfg.get("lambda_vort", 0.0) or 0.0)
+    ckpt_physics_protocol = ckpt_cfg.get("physics_protocol")
+    if (lambda_div != 0.0 or lambda_vort != 0.0) and ckpt_physics_protocol != PHYSICS_PROTOCOL:
+        mismatches.append(
+            "physics_protocol: checkpoint uses non-zero divergence/vorticity loss "
+            f"(lambda_div={lambda_div}, lambda_vort={lambda_vort}) but protocol="
+            f"{ckpt_physics_protocol!r}; required {PHYSICS_PROTOCOL!r}"
+        )
+
     if mismatches:
         raise ValueError(
             f"Benchmark data contract violation for model '{model_name}' ({ckpt_path})!\n"
@@ -83,8 +95,8 @@ def evaluate_model_rollout(
 
     with torch.no_grad():
         for batch in test_loader:
-            q_hist = batch["history"].to(device)  # (B, L, 4, Ny, Nx)
-            q_future = batch["future"].to(device)  # (B, H, 4, Ny, Nx)
+            q_hist = batch["history"].to(device)  # (B, L, 4, Nx, Ny)
+            q_future = batch["future"].to(device)  # (B, H, 4, Nx, Ny)
             re = batch["re"].to(device) if use_condition and "re" in batch else None
             sc = batch["sc"].to(device) if use_condition and "sc" in batch else None
             b = len(q_hist)
