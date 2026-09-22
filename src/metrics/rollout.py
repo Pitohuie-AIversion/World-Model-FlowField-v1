@@ -19,7 +19,7 @@ def evaluate_rollout_trajectory(
     pred_trajectory: torch.Tensor,
     target_trajectory: torch.Tensor,
     evaluation_steps: Optional[List[int]] = None,
-    domain_size: tuple = (2.0, 1.0),
+    domain_size: tuple = (1.0, 2.0),
 ) -> Dict[str, Dict[str, float]]:
     """Evaluates multi-step predicted trajectory against target trajectory."""
     total_steps = pred_trajectory.shape[1]
@@ -33,7 +33,7 @@ def evaluate_rollout_trajectory(
         if idx >= total_steps:
             continue
 
-        p = pred_trajectory[:, idx]  # (B, C, Ny, Nx)
+        p = pred_trajectory[:, idx]  # (B, C, Nx, Ny)
         t = target_trajectory[:, idx]
 
         step_res = {}

@@ -27,11 +27,11 @@ def test_field_metrics():
 def test_spectral_metrics():
     u = torch.randn(32, 64)
     v = torch.randn(32, 64)
-    k_bins, e_k = compute_radial_energy_spectrum(u, v, domain_size=(2.0, 1.0))
+    k_bins, e_k = compute_radial_energy_spectrum(u, v, domain_size=(1.0, 2.0))
     assert len(k_bins) == len(e_k)
     assert (e_k >= 0.0).all()
 
-    spec_err = compute_spectral_error(u, v, u, v, domain_size=(2.0, 1.0))
+    spec_err = compute_spectral_error(u, v, u, v, domain_size=(1.0, 2.0))
     assert spec_err["spec_err_total"] == pytest.approx(0.0, abs=1e-5)
 
 
@@ -53,8 +53,8 @@ def test_compute_metrics():
 
 
 def test_rollout_evaluation():
-    b, h, c, ny, nx = 2, 5, 4, 32, 64
-    target = torch.randn(b, h, c, ny, nx)
+    b, h, c, nx, ny = 2, 5, 4, 32, 64
+    target = torch.randn(b, h, c, nx, ny)
     pred = target.clone()
 
     res = evaluate_rollout_trajectory(pred, target, evaluation_steps=[1, 5])

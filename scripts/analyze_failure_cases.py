@@ -81,7 +81,7 @@ def analyze_failure_cases(
                 hint = f" Found legacy checkpoint '{found_legacy}', but legacy fallback is disabled by default. Pass --allow_legacy_checkpoint to explicitly opt-in."
             raise FileNotFoundError(f"Checkpoint not found at '{model_path}'.{hint}")
 
-    proto_str = "Closure-R1-legacy" if is_legacy else "Closure-R2"
+    proto_str = "Closure-R1-legacy" if is_legacy else "Closure-R3"
     print(f"Loading checkpoint config from {model_path} [{proto_str}]...")
     ckpt = torch.load(model_path, map_location="cpu")
     cfg = ckpt.get("config", {})

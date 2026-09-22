@@ -99,6 +99,7 @@ def test_bad_repr_checkpoint_fails_through_real_loader():
                 data_dir=data_dir,
                 split_type="custom",
                 split_file=split_file,
+                stats_dir=os.path.join(tmpdir, "norm"),
                 output_dir=os.path.join(tmpdir, "out"),
                 repr_checkpoint=bad_ckpt,
                 freeze_representation=True,

@@ -8,39 +8,39 @@ import torch.fft
 def compute_radial_energy_spectrum(
     u: torch.Tensor,
     v: torch.Tensor,
-    domain_size: Tuple[float, float] = (2.0, 1.0),
+    domain_size: Tuple[float, float] = (1.0, 2.0),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Compute 1D radially averaged kinetic energy spectrum E(k).
 
     Args:
-        u: Horizontal velocity, shape (Ny, Nx) or (..., Ny, Nx).
-        v: Vertical velocity, shape (Ny, Nx) or (..., Ny, Nx).
-        domain_size: (Ly, Lx).
+        u: Horizontal velocity along x, shape (Nx, Ny) or (..., Nx, Ny).
+        v: Vertical velocity along y, shape (Nx, Ny) or (..., Nx, Ny).
+        domain_size: (Lx, Ly) extent of domain. Defaults to (1.0, 2.0).
 
     Returns:
         k_bins: 1D wavenumber bins.
         e_k: 1D kinetic energy spectrum.
     """
-    ny, nx = u.shape[-2], u.shape[-1]
-    ly, lx = domain_size
+    nx, ny = u.shape[-2], u.shape[-1]
+    lx, ly = domain_size
     device = u.device
 
     u_hat = torch.fft.rfft2(u, dim=(-2, -1), norm="forward")
     v_hat = torch.fft.rfft2(v, dim=(-2, -1), norm="forward")
 
     # Kinetic energy density in Fourier space: 0.5 * (|u_hat|^2 + |v_hat|^2)
-    # RFFT omits negative frequencies along x, so account for double-counting positive kx != 0
+    # RFFT omits negative frequencies along y (dim -1), so account for double-counting positive ky != 0
     energy_2d = 0.5 * (torch.abs(u_hat) ** 2 + torch.abs(v_hat) ** 2)
     energy_2d[..., :, 1:-1] *= 2.0
 
-    # 2D Wavenumbers
-    ky = torch.fft.fftfreq(ny, d=ly / ny, device=device) * 2.0 * torch.pi
-    kx = torch.fft.rfftfreq(nx, d=lx / nx, device=device) * 2.0 * torch.pi
-    ky_grid, kx_grid = torch.meshgrid(ky, kx, indexing="ij")
-    k_mag = torch.sqrt(ky_grid**2 + kx_grid**2)
+    # 2D Wavenumbers: kx along dim -2 (fft), ky along dim -1 (rfft)
+    kx = torch.fft.fftfreq(nx, d=lx / nx, device=device) * 2.0 * torch.pi
+    ky = torch.fft.rfftfreq(ny, d=ly / ny, device=device) * 2.0 * torch.pi
+    kx_grid, ky_grid = torch.meshgrid(kx, ky, indexing="ij")
+    k_mag = torch.sqrt(kx_grid**2 + ky_grid**2)
 
     # Binning by integer wavenumber
-    k_max = int(min(ny // 2, nx // 2))
+    k_max = int(min(nx // 2, ny // 2))
     k_bins = torch.arange(0, k_max, dtype=torch.float32, device=device)
     e_k = torch.zeros(k_max, dtype=torch.float32, device=device)
 
@@ -58,7 +58,7 @@ def compute_spectral_error(
     pred_v: torch.Tensor,
     target_u: torch.Tensor,
     target_v: torch.Tensor,
-    domain_size: Tuple[float, float] = (2.0, 1.0),
+    domain_size: Tuple[float, float] = (1.0, 2.0),
     eps: float = 1e-8,
 ) -> Dict[str, float]:
     """Compute relative spectrum error over low, mid, and high wavenumber bands."""

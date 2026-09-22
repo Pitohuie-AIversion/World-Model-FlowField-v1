@@ -12,19 +12,19 @@ from src.utils.fft_derivatives import (
 )
 
 
-def make_periodic_grid(ny: int = 128, nx: int = 256, ly: float = 2.0, lx: float = 1.0):
-    """Generate 2D periodic coordinates [y, x]."""
-    y = torch.linspace(-1.0, 1.0 - ly / ny, ny, dtype=torch.float64)
+def make_periodic_grid(nx: int = 128, ny: int = 256, lx: float = 1.0, ly: float = 2.0):
+    """Generate 2D periodic coordinates [x, y]."""
     x = torch.linspace(0.0, 1.0 - lx / nx, nx, dtype=torch.float64)
-    yy, xx = torch.meshgrid(y, x, indexing="ij")
-    return yy, xx
+    y = torch.linspace(-1.0, 1.0 - ly / ny, ny, dtype=torch.float64)
+    xx, yy = torch.meshgrid(x, y, indexing="ij")
+    return xx, yy
 
 
 def test_spectral_derivatives_accuracy():
     """Test spectral derivative against analytical derivatives."""
-    ny, nx = 128, 256
-    ly, lx = 2.0, 1.0
-    yy, xx = make_periodic_grid(ny, nx, ly, lx)
+    nx, ny = 128, 256
+    lx, ly = 1.0, 2.0
+    xx, yy = make_periodic_grid(nx, ny, lx, ly)
 
     # Test function: f(x, y) = sin(2*pi*x) * cos(pi*y)
     # df/dx = 2*pi * cos(2*pi*x) * cos(pi*y)
@@ -34,7 +34,7 @@ def test_spectral_derivatives_accuracy():
     exact_df_dx = 2.0 * torch.pi * torch.cos(2.0 * torch.pi * xx) * torch.cos(torch.pi * yy)
     exact_df_dy = -torch.pi * torch.sin(2.0 * torch.pi * xx) * torch.sin(torch.pi * yy)
 
-    calc_df_dy, calc_df_dx = spectral_grad_2d(f.float(), domain_size=(ly, lx))
+    calc_df_dx, calc_df_dy = spectral_grad_2d(f.float(), domain_size=(lx, ly))
 
     err_x = torch.norm(calc_df_dx.double() - exact_df_dx) / torch.norm(exact_df_dx)
     err_y = torch.norm(calc_df_dy.double() - exact_df_dy) / torch.norm(exact_df_dy)
@@ -45,40 +45,42 @@ def test_spectral_derivatives_accuracy():
 
 def test_divergence_free_field():
     """Test divergence calculation on an analytically divergence-free velocity field."""
-    ny, nx = 128, 256
-    ly, lx = 2.0, 1.0
-    yy, xx = make_periodic_grid(ny, nx, ly, lx)
+    nx, ny = 128, 256
+    lx, ly = 1.0, 2.0
+    xx, yy = make_periodic_grid(nx, ny, lx, ly)
 
-    # u = -sin(2*pi*x) * sin(pi*y)
-    # v = -2 * cos(2*pi*x) * cos(pi*y)
-    # du/dx = -2*pi * cos(2*pi*x) * sin(pi*y)
-    # dv/dy = +2*pi * cos(2*pi*x) * sin(pi*y)
+    # Streamfunction psi = sin(2*pi*x) * cos(pi*y)
+    # u = d(psi)/dy = -pi * sin(2*pi*x) * sin(pi*y)
+    # v = -d(psi)/dx = -2*pi * cos(2*pi*x) * cos(pi*y)
+    # du/dx = -2*pi^2 * cos(2*pi*x) * sin(pi*y)
+    # dv/dy = +2*pi^2 * cos(2*pi*x) * sin(pi*y)
     # div = du/dx + dv/dy = 0
-    u = -torch.sin(2.0 * torch.pi * xx) * torch.sin(torch.pi * yy)
-    v = -2.0 * torch.cos(2.0 * torch.pi * xx) * torch.cos(torch.pi * yy)
+    u = -torch.pi * torch.sin(2.0 * torch.pi * xx) * torch.sin(torch.pi * yy)
+    v = -2.0 * torch.pi * torch.cos(2.0 * torch.pi * xx) * torch.cos(torch.pi * yy)
 
-    div = compute_divergence(u.float(), v.float(), domain_size=(ly, lx))
+    div = compute_divergence(u.float(), v.float(), domain_size=(lx, ly))
     max_div = torch.max(torch.abs(div))
 
-    assert max_div < 2e-4, f"Divergence should be ~0, got max: {max_div}"
+    assert max_div < 5e-4, f"Divergence should be ~0, got max: {max_div}"
 
 
 def test_vorticity_calculation():
     """Test vorticity against analytical solution."""
-    ny, nx = 128, 256
-    ly, lx = 2.0, 1.0
-    yy, xx = make_periodic_grid(ny, nx, ly, lx)
+    nx, ny = 128, 256
+    lx, ly = 1.0, 2.0
+    xx, yy = make_periodic_grid(nx, ny, lx, ly)
 
-    u = -torch.sin(2.0 * torch.pi * xx) * torch.sin(torch.pi * yy)
-    v = -2.0 * torch.cos(2.0 * torch.pi * xx) * torch.cos(torch.pi * yy)
-
+    # u = -pi * sin(2*pi*x) * sin(pi*y)
+    # v = -2*pi * cos(2*pi*x) * cos(pi*y)
     # omega = dv/dx - du/dy
-    # dv/dx = 4*pi * sin(2*pi*x) * cos(pi*y)
-    # du/dy = -pi * sin(2*pi*x) * cos(pi*y)
-    # omega = 5*pi * sin(2*pi*x) * cos(pi*y)
-    exact_omega = 5.0 * torch.pi * torch.sin(2.0 * torch.pi * xx) * torch.cos(torch.pi * yy)
+    # dv/dx = 4*pi^2 * sin(2*pi*x) * cos(pi*y)
+    # du/dy = -pi^2 * sin(2*pi*x) * cos(pi*y)
+    # omega = 5*pi^2 * sin(2*pi*x) * cos(pi*y)
+    u = -torch.pi * torch.sin(2.0 * torch.pi * xx) * torch.sin(torch.pi * yy)
+    v = -2.0 * torch.pi * torch.cos(2.0 * torch.pi * xx) * torch.cos(torch.pi * yy)
+    exact_omega = 5.0 * (torch.pi ** 2) * torch.sin(2.0 * torch.pi * xx) * torch.cos(torch.pi * yy)
 
-    calc_omega = compute_vorticity(u.float(), v.float(), domain_size=(ly, lx))
+    calc_omega = compute_vorticity(u.float(), v.float(), domain_size=(lx, ly))
     err = torch.norm(calc_omega.double() - exact_omega) / torch.norm(exact_omega)
 
     assert err < 1e-4, f"Vorticity relative error too large: {err}"
@@ -95,14 +97,14 @@ def test_zero_mean_pressure():
 def test_laplacian_accuracy():
     """Test spectral Laplacian against analytical solution: lap(sin(2pi*x)*cos(pi*y)) = -5pi^2 * sin(2pi*x)*cos(pi*y)."""
     from src.utils.fft_derivatives import compute_laplacian_2d
-    ny, nx = 128, 256
-    ly, lx = 2.0, 1.0
-    yy, xx = make_periodic_grid(ny, nx, ly, lx)
+    nx, ny = 128, 256
+    lx, ly = 1.0, 2.0
+    xx, yy = make_periodic_grid(nx, ny, lx, ly)
 
     f = torch.sin(2.0 * torch.pi * xx) * torch.cos(torch.pi * yy)
     exact_lap = -5.0 * (torch.pi ** 2) * f
 
-    calc_lap = compute_laplacian_2d(f, domain_size=(ly, lx))
+    calc_lap = compute_laplacian_2d(f, domain_size=(lx, ly))
     err = torch.norm(calc_lap - exact_lap) / torch.norm(exact_lap)
     assert err < 1e-10, f"Laplacian relative error too large: {err}"
 

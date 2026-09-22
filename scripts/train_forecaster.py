@@ -146,6 +146,7 @@ def train_forecaster(
     num_heads: int = 8,
     use_amp: bool = False,
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
+    stats_dir: Optional[str] = None,
 ):
     # Distributed Data Parallel (DDP) detection
     is_distributed = "WORLD_SIZE" in os.environ and int(os.environ["WORLD_SIZE"]) > 1
@@ -179,6 +180,10 @@ def train_forecaster(
             else:
                 split_file = f"outputs/splits/{split_type}_split.json"
 
+    loader_kwargs = {}
+    if stats_dir is not None:
+        loader_kwargs["stats_dir"] = stats_dir
+
     train_loader, valid_loader, test_loader, normalizer, train_sampler = create_flow_dataloaders(
         split_type=split_type,
         split_file=split_file,
@@ -197,6 +202,7 @@ def train_forecaster(
         world_size=world_size,
         seed=seed,
         return_sampler=True,
+        **loader_kwargs,
     )
     valid_dataset = valid_loader.dataset
 
@@ -282,8 +288,8 @@ def train_forecaster(
     optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=1e-4)
     field_loss_fn = FieldLoss(loss_type="mse").to(device)
     rollout_loss_fn = RolloutLoss(field_loss=field_loss_fn).to(device)
-    div_loss_fn = DivergenceLoss().to(device)
-    vort_loss_fn = VorticityLoss().to(device)
+    div_loss_fn = DivergenceLoss(domain_size=(1.0, 2.0)).to(device)
+    vort_loss_fn = VorticityLoss(domain_size=(1.0, 2.0)).to(device)
 
     tracker = None
     if global_rank == 0:

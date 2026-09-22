@@ -204,13 +204,13 @@ def run_physics_ablation_eval(
                 has_legacy = any(os.path.exists(lp) for lp in group_info["legacy_candidates"])
                 if has_legacy:
                     print(
-                        f"Notice: Closure-R2 checkpoint not found for {group_key}, but legacy Closure-R1 checkpoint exists. "
+                        f"Notice: Closure-R3 checkpoint not found for {group_key}, but legacy Closure-R1 checkpoint exists. "
                         f"Legacy fallback is blocked by default. Pass --allow_legacy_checkpoints to explicitly opt-in."
                     )
             print(f"Warning: No valid checkpoint found for {group_key} in {candidate_paths}, skipping")
             continue
 
-        proto_label = "Closure-R1-legacy" if is_legacy else "Closure-R2"
+        proto_label = "Closure-R1-legacy" if is_legacy else "Closure-R3"
         print(f"\n--- Evaluating Physics Ablation [{group_key}]: {group_info['title']} ({ckpt_path}) [{proto_label}] ---")
         ckpt_data = torch.load(ckpt_path, map_location="cpu")
         cfg = ckpt_data.get("config", {})

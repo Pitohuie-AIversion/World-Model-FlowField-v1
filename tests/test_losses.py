@@ -20,20 +20,23 @@ def test_field_losses():
 
 
 def test_divergence_loss():
-    # Construct zero divergence field
-    ny, nx = 64, 128
-    y = torch.linspace(-1.0, 1.0 - 2.0 / ny, ny)
+    # Construct zero divergence field on (nx, ny) grid with (lx=1.0, ly=2.0)
+    nx, ny = 64, 128
     x = torch.linspace(0.0, 1.0 - 1.0 / nx, nx)
-    yy, xx = torch.meshgrid(y, x, indexing="ij")
+    y = torch.linspace(-1.0, 1.0 - 2.0 / ny, ny)
+    xx, yy = torch.meshgrid(x, y, indexing="ij")
 
-    u = -torch.sin(2.0 * torch.pi * xx) * torch.sin(torch.pi * yy)
-    v = -2.0 * torch.cos(2.0 * torch.pi * xx) * torch.cos(torch.pi * yy)
+    # Streamfunction psi = sin(2*pi*x) * cos(pi*y)
+    # u = d(psi)/dy = -pi * sin(2*pi*x) * sin(pi*y)
+    # v = -d(psi)/dx = -2*pi * cos(2*pi*x) * cos(pi*y)
+    u = -torch.pi * torch.sin(2.0 * torch.pi * xx) * torch.sin(torch.pi * yy)
+    v = -2.0 * torch.pi * torch.cos(2.0 * torch.pi * xx) * torch.cos(torch.pi * yy)
     p = torch.zeros_like(u)
     s = torch.zeros_like(u)
 
-    q = torch.stack([u, v, p, s], dim=0).unsqueeze(0)  # (1, 4, ny, nx)
+    q = torch.stack([u, v, p, s], dim=0).unsqueeze(0)  # (1, 4, nx, ny)
 
-    div_loss_fn = DivergenceLoss(domain_size=(2.0, 1.0))
+    div_loss_fn = DivergenceLoss(domain_size=(1.0, 2.0))
     loss_val = div_loss_fn(q)
     assert loss_val.item() < 1e-6
 

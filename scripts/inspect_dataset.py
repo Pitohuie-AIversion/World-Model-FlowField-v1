@@ -67,7 +67,7 @@ def audit_hdf5_file(file_path: str):
             # Divergence check on t=0
             u_t = torch.from_numpy(u).unsqueeze(0)
             v_t = torch.from_numpy(v).unsqueeze(0)
-            div = compute_divergence(u_t, v_t, domain_size=(2.0, 1.0))
+            div = compute_divergence(u_t, v_t, domain_size=(1.0, 2.0))
             max_div = torch.max(torch.abs(div)).item()
             mean_div = torch.mean(torch.abs(div)).item()
             print(f"  Divergence check at t=0: max |div| = {max_div:.4e}, mean |div| = {mean_div:.4e}")

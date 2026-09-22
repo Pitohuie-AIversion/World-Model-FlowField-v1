@@ -32,10 +32,10 @@ def plot_flow_state(
     s = fields[3]
 
     # Compute vorticity
-    omega = compute_vorticity(u.unsqueeze(0), v.unsqueeze(0), domain_size=(1.0, 1.0))[0]
+    omega = compute_vorticity(u.unsqueeze(0), v.unsqueeze(0), domain_size=(1.0, 2.0))[0]
 
     # Compute spectrum
-    k_bins, e_k = compute_radial_energy_spectrum(u, v, domain_size=(1.0, 1.0))
+    k_bins, e_k = compute_radial_energy_spectrum(u, v, domain_size=(1.0, 2.0))
 
     fig, axes = plt.subplots(2, 3, figsize=(16, 9), dpi=150)
 

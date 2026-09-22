@@ -10,10 +10,10 @@ class DivergenceLoss(nn.Module):
     """Calculates mean squared divergence of predicted velocity fields (u, v).
 
     Args:
-        domain_size: (Ly, Lx) spatial domain sizes. Defaults to (2.0, 1.0).
+        domain_size: (Lx, Ly) spatial domain sizes. Defaults to (1.0, 2.0).
     """
 
-    def __init__(self, domain_size: Tuple[float, float] = (2.0, 1.0)):
+    def __init__(self, domain_size: Tuple[float, float] = (1.0, 2.0)):
         super().__init__()
         self.domain_size = domain_size
 
@@ -21,7 +21,7 @@ class DivergenceLoss(nn.Module):
         """Compute divergence loss.
 
         Args:
-            pred_q: Physical fields of shape (..., C, Ny, Nx), where channel 0 is u, channel 1 is v.
+            pred_q: Physical fields of shape (..., C, Nx, Ny), where channel 0 is u, channel 1 is v.
 
         Returns:
             loss: Scalar mean squared divergence.

@@ -10,14 +10,14 @@ class VorticityLoss(nn.Module):
     """Calculates mean squared or relative error between predicted and target vorticity.
 
     Args:
-        domain_size: (Ly, Lx) spatial domain sizes. Defaults to (2.0, 1.0).
+        domain_size: (Lx, Ly) spatial domain sizes. Defaults to (1.0, 2.0).
         relative: If True, computes relative L2 error rather than absolute MSE.
         eps: Epsilon for relative division.
     """
 
     def __init__(
         self,
-        domain_size: Tuple[float, float] = (2.0, 1.0),
+        domain_size: Tuple[float, float] = (1.0, 2.0),
         relative: bool = False,
         eps: float = 1e-6,
     ):
@@ -30,8 +30,8 @@ class VorticityLoss(nn.Module):
         """Compute vorticity loss.
 
         Args:
-            pred_q: Predicted physical fields (..., C, Ny, Nx), channels 0, 1 are u, v.
-            target_q: Target physical fields (..., C, Ny, Nx), channels 0, 1 are u, v.
+            pred_q: Predicted physical fields (..., C, Nx, Ny), channels 0, 1 are u, v.
+            target_q: Target physical fields (..., C, Nx, Ny), channels 0, 1 are u, v.
 
         Returns:
             loss: Scalar vorticity error loss.
