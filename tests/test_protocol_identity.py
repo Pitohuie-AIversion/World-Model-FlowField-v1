@@ -635,8 +635,8 @@ def test_checkpoint_seed_missing_not_silently_interpreted_as_42():
     assert "missing required 'seed'" in str(exc_info.value)
 
 
-def test_seed43_requested_only_seed42_exists_rejects_cross_seed_fallback():
-    """When seed 43 is requested and only seed 42 checkpoints exist, cross-seed fallback is forbidden."""
+def test_untrained_seed_requested_only_seed42_exists_rejects_cross_seed_fallback():
+    """When an untrained seed (e.g. 9999) is requested and only seed 42 checkpoints exist, cross-seed fallback is forbidden."""
     with tempfile.TemporaryDirectory() as tmpdir:
         h5_path = os.path.join(tmpdir, "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5")
         _create_mock_h5(h5_path, n_trajs=2, nt=8, ny=16, nx=32)
@@ -651,14 +651,14 @@ def test_seed43_requested_only_seed42_exists_rejects_cross_seed_fallback():
                 split_file=split_file,
                 stats_dir=os.path.join(tmpdir, "normalization"),
                 max_horizon=2,
-                seed=43,
+                seed=9999,
                 groups=["E1_rollout_field"],
             )
         assert "Cross-seed fallback is strictly forbidden" in str(exc_info.value)
-        assert "seed_43" in str(exc_info.value)
+        assert "seed_9999" in str(exc_info.value)
 
 
-def test_seed43_groups_filtering_skips_missing_e0():
+def test_untrained_seed_groups_filtering_skips_missing_e0():
     """Evaluator honors --groups and does not check or attempt to access unselected groups like E0."""
     with tempfile.TemporaryDirectory() as tmpdir:
         h5_path = os.path.join(tmpdir, "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5")
@@ -667,7 +667,7 @@ def test_seed43_groups_filtering_skips_missing_e0():
         with open(split_file, "w") as f:
             json.dump({"train": [h5_path], "valid": [h5_path], "test": [h5_path]}, f)
 
-        # When requesting only E2 for seed 43, E0 should never be checked
+        # When requesting only E2 for an untrained seed, E0 should never be checked
         with pytest.raises(FileNotFoundError) as exc_info:
             run_physics_ablation_eval(
                 data_dir=tmpdir,
@@ -675,7 +675,7 @@ def test_seed43_groups_filtering_skips_missing_e0():
                 split_file=split_file,
                 stats_dir=os.path.join(tmpdir, "normalization"),
                 max_horizon=2,
-                seed=43,
+                seed=9999,
                 groups=["E2_plus_L_div"],
             )
         # The error must be about E2, not E0!
