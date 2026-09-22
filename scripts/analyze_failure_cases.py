@@ -30,10 +30,11 @@ from src.models.latent_forecaster import LatentForecaster
 from src.models.latent_transformer import LatentSTTransformer
 from src.utils.fft_derivatives import compute_divergence, compute_vorticity
 from src.utils.reproducibility import seed_everything
+from src.utils.physics_contract import PHYSICS_PROTOCOL, SPATIAL_AXIS_CONTRACT, SHEAR_FLOW_DOMAIN_SIZE_XY
 
 
 def analyze_failure_cases(
-    model_path: str = "outputs/checkpoints/dynamics/ablation_E4_full_physics/best_vrmse_mean.pt",
+    model_path: str = "outputs/checkpoints/dynamics/closure_r4/ablation_E4_full_physics/best_vrmse_mean.pt",
     data_dir: str = "/root/autodl-tmp/datasets/shear_flow",
     split_type: str = "grouped",
     split_file: str = None,
@@ -52,37 +53,82 @@ def analyze_failure_cases(
     os.makedirs(fig_dir, exist_ok=True)
     os.makedirs(metrics_dir, exist_ok=True)
 
-    # Resolve candidate model path with strict fail-closed protocol
+    # Resolve candidate model path with strict Closure-R4 fail-closed protocol.
+    # Pre-R4 E2/E3/E4 checkpoints are permanently invalid because their
+    # divergence/vorticity losses used the swapped-axis physics operator.
     is_legacy = False
+    checkpoint_training_protocol = PHYSICS_PROTOCOL
+
+    canonical_default = "outputs/checkpoints/dynamics/closure_r4/ablation_E4_full_physics/best_vrmse_mean.pt"
+    canonical_alt = "outputs/checkpoints/dynamics/closure_r4/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt"
     if not os.path.exists(model_path):
-        canonical_alt = "outputs/checkpoints/dynamics/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt"
-        if model_path == "outputs/checkpoints/dynamics/ablation_E4_full_physics/best_vrmse_mean.pt" and os.path.exists(canonical_alt):
+        if model_path == canonical_default and os.path.exists(canonical_alt):
             model_path = canonical_alt
 
+    invalid_axis_candidates = [
+        "outputs/checkpoints/dynamics/ablation_E2_plus_L_div/best_vrmse_mean.pt",
+        "outputs/checkpoints/dynamics/ablation_E2_plus_L_div/latent_transformer/best_vrmse_mean.pt",
+        "outputs/checkpoints/dynamics/ablation_E3_plus_L_vort/best_vrmse_mean.pt",
+        "outputs/checkpoints/dynamics/ablation_E3_plus_L_vort/latent_transformer/best_vrmse_mean.pt",
+        "outputs/checkpoints/dynamics/ablation_E4_full_physics/best_vrmse_mean.pt",
+        "outputs/checkpoints/dynamics/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt",
+        "outputs/checkpoints/dynamics/ablation_plus_L_div/best_vrmse_mean.pt",
+        "outputs/checkpoints/dynamics/ablation_plus_L_div/latent_transformer/best_vrmse_mean.pt",
+        "outputs/checkpoints/dynamics/ablation_plus_L_vort/best_vrmse_mean.pt",
+        "outputs/checkpoints/dynamics/ablation_plus_L_vort/latent_transformer/best_vrmse_mean.pt",
+        "outputs/checkpoints/dynamics/ablation_plus_L_div_vort/best_vrmse_mean.pt",
+        "outputs/checkpoints/dynamics/ablation_plus_L_div_vort/latent_transformer/best_vrmse_mean.pt",
+    ]
+
     if not os.path.exists(model_path):
-        legacy_candidates = [
-            "outputs/checkpoints/dynamics/ablation_plus_L_div_vort/best_vrmse_mean.pt",
-            "outputs/checkpoints/dynamics/ablation_plus_L_div_vort/latent_transformer/best_vrmse_mean.pt",
+        safe_legacy_candidates = [
+            "outputs/checkpoints/dynamics/ablation_E1_rollout_field/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/ablation_E1_rollout_field/latent_transformer/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/ablation_E0_single_step/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/ablation_E0_single_step/latent_transformer/best_vrmse_mean.pt",
             "outputs/checkpoints/dynamics/latent_transformer/best_vrmse_mean.pt",
         ]
-        found_legacy = None
-        for cand in legacy_candidates:
-            if os.path.exists(cand):
-                found_legacy = cand
-                break
+        found_safe_legacy = next(
+            (p for p in safe_legacy_candidates if os.path.exists(p)),
+            None,
+        )
+        invalid_existing = [p for p in invalid_axis_candidates if os.path.exists(p)]
 
-        if allow_legacy_checkpoint and found_legacy:
-            model_path = found_legacy
+        if allow_legacy_checkpoint and found_safe_legacy:
+            legacy_ckpt = torch.load(found_safe_legacy, map_location="cpu")
+            legacy_cfg = legacy_ckpt.get("config", {})
+            if legacy_cfg.get("lambda_div", 0.0) != 0.0 or legacy_cfg.get("lambda_vort", 0.0) != 0.0:
+                raise RuntimeError(
+                    f"Refusing legacy checkpoint '{found_safe_legacy}': non-zero physics-loss weights "
+                    "make it invalid under Closure-R4."
+                )
+            model_path = found_safe_legacy
             is_legacy = True
-            print(f"Notice: Using Closure-R1 legacy checkpoint: {model_path} (explicit opt-in enabled)")
+            checkpoint_training_protocol = "pre-R4-field-only"
+            print(
+                f"Notice: Using pre-R4 field-only checkpoint {model_path}; "
+                f"all diagnostics are recomputed under {PHYSICS_PROTOCOL}."
+            )
         else:
-            hint = ""
-            if found_legacy:
-                hint = f" Found legacy checkpoint '{found_legacy}', but legacy fallback is disabled by default. Pass --allow_legacy_checkpoint to explicitly opt-in."
-            raise FileNotFoundError(f"Checkpoint not found at '{model_path}'.{hint}")
+            detail = ""
+            if invalid_existing:
+                detail += (
+                    " Invalid pre-R4 physics-loss checkpoint(s) exist but are permanently blocked: "
+                    f"{invalid_existing}."
+                )
+            if found_safe_legacy and not allow_legacy_checkpoint:
+                detail += (
+                    f" Safe field-only legacy checkpoint '{found_safe_legacy}' exists, but explicit "
+                    "--allow_legacy_checkpoint is required."
+                )
+            raise FileNotFoundError(
+                f"Closure-R4 checkpoint not found at '{model_path}'.{detail}"
+            )
 
-    proto_str = "Closure-R1-legacy" if is_legacy else "Closure-R2"
-    print(f"Loading checkpoint config from {model_path} [{proto_str}]...")
+    print(
+        f"Loading checkpoint config from {model_path} "
+        f"[evaluation={PHYSICS_PROTOCOL}; checkpoint={checkpoint_training_protocol}]..."
+    )
     ckpt = torch.load(model_path, map_location="cpu")
     cfg = ckpt.get("config", {})
 
@@ -260,7 +306,7 @@ def analyze_failure_cases(
     plt.suptitle("The Well Shear Flow V1: Failure and Boundary Case Analysis (30-Step Rollout)", fontsize=15, fontweight="bold", y=0.99)
     plt.tight_layout(rect=[0, 0.02, 1, 0.97])
 
-    save_fig_path = os.path.join(fig_dir, "failure_cases_analysis.png")
+    save_fig_path = os.path.join(fig_dir, "closure_r4_failure_cases_analysis.png")
     plt.savefig(save_fig_path, bbox_inches="tight")
     plt.close()
     print(f"Exported failure case visualization to: {save_fig_path}")
@@ -269,7 +315,10 @@ def analyze_failure_cases(
     summary_data = {
         "metadata": {
             "model_path": model_path,
-            "protocol": proto_str,
+            "evaluation_protocol": PHYSICS_PROTOCOL,
+            "checkpoint_training_protocol": checkpoint_training_protocol,
+            "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+            "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
             "is_legacy": is_legacy,
             "split_type": s_type,
             "downsample_factor": ds_factor,
@@ -285,7 +334,7 @@ def analyze_failure_cases(
         ],
     }
 
-    save_json_path = os.path.join(metrics_dir, "failure_cases_analysis.json")
+    save_json_path = os.path.join(metrics_dir, "closure_r4_failure_cases_analysis.json")
     with open(save_json_path, "w") as f:
         json.dump(summary_data, f, indent=2)
     print(f"Exported failure case metadata to: {save_json_path}")
@@ -293,13 +342,13 @@ def analyze_failure_cases(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Failure and boundary case analysis.")
-    parser.add_argument("--model_path", type=str, default="outputs/checkpoints/dynamics/ablation_E4_full_physics/best_vrmse_mean.pt")
+    parser.add_argument("--model_path", type=str, default="outputs/checkpoints/dynamics/closure_r4/ablation_E4_full_physics/best_vrmse_mean.pt")
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--split_type", type=str, default="grouped")
     parser.add_argument("--split_file", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="outputs")
     parser.add_argument("--horizon", type=int, default=30)
-    parser.add_argument("--allow_legacy_checkpoint", action="store_true", default=False, help="Allow opt-in fallback to Closure-R1 legacy checkpoint")
+    parser.add_argument("--allow_legacy_checkpoint", action="store_true", default=False, help="Allow explicit re-evaluation of a pre-R4 field-only checkpoint; pre-R4 physics-loss checkpoints remain blocked")
     args = parser.parse_args()
 
     analyze_failure_cases(
