@@ -39,16 +39,27 @@ def compute_radial_energy_spectrum(
     kx_grid, ky_grid = torch.meshgrid(kx, ky, indexing="ij")
     k_mag = torch.sqrt(kx_grid**2 + ky_grid**2)
 
-    # Binning by integer wavenumber
-    k_max = int(min(nx // 2, ny // 2))
-    k_bins = torch.arange(0, k_max, dtype=torch.float32, device=device)
-    e_k = torch.zeros(k_max, dtype=torch.float32, device=device)
+    # Fundamental radial bin width delta_k based on largest domain dimension
+    delta_k = 2.0 * torch.pi / max(lx, ly)
+
+    # Inscribed Nyquist wavenumber (isotropic limit)
+    k_nyq_x = (nx // 2) * (2.0 * torch.pi / lx)
+    k_nyq_y = (ny // 2) * (2.0 * torch.pi / ly)
+    k_max = min(k_nyq_x, k_nyq_y)
+
+    num_bins = int(torch.floor(torch.tensor(k_max / delta_k)).item())
+    k_bins = torch.arange(num_bins, dtype=torch.float32, device=device) * delta_k
+    e_k = torch.zeros(num_bins, dtype=torch.float32, device=device)
 
     flat_k = k_mag.flatten()
     flat_e = energy_2d.mean(dim=tuple(range(energy_2d.ndim - 2))).flatten() if energy_2d.ndim > 2 else energy_2d.flatten()
 
-    k_indices = torch.clamp(torch.floor(flat_k).long(), 0, k_max - 1)
-    e_k.index_add_(0, k_indices, flat_e)
+    # Bin index by physical wavenumber shell [i * delta_k, (i + 1) * delta_k)
+    # Add epsilon to guard against IEEE 754 precision issues at exact boundaries
+    k_indices = torch.floor(flat_k / delta_k + 1e-6).long()
+    valid_mask = (k_indices >= 0) & (k_indices < num_bins)
+
+    e_k.index_add_(0, k_indices[valid_mask], flat_e[valid_mask])
 
     return k_bins, e_k
 
@@ -78,3 +89,4 @@ def compute_spectral_error(
         "spec_err_mid": float(torch.mean(log_err[k_low:k_mid]).item()),
         "spec_err_high": float(torch.mean(log_err[k_mid:]).item()),
     }
+

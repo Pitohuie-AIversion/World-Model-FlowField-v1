@@ -20,6 +20,7 @@ def evaluate_rollout_trajectory(
     target_trajectory: torch.Tensor,
     evaluation_steps: Optional[List[int]] = None,
     domain_size: tuple = (1.0, 2.0),
+    initial_state: Optional[torch.Tensor] = None,
 ) -> Dict[str, Dict[str, float]]:
     """Evaluates multi-step predicted trajectory against target trajectory."""
     total_steps = pred_trajectory.shape[1]
@@ -42,7 +43,8 @@ def evaluate_rollout_trajectory(
         step_res.update(field_metrics)
 
         # 2. Tracer consistency
-        tracer_metrics = compute_tracer_metrics(p[:, 3], t[:, 3])
+        initial_s = initial_state[:, 3] if initial_state is not None else None
+        tracer_metrics = compute_tracer_metrics(p[:, 3], t[:, 3], initial_s=initial_s)
         step_res.update(tracer_metrics)
 
         # 3. Divergence

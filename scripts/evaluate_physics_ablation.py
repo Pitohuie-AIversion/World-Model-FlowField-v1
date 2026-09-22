@@ -12,6 +12,8 @@ canonical data pipeline, self-describing checkpoint recovery, and physical-space
 """
 
 import argparse
+import datetime
+import hashlib
 import json
 import os
 import sys
@@ -141,15 +143,23 @@ def evaluate_single_ablation(
             if normalizer is not None:
                 pred_eval = normalizer.denormalize(pred_traj)
                 future_eval = normalizer.denormalize(q_future)
+                hist_eval = normalizer.denormalize(q_hist)
             else:
                 pred_eval = pred_traj
                 future_eval = q_future
+                hist_eval = q_hist
+
+            # Initial condition at t=0 (last frame of history)
+            initial_state = hist_eval[:, -1].clone()
 
             # Enforce physical zero-mean pressure gauge
             pred_eval[:, :, 2:3, :, :] = pred_eval[:, :, 2:3, :, :] - pred_eval[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
             future_eval[:, :, 2:3, :, :] = future_eval[:, :, 2:3, :, :] - future_eval[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
+            initial_state[:, 2:3, :, :] = initial_state[:, 2:3, :, :] - initial_state[:, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
 
-            batch_res = evaluate_rollout_trajectory(pred_eval, future_eval, evaluation_steps=eval_steps)
+            batch_res = evaluate_rollout_trajectory(
+                pred_eval, future_eval, evaluation_steps=eval_steps, initial_state=initial_state
+            )
 
             for step_key, step_data in batch_res.items():
                 for m_key, m_val in step_data.items():
@@ -274,8 +284,12 @@ def run_physics_ablation_eval(
         eval_res = evaluate_single_ablation(
             forecaster, test_loader, device, max_horizon=max_horizon, normalizer=normalizer, use_condition=use_cond
         )
+        with open(ckpt_path, "rb") as f_ckpt:
+            ckpt_sha256 = hashlib.sha256(f_ckpt.read()).hexdigest()
+
         eval_res["__metadata__"] = {
             "checkpoint": ckpt_path,
+            "checkpoint_sha256": ckpt_sha256,
             "evaluation_protocol": PHYSICS_PROTOCOL,
             "checkpoint_training_protocol": checkpoint_training_protocol,
             "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
@@ -283,6 +297,9 @@ def run_physics_ablation_eval(
             "is_legacy": is_legacy,
             "prediction_mode": pred_mode,
             "use_condition": use_cond,
+            "split_type": split_type,
+            "split_file": split_file,
+            "evaluation_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         results[group_key] = eval_res
 
@@ -296,7 +313,9 @@ def run_physics_ablation_eval(
         ("enstrophy_rel_err", "Enstrophy Rel Err"),
         ("energy_spectrum_mae", "Energy Spectrum MAE"),
         ("tracer_var_retention", "Tracer Var Retention"),
-        ("tracer_mass_error", "Tracer Mass Error"),
+        ("tracer_out_of_bounds_rate", "Tracer OOB Rate"),
+        ("tracer_mass_error", "Tracer Mass Error (L1)"),
+        ("tracer_mean_err", "Tracer Mean Error"),
     ]
 
     print("\n" + "=" * 98)
@@ -317,7 +336,9 @@ def run_physics_ablation_eval(
     # Auto-plot
     try:
         from scripts.plot_physics_ablation import plot_physics_ablation_curves
-        plot_physics_ablation_curves(json_path=output_file)
+        base_name = os.path.splitext(os.path.basename(output_file))[0]
+        fig_path = f"outputs/figures/{base_name}_curves.png" if "v2" in base_name else "outputs/figures/physics_ablation_curves.png"
+        plot_physics_ablation_curves(json_path=output_file, save_path=fig_path)
     except Exception as e:
         print(f"Plotting notice: {e}")
 

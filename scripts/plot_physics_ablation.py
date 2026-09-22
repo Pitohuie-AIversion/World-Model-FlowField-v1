@@ -34,6 +34,41 @@ def plot_physics_ablation_curves(
     ]
 
     styles = {
+        "E0_single_step": {
+            "label": r"E0: Single-Step Pure Field ($H=1$)",
+            "color": "#7f7f7f",
+            "linestyle": ":",
+            "marker": "o",
+            "linewidth": 2.0,
+        },
+        "E1_rollout_field": {
+            "label": r"E1: Rollout-Aware Field ($H=2$)",
+            "color": "#1f77b4",
+            "linestyle": "--",
+            "marker": "s",
+            "linewidth": 2.2,
+        },
+        "E2_plus_L_div": {
+            "label": r"E2: $+ L_{\mathrm{div}}$ (Divergence)",
+            "color": "#2ca02c",
+            "linestyle": "-.",
+            "marker": "^",
+            "linewidth": 2.2,
+        },
+        "E3_plus_L_vort": {
+            "label": r"E3: $+ L_\omega$ (Vorticity)",
+            "color": "#ff7f0e",
+            "linestyle": "-.",
+            "marker": "v",
+            "linewidth": 2.2,
+        },
+        "E4_full_physics": {
+            "label": r"E4: $+ L_{\mathrm{div}} + L_\omega$ (Full Physics)",
+            "color": "#d62728",
+            "linestyle": "-",
+            "marker": "D",
+            "linewidth": 2.8,
+        },
         "L_field": {
             "label": r"1. $L_{\mathrm{field}}$ (Baseline)",
             "color": "#7f7f7f",
