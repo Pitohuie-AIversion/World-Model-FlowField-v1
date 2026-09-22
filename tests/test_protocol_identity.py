@@ -187,3 +187,21 @@ def test_benchmark_rejects_mixed_data_contracts():
     with pytest.raises(ValueError) as exc:
         verify_checkpoint_contract("test_model", "ckpt.pt", mismatched_split_cfg, benchmark_contract)
     assert "split_type" in str(exc.value)
+
+    # 5. Pre-R4 checkpoints trained with physics losses are scientifically invalid.
+    poisoned_physics_cfg = {
+        "split_type": "grouped",
+        "downsample_factor": 2,
+        "normalize": True,
+        "lambda_div": 0.01,
+        "lambda_vort": 0.0,
+        "physics_protocol": "Closure-R3",
+    }
+    with pytest.raises(ValueError) as exc:
+        verify_checkpoint_contract("poisoned_model", "old_e2.pt", poisoned_physics_cfg, benchmark_contract)
+    assert "physics_protocol" in str(exc.value)
+
+    # 6. The same non-zero physics loss is valid when trained under Closure-R4.
+    valid_r4_physics_cfg = dict(poisoned_physics_cfg)
+    valid_r4_physics_cfg["physics_protocol"] = "Closure-R4"
+    verify_checkpoint_contract("r4_model", "r4_e2.pt", valid_r4_physics_cfg, benchmark_contract)
