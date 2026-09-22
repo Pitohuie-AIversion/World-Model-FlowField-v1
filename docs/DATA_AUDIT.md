@@ -45,6 +45,27 @@
 
 ---
 
+## 2.1 Closure-R4 空间轴与物理尺度契约
+
+真实 HDF5 字段的空间维度按 `(Nx, Ny) = (256, 512)` 存储，且
+`ShearFlowDataset` 保持该原生空间顺序，不做转置。因此正式张量契约为：
+
+- `dim -2 = x`
+- `dim -1 = y`
+- Tensor layout: `(..., C, Nx, Ny)`
+
+HDF5 中 `dimensions/x` 与 `dimensions/y` 的标签值均归一化到
+`[0, 1]`。物理空间导数则使用 shear-flow 仿真的实际尺度
+`Lx = 1.0, Ly = 2.0`。Closure-R4 的 FFT 梯度、散度、涡量、
+Laplacian 与能谱波数全部遵守统一的 `(Lx, Ly)` 约定。
+
+pre-R4 物理算子错误地把 `dim -2` 当作 y、`dim -1` 当作 x。
+因此，任何使用非零 divergence/vorticity loss 训练得到的 pre-R4
+checkpoint 均不得用于正式物理结论；field-only 权重可以保留，但必须使用
+Closure-R4 算子重新计算物理指标。
+
+---
+
 ## 3. 物理字段数值分布统计
 
 ### 3.1 初始状态 ($t = 0$)
