@@ -72,6 +72,9 @@ To prevent mislabeled or mismatched checkpoints (e.g. an E2 directory containing
    - Checkpoints trained before Closure-R4 were optimized against invalid gradients.
    - **Permanently blocked** from evaluation in all evaluation scripts (`evaluate_physics_ablation.py`, `evaluate_rollout.py`, `analyze_failure_cases.py`).
    - Any checkpoint claiming non-zero physics losses that lacks `physics_protocol: "Closure-R4"`, `spatial_axis_contract`, or `physics_domain_size_xy: [1.0, 2.0]` fails closed immediately.
-4. **Output Directory Isolation**:
+4. **Required Field Fail-Closed Verification**:
+   - For all non-legacy Closure-R4 checkpoints, `horizon`, `lambda_div`, `lambda_vort`, `physics_protocol`, `spatial_axis_contract`, and `physics_domain_size_xy` are strictly required fields. Any missing field triggers an immediate fail-closed semantic violation.
+   - For legacy field-only checkpoints (`is_legacy=True`), `horizon`, `lambda_div`, and `lambda_vort` are required, and physics losses must strictly be 0.0.
+5. **Output Directory Isolation**:
    - Closure-R4 ablation models are trained and saved to `outputs/checkpoints/dynamics/closure_r4/`.
    - Results are saved to `outputs/metrics/closure_r4_physics_ablation.json` and `outputs/metrics/closure_r4_rollout_benchmark.json`.

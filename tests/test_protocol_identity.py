@@ -359,3 +359,54 @@ def test_ablation_checkpoint_semantic_validation():
         "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
     }
     validate_ablation_checkpoint_semantics("E4_full_physics", valid_e4)
+
+    # 6. Required field missing fail-closed validations
+    # 6a. E2 missing horizon is rejected
+    e2_missing_horizon = {
+        "lambda_div": 0.01,
+        "lambda_vort": 0.0,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+    }
+    with pytest.raises(ValueError) as exc:
+        validate_ablation_checkpoint_semantics("E2_plus_L_div", e2_missing_horizon)
+    assert "missing required field: horizon" in str(exc.value)
+
+    # 6b. E0 R4 missing horizon is rejected
+    e0_r4_missing_horizon = {
+        "lambda_div": 0.0,
+        "lambda_vort": 0.0,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+    }
+    with pytest.raises(ValueError) as exc:
+        validate_ablation_checkpoint_semantics("E0_single_step", e0_r4_missing_horizon)
+    assert "missing required field: horizon" in str(exc.value)
+
+    # 6c. E1 R4 missing lambda_div is rejected
+    e1_r4_missing_lambda_div = {
+        "horizon": 2,
+        "lambda_vort": 0.0,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+    }
+    with pytest.raises(ValueError) as exc:
+        validate_ablation_checkpoint_semantics("E1_rollout_field", e1_r4_missing_lambda_div)
+    assert "missing required field: lambda_div" in str(exc.value)
+
+    # 6d. Legacy E0 missing new R4 metadata passes under legacy opt-in
+    legacy_e0 = {
+        "horizon": 1,
+        "lambda_div": 0.0,
+        "lambda_vort": 0.0,
+        # Intentionally omitting physics_protocol, spatial_axis_contract, physics_domain_size_xy
+    }
+    validate_ablation_checkpoint_semantics("E0_single_step", legacy_e0, is_legacy=True)
+
+    # 6e. Legacy E0 without opt-in (is_legacy=False) is rejected due to missing R4 metadata
+    with pytest.raises(ValueError) as exc:
+        validate_ablation_checkpoint_semantics("E0_single_step", legacy_e0, is_legacy=False)
+    assert "missing required field: physics_protocol" in str(exc.value)
