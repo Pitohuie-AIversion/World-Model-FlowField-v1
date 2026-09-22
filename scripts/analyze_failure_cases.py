@@ -122,7 +122,7 @@ def analyze_failure_cases(
                     "--allow_legacy_checkpoint is required."
                 )
             raise FileNotFoundError(
-                f"Closure-R4 checkpoint not found at '{model_path}'.{detail}"
+                f"Checkpoint not found for Closure-R4 at '{model_path}'.{detail}"
             )
 
     print(
