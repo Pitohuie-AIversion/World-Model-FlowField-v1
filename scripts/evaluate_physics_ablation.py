@@ -199,6 +199,7 @@ def run_physics_ablation_eval(
     max_horizon: int = 30,
     stride: int = 20,
     seed: Optional[int] = None,
+    stats_dir: Optional[str] = None,
     manifest_path: str = "outputs/manifests/closure_r4_seed42.json",
     allow_legacy_checkpoints: bool = False,
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
@@ -221,6 +222,10 @@ def run_physics_ablation_eval(
                 split_file = f"outputs/splits/{split_type}_split.json"
 
     print(f"Loading test dataset via unified pipeline ({split_type} split: {split_file})...")
+    loader_kwargs = {}
+    if stats_dir is not None:
+        loader_kwargs["stats_dir"] = stats_dir
+
     _, _, test_loader, normalizer = create_flow_dataloaders(
         split_type=split_type,
         split_file=split_file,
@@ -232,6 +237,7 @@ def run_physics_ablation_eval(
         batch_size=2,
         num_workers=0,
         normalize=normalize,
+        **loader_kwargs,
     )
 
     print(f"Loaded {len(test_loader.dataset)} test trajectories for physics ablation {max_horizon}-step evaluation.")
