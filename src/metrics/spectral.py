@@ -10,7 +10,7 @@ def compute_radial_energy_spectrum(
     v: torch.Tensor,
     domain_size: Tuple[float, float] = (1.0, 2.0),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Compute 1D radially averaged kinetic energy spectrum E(k).
+    """Compute 1D shell-integrated / radially binned kinetic energy spectrum E(k).
 
     Args:
         u: Horizontal velocity along x, shape (Nx, Ny) or (..., Nx, Ny).
@@ -18,8 +18,8 @@ def compute_radial_energy_spectrum(
         domain_size: (Lx, Ly) extent of domain. Defaults to (1.0, 2.0).
 
     Returns:
-        k_bins: 1D wavenumber bins.
-        e_k: 1D kinetic energy spectrum.
+        k_bins: 1D wavenumber bins [0, delta_k, 2*delta_k, ...].
+        e_k: 1D shell-integrated kinetic energy spectrum.
     """
     nx, ny = u.shape[-2], u.shape[-1]
     lx, ly = domain_size
