@@ -42,6 +42,7 @@ from src.utils.physics_contract import (
 )
 from src.utils.provenance import (
     get_git_commit,
+    is_git_dirty,
     compute_file_sha256,
     compute_split_hash_from_file,
     compute_normalizer_hash,
@@ -122,6 +123,14 @@ ABLATION_GROUPS = {
 }
 
 
+def resolve_evaluation_output_path(output_file: Optional[str], seed: Optional[int]) -> str:
+    """Determine output file path, ensuring distinct seeds never collide or overwrite each other."""
+    if output_file is not None:
+        return output_file
+    seed_tag = f"_seed{seed}" if seed is not None else ""
+    return f"outputs/metrics/closure_r4_physics_ablation{seed_tag}_v2.json"
+
+
 def evaluate_single_ablation(
     model: LatentForecaster,
     test_loader: DataLoader,
@@ -181,7 +190,8 @@ def evaluate_single_ablation(
 
 def run_physics_ablation_eval(
     data_dir: str = "/root/autodl-tmp/datasets/shear_flow",
-    output_file: str = "outputs/metrics/closure_r4_physics_ablation.json",
+    output_file: Optional[str] = None,
+    groups: Optional[List[str]] = None,
     split_type: str = "grouped",
     split_file: Optional[str] = None,
     downsample_factor: int = 2,
@@ -195,6 +205,7 @@ def run_physics_ablation_eval(
 ):
     seed_everything(42)
     device = torch.device(device_str)
+    output_file = resolve_evaluation_output_path(output_file, seed)
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     if split_file is None:
@@ -226,6 +237,7 @@ def run_physics_ablation_eval(
     print(f"Loaded {len(test_loader.dataset)} test trajectories for physics ablation {max_horizon}-step evaluation.")
 
     eval_git_commit = get_git_commit(PROJECT_ROOT)
+    eval_git_dirty = is_git_dirty(PROJECT_ROOT)
     eval_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
     eval_split_hash = (
         compute_split_hash_from_file(split_file)
@@ -234,16 +246,34 @@ def run_physics_ablation_eval(
     )
     eval_normalizer_hash = compute_normalizer_hash(normalizer)
 
+    if groups is not None:
+        selected_groups = {}
+        for g in groups:
+            matched = [
+                k for k in ABLATION_GROUPS.keys()
+                if k == g or k == f"ablation_{g}" or g == f"ablation_{k}" or g in k
+            ]
+            if not matched:
+                raise ValueError(f"Unknown ablation group '{g}'. Available: {list(ABLATION_GROUPS.keys())}")
+            selected_groups[matched[0]] = ABLATION_GROUPS[matched[0]]
+        groups_to_evaluate = selected_groups
+    else:
+        groups_to_evaluate = ABLATION_GROUPS
+
     results = {}
 
-    for group_key, group_info in ABLATION_GROUPS.items():
+    for group_key, group_info in groups_to_evaluate.items():
         if seed is not None:
             candidate_paths = [
                 f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/ablation_{group_key}/latent_transformer/best_vrmse_mean.pt",
                 f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/ablation_{group_key}/best_vrmse_mean.pt",
                 f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/{group_key}/latent_transformer/best_vrmse_mean.pt",
                 f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/{group_key}/best_vrmse_mean.pt",
-            ] + list(group_info["candidates"])
+            ]
+            # Strict multi-seed isolation: cross-seed fallback is strictly forbidden!
+            # Only seed 42 may consult existing unnested closure_r4 paths:
+            if seed == 42:
+                candidate_paths.extend(group_info["candidates"])
         else:
             candidate_paths = list(group_info["candidates"])
 
@@ -259,6 +289,11 @@ def run_physics_ablation_eval(
                 break
 
         if ckpt_path is None:
+            if seed is not None:
+                raise FileNotFoundError(
+                    f"No valid checkpoint found for group '{group_key}' under seed {seed}. "
+                    f"Cross-seed fallback is strictly forbidden. Looked in: {candidate_paths}"
+                )
             invalid_existing = [
                 p for p in group_info.get("invalid_axis_candidates", []) if os.path.exists(p)
             ]
@@ -330,12 +365,14 @@ def run_physics_ablation_eval(
 
         eval_res["__metadata__"] = {
             "evaluation_git_commit": eval_git_commit,
+            "evaluation_git_dirty": eval_git_dirty,
             "evaluation_timestamp": eval_timestamp,
             "split_hash": eval_split_hash,
             "normalizer_hash": eval_normalizer_hash,
             "checkpoint_sha256": ckpt_sha256,
             "training_git_commit": ckpt_provenance.get("training_git_commit", "UNKNOWN"),
-            "seed": ckpt_provenance.get("seed", 42),
+            "training_git_dirty": ckpt_provenance.get("training_git_dirty", False),
+            "seed": ckpt_provenance.get("seed"),
             "checkpoint": ckpt_path,
             "evaluation_protocol": PHYSICS_PROTOCOL,
             "checkpoint_training_protocol": checkpoint_training_protocol,
@@ -394,7 +431,8 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--split_type", type=str, default="grouped")
     parser.add_argument("--split_file", type=str, default=None)
-    parser.add_argument("--output_file", type=str, default="outputs/metrics/closure_r4_physics_ablation.json")
+    parser.add_argument("--output_file", type=str, default=None, help="Output metrics JSON path (default auto-isolates by seed)")
+    parser.add_argument("--groups", nargs="+", default=None, help="Specific ablation groups to evaluate (e.g. E1_rollout_field or ablation_E1_rollout_field)")
     parser.add_argument("--downsample_factor", type=int, default=2)
     parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--horizon", type=int, default=30)
@@ -406,6 +444,7 @@ if __name__ == "__main__":
     run_physics_ablation_eval(
         data_dir=args.data_dir,
         output_file=args.output_file,
+        groups=args.groups,
         split_type=args.split_type,
         split_file=args.split_file,
         downsample_factor=args.downsample_factor,

@@ -36,6 +36,25 @@ def get_git_commit(project_root: Optional[str] = None) -> str:
     return "UNKNOWN"
 
 
+def is_git_dirty(project_root: Optional[str] = None) -> bool:
+    """Check whether git working directory has unstaged or uncommitted changes."""
+    cwd = project_root or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        ret = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+        )
+        if ret.returncode == 0:
+            return len(ret.stdout.strip()) > 0
+    except Exception:
+        pass
+    return False
+
+
 def compute_file_sha256(file_path: str, chunk_size: int = 65536) -> str:
     """Compute deterministic SHA-256 fingerprint of a file on disk."""
     if not os.path.exists(file_path):
@@ -89,6 +108,7 @@ def create_checkpoint_provenance(
     """Construct canonical provenance bundle for model checkpoint."""
     return {
         "training_git_commit": get_git_commit(project_root),
+        "training_git_dirty": is_git_dirty(project_root),
         "seed": seed,
         "split_type": split_type,
         "split_hash": split_hash,
@@ -107,6 +127,7 @@ def resolve_checkpoint_provenance(
 ) -> Dict[str, Any]:
     """Extract provenance bundle from checkpoint dict, with fallback to seed-42 manifest."""
     commit = ckpt_data.get("training_git_commit") or ckpt_data.get("config", {}).get("training_git_commit")
+    git_dirty = ckpt_data.get("training_git_dirty") or ckpt_data.get("config", {}).get("training_git_dirty", False)
     seed = ckpt_data.get("seed") if "seed" in ckpt_data else ckpt_data.get("config", {}).get("seed")
     split_type = ckpt_data.get("split_type") or ckpt_data.get("config", {}).get("split_type")
     split_hash = ckpt_data.get("split_hash") or ckpt_data.get("config", {}).get("split_hash")
@@ -116,8 +137,8 @@ def resolve_checkpoint_provenance(
     spatial_axis_contract = ckpt_data.get("spatial_axis_contract") or ckpt_data.get("config", {}).get("spatial_axis_contract")
     physics_domain_size_xy = ckpt_data.get("physics_domain_size_xy") or ckpt_data.get("config", {}).get("physics_domain_size_xy")
 
-    # If missing split_hash or normalizer_hash in state dict, consult manifest
-    if (split_hash is None or normalizer_hash is None) and manifest_path and os.path.exists(manifest_path):
+    # If missing split_hash, normalizer_hash, or seed in state dict, consult manifest
+    if (split_hash is None or normalizer_hash is None or seed is None) and manifest_path and os.path.exists(manifest_path):
         try:
             with open(manifest_path, "r") as mf:
                 manifest = json.load(mf)
@@ -134,7 +155,7 @@ def resolve_checkpoint_provenance(
                             f"file SHA256 is {ckpt_sha}, but manifest expected {manifest_expected_sha}"
                         )
                     commit = commit or grp_info.get("training_git_commit")
-                    seed = seed if seed is not None else grp_info.get("seed", 42)
+                    seed = seed if seed is not None else grp_info.get("seed")
                     split_type = split_type or grp_info.get("split_type", "grouped")
                     split_hash = split_hash or grp_info.get("split_hash")
                     normalizer_hash = normalizer_hash or grp_info.get("normalizer_hash")
@@ -150,7 +171,8 @@ def resolve_checkpoint_provenance(
 
     return {
         "training_git_commit": commit or "UNKNOWN",
-        "seed": seed if seed is not None else 42,
+        "training_git_dirty": git_dirty,
+        "seed": seed,  # Note: DO NOT fallback to 42. If seed is missing, keep None to fail closed!
         "split_type": split_type,
         "split_hash": split_hash,
         "normalizer_hash": normalizer_hash,
@@ -201,7 +223,9 @@ def validate_evaluation_provenance(
             f"but evaluation environment has {eval_normalizer_hash[:12]}..."
         )
 
-    if expected_seed is not None and ckpt_seed != expected_seed:
+    if ckpt_seed is None:
+        errors.append("Checkpoint or manifest is missing required 'seed'")
+    elif expected_seed is not None and ckpt_seed != expected_seed:
         errors.append(
             f"Seed mismatch: checkpoint/manifest has seed={ckpt_seed}, but expected {expected_seed}"
         )

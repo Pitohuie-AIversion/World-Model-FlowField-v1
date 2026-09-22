@@ -37,6 +37,7 @@ from src.utils.physics_contract import (
 )
 from src.utils.provenance import (
     get_git_commit,
+    is_git_dirty,
     compute_split_hash_from_file,
     compute_normalizer_hash,
 )
@@ -224,6 +225,7 @@ def train_forecaster(
     )
     normalizer_hash = compute_normalizer_hash(normalizer)
     training_git_commit = get_git_commit(PROJECT_ROOT)
+    training_git_dirty = is_git_dirty(PROJECT_ROOT)
 
     # Initialize model
     if model_type == "latent_transformer":
@@ -494,6 +496,7 @@ def train_forecaster(
                 "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
                 "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
                 "training_git_commit": training_git_commit,
+                "training_git_dirty": training_git_dirty,
                 "seed": seed,
                 "split_type": split_type,
                 "split_hash": split_hash,
@@ -504,6 +507,7 @@ def train_forecaster(
                     "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
                     "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
                     "training_git_commit": training_git_commit,
+                    "training_git_dirty": training_git_dirty,
                     "seed": seed,
                     "split_type": split_type,
                     "split_hash": split_hash,

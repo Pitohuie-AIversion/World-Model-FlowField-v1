@@ -18,7 +18,11 @@ import pytest
 import torch
 
 from scripts.evaluate_rollout import verify_checkpoint_contract
-from scripts.evaluate_physics_ablation import ABLATION_GROUPS
+from scripts.evaluate_physics_ablation import (
+    ABLATION_GROUPS,
+    resolve_evaluation_output_path,
+    run_physics_ablation_eval,
+)
 from src.data.pipeline import compute_split_hash, create_flow_datasets
 from src.utils.physics_contract import (
     PHYSICS_PROTOCOL,
@@ -579,3 +583,80 @@ def test_closure_r4_seed42_manifest_and_checkpoints_integrity():
         )
         assert is_valid is True
         assert len(errors) == 0
+
+
+def test_evaluation_output_filename_seed_isolation():
+    """Verify that evaluator automatically generates non-colliding output paths per seed."""
+    out_default = resolve_evaluation_output_path(None, seed=None)
+    out_42 = resolve_evaluation_output_path(None, seed=42)
+    out_43 = resolve_evaluation_output_path(None, seed=43)
+    out_44 = resolve_evaluation_output_path(None, seed=44)
+
+    assert out_default == "outputs/metrics/closure_r4_physics_ablation_v2.json"
+    assert out_42 == "outputs/metrics/closure_r4_physics_ablation_seed42_v2.json"
+    assert out_43 == "outputs/metrics/closure_r4_physics_ablation_seed43_v2.json"
+    assert out_44 == "outputs/metrics/closure_r4_physics_ablation_seed44_v2.json"
+
+    # Ensure none of the paths overwrite each other
+    paths = {out_default, out_42, out_43, out_44}
+    assert len(paths) == 4, "Output filenames collide across seeds!"
+
+    # Explicit override is respected
+    custom = "outputs/metrics/my_custom.json"
+    assert resolve_evaluation_output_path(custom, seed=43) == custom
+
+
+def test_provenance_validation_missing_seed_fails_closed():
+    """Fail-closed rejection when seed is missing from checkpoint/provenance and manifest."""
+    bundle = {
+        "training_git_commit": "abc",
+        "seed": None,
+        "split_hash": "split_hash_valid",
+        "normalizer_hash": "norm_hash_valid",
+    }
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_evaluation_provenance(bundle, eval_split_hash="split_hash_valid", eval_normalizer_hash="norm_hash_valid")
+    assert "missing required 'seed'" in str(exc_info.value)
+
+
+def test_checkpoint_seed_missing_not_silently_interpreted_as_42():
+    """Missing seed must NOT be silently defaulted to 42."""
+    raw_ckpt_data = {
+        "config": {
+            "split_hash": "split123",
+            "normalizer_hash": "norm123",
+        }
+    }
+    # With no manifest, resolved seed must be None, not 42
+    prov = resolve_checkpoint_provenance("dummy.pt", raw_ckpt_data, manifest_path=None)
+    assert prov["seed"] is None
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_evaluation_provenance(prov, eval_split_hash="split123", eval_normalizer_hash="norm123")
+    assert "missing required 'seed'" in str(exc_info.value)
+
+
+def test_seed43_requested_only_seed42_exists_rejects_cross_seed_fallback():
+    """When seed 43 is requested and only seed 42 checkpoints exist, cross-seed fallback is forbidden."""
+    with pytest.raises(FileNotFoundError) as exc_info:
+        run_physics_ablation_eval(
+            seed=43,
+            groups=["E1_rollout_field"],
+            split_file="outputs/splits/grouped_split.json",
+        )
+    assert "Cross-seed fallback is strictly forbidden" in str(exc_info.value)
+    assert "seed_43" in str(exc_info.value)
+
+
+def test_seed43_groups_filtering_skips_missing_e0():
+    """Evaluator honors --groups and does not check or attempt to access unselected groups like E0."""
+    # When requesting only E2 for seed 43, E0 should never be checked
+    with pytest.raises(FileNotFoundError) as exc_info:
+        run_physics_ablation_eval(
+            seed=43,
+            groups=["E2_plus_L_div"],
+            split_file="outputs/splits/grouped_split.json",
+        )
+    # The error must be about E2, not E0!
+    assert "E2_plus_L_div" in str(exc_info.value)
+    assert "E0_single_step" not in str(exc_info.value)
+
