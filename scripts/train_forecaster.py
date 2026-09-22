@@ -30,6 +30,11 @@ from src.models.history_buffer import HistoryBuffer
 from src.models.latent_transformer import LatentSTTransformer
 from src.utils.checkpoint import BestCheckpointTracker, load_checkpoint, save_checkpoint
 from src.utils.reproducibility import seed_everything
+from src.utils.physics_contract import (
+    PHYSICS_PROTOCOL,
+    SPATIAL_AXIS_CONTRACT,
+    SHEAR_FLOW_DOMAIN_SIZE_XY,
+)
 
 
 class LatentForecasterWrapper(nn.Module):
@@ -471,8 +476,14 @@ def train_forecaster(
                 "prediction_mode": prediction_mode,
                 "use_condition": use_condition,
                 "downsample_factor": downsample_factor,
+                "physics_protocol": PHYSICS_PROTOCOL,
+                "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+                "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
                 "config": {
                     "model_type": model_type,
+                    "physics_protocol": PHYSICS_PROTOCOL,
+                    "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+                    "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
                     "prediction_mode": prediction_mode,
                     "use_condition": use_condition,
                     "downsample_factor": downsample_factor,

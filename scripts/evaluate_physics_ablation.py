@@ -32,35 +32,50 @@ from src.models.encoder import Encoder2D
 from src.models.latent_forecaster import LatentForecaster
 from src.models.latent_transformer import LatentSTTransformer
 from src.utils.reproducibility import seed_everything
+from src.utils.physics_contract import (
+    PHYSICS_PROTOCOL,
+    SPATIAL_AXIS_CONTRACT,
+    SHEAR_FLOW_DOMAIN_SIZE_XY,
+)
 
 
 ABLATION_GROUPS = {
     "E0_single_step": {
         "title": "E0: Single-Step Pure Field Loss",
         "candidates": [
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E0_single_step/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E0_single_step/latent_transformer/best_vrmse_mean.pt",
+        ],
+        "legacy_candidates": [
             "outputs/checkpoints/dynamics/ablation_E0_single_step/best_vrmse_mean.pt",
             "outputs/checkpoints/dynamics/ablation_E0_single_step/latent_transformer/best_vrmse_mean.pt",
         ],
-        "legacy_candidates": [],
+        "invalid_axis_candidates": [],
     },
     "E1_rollout_field": {
         "title": "E1: Rollout-Aware Field Loss",
         "candidates": [
-            "outputs/checkpoints/dynamics/ablation_E1_rollout_field/best_vrmse_mean.pt",
-            "outputs/checkpoints/dynamics/ablation_E1_rollout_field/latent_transformer/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E1_rollout_field/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E1_rollout_field/latent_transformer/best_vrmse_mean.pt",
         ],
         "legacy_candidates": [
+            "outputs/checkpoints/dynamics/ablation_E1_rollout_field/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/ablation_E1_rollout_field/latent_transformer/best_vrmse_mean.pt",
             "outputs/checkpoints/dynamics/ablation_L_field/best_vrmse_mean.pt",
             "outputs/checkpoints/dynamics/ablation_L_field/latent_transformer/best_vrmse_mean.pt",
         ],
+        "invalid_axis_candidates": [],
     },
     "E2_plus_L_div": {
         "title": "E2: + Divergence Loss",
         "candidates": [
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E2_plus_L_div/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E2_plus_L_div/latent_transformer/best_vrmse_mean.pt",
+        ],
+        "legacy_candidates": [],
+        "invalid_axis_candidates": [
             "outputs/checkpoints/dynamics/ablation_E2_plus_L_div/best_vrmse_mean.pt",
             "outputs/checkpoints/dynamics/ablation_E2_plus_L_div/latent_transformer/best_vrmse_mean.pt",
-        ],
-        "legacy_candidates": [
             "outputs/checkpoints/dynamics/ablation_plus_L_div/best_vrmse_mean.pt",
             "outputs/checkpoints/dynamics/ablation_plus_L_div/latent_transformer/best_vrmse_mean.pt",
         ],
@@ -68,10 +83,13 @@ ABLATION_GROUPS = {
     "E3_plus_L_vort": {
         "title": "E3: + Vorticity Loss",
         "candidates": [
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E3_plus_L_vort/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E3_plus_L_vort/latent_transformer/best_vrmse_mean.pt",
+        ],
+        "legacy_candidates": [],
+        "invalid_axis_candidates": [
             "outputs/checkpoints/dynamics/ablation_E3_plus_L_vort/best_vrmse_mean.pt",
             "outputs/checkpoints/dynamics/ablation_E3_plus_L_vort/latent_transformer/best_vrmse_mean.pt",
-        ],
-        "legacy_candidates": [
             "outputs/checkpoints/dynamics/ablation_plus_L_vort/best_vrmse_mean.pt",
             "outputs/checkpoints/dynamics/ablation_plus_L_vort/latent_transformer/best_vrmse_mean.pt",
         ],
@@ -79,10 +97,13 @@ ABLATION_GROUPS = {
     "E4_full_physics": {
         "title": "E4: Full Physics Coupling",
         "candidates": [
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E4_full_physics/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt",
+        ],
+        "legacy_candidates": [],
+        "invalid_axis_candidates": [
             "outputs/checkpoints/dynamics/ablation_E4_full_physics/best_vrmse_mean.pt",
             "outputs/checkpoints/dynamics/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt",
-        ],
-        "legacy_candidates": [
             "outputs/checkpoints/dynamics/ablation_plus_L_div_vort/best_vrmse_mean.pt",
             "outputs/checkpoints/dynamics/ablation_plus_L_div_vort/latent_transformer/best_vrmse_mean.pt",
         ],
@@ -141,7 +162,7 @@ def evaluate_single_ablation(
 
 def run_physics_ablation_eval(
     data_dir: str = "/root/autodl-tmp/datasets/shear_flow",
-    output_file: str = "outputs/metrics/physics_ablation_benchmark.json",
+    output_file: str = "outputs/metrics/closure_r4_physics_ablation.json",
     split_type: str = "grouped",
     split_file: Optional[str] = None,
     downsample_factor: int = 2,
@@ -187,33 +208,49 @@ def run_physics_ablation_eval(
 
     for group_key, group_info in ABLATION_GROUPS.items():
         candidate_paths = list(group_info["candidates"])
-        if allow_legacy_checkpoints and group_info.get("legacy_candidates"):
-            candidate_paths.extend(group_info["legacy_candidates"])
+        if allow_legacy_checkpoints:
+            candidate_paths.extend(group_info.get("legacy_candidates", []))
 
         ckpt_path = None
         is_legacy = False
         for p in candidate_paths:
             if os.path.exists(p):
                 ckpt_path = p
-                if group_info.get("legacy_candidates") and p in group_info["legacy_candidates"]:
-                    is_legacy = True
+                is_legacy = p in group_info.get("legacy_candidates", [])
                 break
 
         if ckpt_path is None:
-            if not allow_legacy_checkpoints and group_info.get("legacy_candidates"):
-                has_legacy = any(os.path.exists(lp) for lp in group_info["legacy_candidates"])
-                if has_legacy:
-                    print(
-                        f"Notice: Closure-R3 checkpoint not found for {group_key}, but legacy Closure-R1 checkpoint exists. "
-                        f"Legacy fallback is blocked by default. Pass --allow_legacy_checkpoints to explicitly opt-in."
-                    )
-            print(f"Warning: No valid checkpoint found for {group_key} in {candidate_paths}, skipping")
+            invalid_existing = [
+                p for p in group_info.get("invalid_axis_candidates", []) if os.path.exists(p)
+            ]
+            if invalid_existing:
+                print(
+                    f"Notice: pre-Closure-R4 checkpoint(s) for {group_key} were trained "
+                    f"with the invalid swapped-axis physics operator and are blocked: {invalid_existing}"
+                )
+            print(f"Warning: No Closure-R4-valid checkpoint found for {group_key}; skipping")
             continue
 
-        proto_label = "Closure-R1-legacy" if is_legacy else "Closure-R3"
-        print(f"\n--- Evaluating Physics Ablation [{group_key}]: {group_info['title']} ({ckpt_path}) [{proto_label}] ---")
         ckpt_data = torch.load(ckpt_path, map_location="cpu")
         cfg = ckpt_data.get("config", {})
+
+        # Safety check: if checkpoint uses physics losses, verify it was trained under Closure-R4
+        lambda_div = float(cfg.get("lambda_div", 0.0) or 0.0)
+        lambda_vort = float(cfg.get("lambda_vort", 0.0) or 0.0)
+        ckpt_physics_protocol = cfg.get("physics_protocol")
+
+        if (lambda_div != 0.0 or lambda_vort != 0.0) and ckpt_physics_protocol != PHYSICS_PROTOCOL:
+            raise ValueError(
+                f"Checkpoint '{ckpt_path}' for {group_key} was trained with non-zero physics losses "
+                f"(lambda_div={lambda_div}, lambda_vort={lambda_vort}) under protocol={ckpt_physics_protocol!r}, "
+                f"which is invalid under {PHYSICS_PROTOCOL}! Re-training under {PHYSICS_PROTOCOL} is required."
+            )
+
+        checkpoint_training_protocol = "pre-R4-field-only" if is_legacy else PHYSICS_PROTOCOL
+        print(
+            f"\n--- Evaluating Physics Ablation [{group_key}]: {group_info['title']} "
+            f"({ckpt_path}) [evaluation={PHYSICS_PROTOCOL}; checkpoint={checkpoint_training_protocol}] ---"
+        )
 
         pred_mode = cfg.get("prediction_mode", ckpt_data.get("prediction_mode", "direct"))
         use_cond = cfg.get("use_condition", ckpt_data.get("use_condition", True))
@@ -247,7 +284,10 @@ def run_physics_ablation_eval(
         )
         eval_res["__metadata__"] = {
             "checkpoint": ckpt_path,
-            "protocol": proto_label,
+            "evaluation_protocol": PHYSICS_PROTOCOL,
+            "checkpoint_training_protocol": checkpoint_training_protocol,
+            "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+            "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
             "is_legacy": is_legacy,
             "prediction_mode": pred_mode,
             "use_condition": use_cond,
@@ -295,11 +335,11 @@ if __name__ == "__main__":
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--split_type", type=str, default="grouped")
     parser.add_argument("--split_file", type=str, default=None)
-    parser.add_argument("--output_file", type=str, default="outputs/metrics/physics_ablation_benchmark.json")
+    parser.add_argument("--output_file", type=str, default="outputs/metrics/closure_r4_physics_ablation.json")
     parser.add_argument("--downsample_factor", type=int, default=2)
     parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--horizon", type=int, default=30)
-    parser.add_argument("--allow_legacy_checkpoints", action="store_true", default=False, help="Allow opt-in evaluation of Closure-R1 legacy checkpoints")
+    parser.add_argument("--allow_legacy_checkpoints", action="store_true", default=False, help="Allow opt-in re-evaluation of pre-R4 field-only checkpoints; poisoned physics-loss checkpoints remain blocked")
     args = parser.parse_args()
 
     run_physics_ablation_eval(

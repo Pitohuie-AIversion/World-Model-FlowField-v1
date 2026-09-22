@@ -28,6 +28,11 @@ from src.models.latent_transformer import LatentSTTransformer
 from src.models.latent_forecaster import LatentForecaster
 from src.utils.checkpoint import load_checkpoint
 from src.utils.reproducibility import seed_everything
+from src.utils.physics_contract import (
+    PHYSICS_PROTOCOL,
+    SPATIAL_AXIS_CONTRACT,
+    SHEAR_FLOW_DOMAIN_SIZE_XY,
+)
 
 
 def verify_checkpoint_contract(
@@ -55,6 +60,18 @@ def verify_checkpoint_contract(
     if ckpt_split is not None and ckpt_split != benchmark_contract["split_type"]:
         mismatches.append(
             f"split_type: checkpoint='{ckpt_split}' vs benchmark='{benchmark_contract['split_type']}'"
+        )
+
+    # Field-only pre-R4 checkpoints may be re-evaluated with corrected metrics,
+    # but any checkpoint trained with physics losses must itself be Closure-R4.
+    lambda_div = float(ckpt_cfg.get("lambda_div", 0.0) or 0.0)
+    lambda_vort = float(ckpt_cfg.get("lambda_vort", 0.0) or 0.0)
+    ckpt_physics_protocol = ckpt_cfg.get("physics_protocol")
+    if (lambda_div != 0.0 or lambda_vort != 0.0) and ckpt_physics_protocol != PHYSICS_PROTOCOL:
+        mismatches.append(
+            "physics_protocol: checkpoint uses non-zero divergence/vorticity loss "
+            f"(lambda_div={lambda_div}, lambda_vort={lambda_vort}) but protocol="
+            f"{ckpt_physics_protocol!r}; required {PHYSICS_PROTOCOL!r}"
         )
 
     if mismatches:
@@ -187,9 +204,9 @@ def run_benchmark(
             else:
                 split_file = f"outputs/splits/{split_type}_split.json"
 
+    print(f"Loading test dataset via unified pipeline ({split_type} split: {split_file})...")
     normalizer = None
     if os.path.exists(split_file):
-        print(f"Loading benchmark test dataset via unified pipeline ({split_type} split: {split_file})...")
         _, _, test_loader, normalizer = create_flow_dataloaders(
             split_type=split_type,
             split_file=split_file,
@@ -203,18 +220,9 @@ def run_benchmark(
             normalize=normalize,
         )
     elif allow_legacy_data_fallback:
-        print(f"Warning: split_file '{split_file}' not found. Using legacy data fallback as requested.")
-        test_files = sorted(glob.glob(os.path.join(data_dir, "**/test/*.hdf5"), recursive=True))
-        if not test_files:
-            test_files = sorted(glob.glob(os.path.join(data_dir, "**/valid/*.hdf5"), recursive=True))
-            if test_files:
-                print(f"Notice: No test files found. Using available valid files for benchmark evaluation.")
-            else:
-                raise FileNotFoundError(f"No test/valid files found in {data_dir}.")
-
+        print(f"Notice: Split file '{split_file}' not found. Falling back to glob search under '{data_dir}/data/test/' (opt-in enabled).")
         test_dataset = ShearFlowDataset(
-            test_files,
-            data_root=data_dir,
+            data_root=os.path.join(data_dir, "data/test"),
             history_length=4,
             horizon=max_horizon,
             stride=20,
@@ -232,6 +240,9 @@ def run_benchmark(
         "split_type": split_type,
         "downsample_factor": downsample_factor,
         "normalize": normalize,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
     }
     print(f"Unified Benchmark Data Contract: {benchmark_contract}")
 
@@ -385,7 +396,7 @@ def run_benchmark(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate multi-step autoregressive rollouts.")
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
-    parser.add_argument("--output_file", type=str, default="outputs/metrics/rollout_benchmark.json")
+    parser.add_argument("--output_file", type=str, default="outputs/metrics/closure_r4_rollout_benchmark.json")
     parser.add_argument(
         "--split_type",
         type=str,
