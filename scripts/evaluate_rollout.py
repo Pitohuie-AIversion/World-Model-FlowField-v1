@@ -28,6 +28,7 @@ from src.models.latent_transformer import LatentSTTransformer
 from src.models.latent_forecaster import LatentForecaster
 from src.utils.checkpoint import load_checkpoint
 from src.utils.reproducibility import seed_everything
+from src.utils.physics_contract import PHYSICS_PROTOCOL, SPATIAL_AXIS_CONTRACT, SHEAR_FLOW_DOMAIN_SIZE_XY
 
 
 def verify_checkpoint_contract(
@@ -139,7 +140,7 @@ def evaluate_model_rollout(
 
 def run_benchmark(
     data_dir: str = "/root/autodl-tmp/datasets/shear_flow",
-    output_file: str = "outputs/metrics/rollout_benchmark.json",
+    output_file: str = "outputs/metrics/closure_r4_rollout_benchmark.json",
     split_type: str = "grouped",
     split_file: Optional[str] = None,
     downsample_factor: int = 2,
@@ -232,6 +233,9 @@ def run_benchmark(
         "split_type": split_type,
         "downsample_factor": downsample_factor,
         "normalize": normalize,
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
     }
     print(f"Unified Benchmark Data Contract: {benchmark_contract}")
 
@@ -385,7 +389,7 @@ def run_benchmark(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate multi-step autoregressive rollouts.")
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
-    parser.add_argument("--output_file", type=str, default="outputs/metrics/rollout_benchmark.json")
+    parser.add_argument("--output_file", type=str, default="outputs/metrics/closure_r4_rollout_benchmark.json")
     parser.add_argument(
         "--split_type",
         type=str,
