@@ -14,6 +14,7 @@
 # 确保子目录骨架可被追踪
 !checkpoints/
 !figures/
+!manifests/
 !metrics/
 !splits/
 
@@ -38,6 +39,7 @@ logs/*
 # 实验元数据与划分表、指标报告及关键图表（纳入版本管理作为复现证据）
 # ------------------------------------------------------------------------------
 !splits/*.json
+!manifests/*.json
 !metrics/*.json
 !normalization/*.pt
 !normalization/*.json

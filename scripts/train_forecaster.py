@@ -35,6 +35,11 @@ from src.utils.physics_contract import (
     SPATIAL_AXIS_CONTRACT,
     SHEAR_FLOW_DOMAIN_SIZE_XY,
 )
+from src.utils.provenance import (
+    get_git_commit,
+    compute_split_hash_from_file,
+    compute_normalizer_hash,
+)
 
 
 class LatentForecasterWrapper(nn.Module):
@@ -210,6 +215,15 @@ def train_forecaster(
         **loader_kwargs,
     )
     valid_dataset = valid_loader.dataset
+
+    # Experiment Provenance Fingerprinting
+    split_hash = (
+        compute_split_hash_from_file(split_file)
+        if split_file and os.path.exists(split_file)
+        else "UNKNOWN_SPLIT"
+    )
+    normalizer_hash = compute_normalizer_hash(normalizer)
+    training_git_commit = get_git_commit(PROJECT_ROOT)
 
     # Initialize model
     if model_type == "latent_transformer":
@@ -479,11 +493,21 @@ def train_forecaster(
                 "physics_protocol": PHYSICS_PROTOCOL,
                 "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
                 "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+                "training_git_commit": training_git_commit,
+                "seed": seed,
+                "split_type": split_type,
+                "split_hash": split_hash,
+                "normalizer_hash": normalizer_hash,
                 "config": {
                     "model_type": model_type,
                     "physics_protocol": PHYSICS_PROTOCOL,
                     "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
                     "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+                    "training_git_commit": training_git_commit,
+                    "seed": seed,
+                    "split_type": split_type,
+                    "split_hash": split_hash,
+                    "normalizer_hash": normalizer_hash,
                     "prediction_mode": prediction_mode,
                     "use_condition": use_condition,
                     "downsample_factor": downsample_factor,
@@ -560,6 +584,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--preload_to_memory", action="store_true")
     parser.add_argument("--use_amp", action="store_true")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for training reproducibility")
     args = parser.parse_args()
 
     freeze_rep = False if args.joint else args.freeze_representation
@@ -586,6 +611,7 @@ if __name__ == "__main__":
         lambda_div=args.lambda_div,
         lambda_vort=args.lambda_vort,
         field_loss_space=args.field_loss_space,
+        seed=args.seed,
         embed_dim=args.embed_dim,
         depth=args.depth,
         num_heads=args.num_heads,

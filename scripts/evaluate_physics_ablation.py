@@ -40,6 +40,14 @@ from src.utils.physics_contract import (
     SHEAR_FLOW_DOMAIN_SIZE_XY,
     validate_ablation_checkpoint_semantics,
 )
+from src.utils.provenance import (
+    get_git_commit,
+    compute_file_sha256,
+    compute_split_hash_from_file,
+    compute_normalizer_hash,
+    resolve_checkpoint_provenance,
+    validate_evaluation_provenance,
+)
 
 
 ABLATION_GROUPS = {
@@ -180,6 +188,8 @@ def run_physics_ablation_eval(
     normalize: bool = True,
     max_horizon: int = 30,
     stride: int = 20,
+    seed: Optional[int] = None,
+    manifest_path: str = "outputs/manifests/closure_r4_seed42.json",
     allow_legacy_checkpoints: bool = False,
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
 ):
@@ -215,10 +225,28 @@ def run_physics_ablation_eval(
 
     print(f"Loaded {len(test_loader.dataset)} test trajectories for physics ablation {max_horizon}-step evaluation.")
 
+    eval_git_commit = get_git_commit(PROJECT_ROOT)
+    eval_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    eval_split_hash = (
+        compute_split_hash_from_file(split_file)
+        if split_file and os.path.exists(split_file)
+        else "UNKNOWN_SPLIT"
+    )
+    eval_normalizer_hash = compute_normalizer_hash(normalizer)
+
     results = {}
 
     for group_key, group_info in ABLATION_GROUPS.items():
-        candidate_paths = list(group_info["candidates"])
+        if seed is not None:
+            candidate_paths = [
+                f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/ablation_{group_key}/latent_transformer/best_vrmse_mean.pt",
+                f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/ablation_{group_key}/best_vrmse_mean.pt",
+                f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/{group_key}/latent_transformer/best_vrmse_mean.pt",
+                f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/{group_key}/best_vrmse_mean.pt",
+            ] + list(group_info["candidates"])
+        else:
+            candidate_paths = list(group_info["candidates"])
+
         if allow_legacy_checkpoints:
             candidate_paths.extend(group_info.get("legacy_candidates", []))
 
@@ -247,6 +275,20 @@ def run_physics_ablation_eval(
 
         # Safety & Semantic validation: verify checkpoint strictly complies with Closure-R4 and group spec
         validate_ablation_checkpoint_semantics(group_key, cfg, is_legacy=is_legacy)
+
+        # Provenance Closure validation: verify training split and normalizer match evaluation fail-closed
+        ckpt_provenance = resolve_checkpoint_provenance(
+            ckpt_path=ckpt_path,
+            ckpt_data=ckpt_data,
+            manifest_path=manifest_path,
+        )
+        validate_evaluation_provenance(
+            ckpt_provenance=ckpt_provenance,
+            eval_split_hash=eval_split_hash,
+            eval_normalizer_hash=eval_normalizer_hash,
+            expected_seed=seed,
+            fail_closed=True,
+        )
 
         checkpoint_training_protocol = "pre-R4-field-only" if is_legacy else PHYSICS_PROTOCOL
         print(
@@ -284,12 +326,17 @@ def run_physics_ablation_eval(
         eval_res = evaluate_single_ablation(
             forecaster, test_loader, device, max_horizon=max_horizon, normalizer=normalizer, use_condition=use_cond
         )
-        with open(ckpt_path, "rb") as f_ckpt:
-            ckpt_sha256 = hashlib.sha256(f_ckpt.read()).hexdigest()
+        ckpt_sha256 = compute_file_sha256(ckpt_path)
 
         eval_res["__metadata__"] = {
-            "checkpoint": ckpt_path,
+            "evaluation_git_commit": eval_git_commit,
+            "evaluation_timestamp": eval_timestamp,
+            "split_hash": eval_split_hash,
+            "normalizer_hash": eval_normalizer_hash,
             "checkpoint_sha256": ckpt_sha256,
+            "training_git_commit": ckpt_provenance.get("training_git_commit", "UNKNOWN"),
+            "seed": ckpt_provenance.get("seed", 42),
+            "checkpoint": ckpt_path,
             "evaluation_protocol": PHYSICS_PROTOCOL,
             "checkpoint_training_protocol": checkpoint_training_protocol,
             "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
@@ -299,7 +346,6 @@ def run_physics_ablation_eval(
             "use_condition": use_cond,
             "split_type": split_type,
             "split_file": split_file,
-            "evaluation_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         results[group_key] = eval_res
 
@@ -352,6 +398,8 @@ if __name__ == "__main__":
     parser.add_argument("--downsample_factor", type=int, default=2)
     parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--horizon", type=int, default=30)
+    parser.add_argument("--seed", type=int, default=None, help="Target seed to evaluate (checks seed_{seed} directories first)")
+    parser.add_argument("--manifest", type=str, default="outputs/manifests/closure_r4_seed42.json", help="Path to seed-42 provenance manifest")
     parser.add_argument("--allow_legacy_checkpoints", action="store_true", default=False, help="Allow opt-in re-evaluation of pre-R4 field-only checkpoints; poisoned physics-loss checkpoints remain blocked")
     args = parser.parse_args()
 
@@ -363,5 +411,7 @@ if __name__ == "__main__":
         downsample_factor=args.downsample_factor,
         normalize=args.normalize,
         max_horizon=args.horizon,
+        seed=args.seed,
+        manifest_path=args.manifest,
         allow_legacy_checkpoints=args.allow_legacy_checkpoints,
     )

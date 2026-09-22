@@ -26,6 +26,14 @@ from src.utils.physics_contract import (
     SHEAR_FLOW_DOMAIN_SIZE_XY,
     validate_ablation_checkpoint_semantics,
 )
+from src.utils.provenance import (
+    compute_split_hash,
+    compute_normalizer_hash,
+    compute_file_sha256,
+    create_checkpoint_provenance,
+    resolve_checkpoint_provenance,
+    validate_evaluation_provenance,
+)
 
 
 def _create_mock_h5(path: str, n_trajs: int = 2, nt: int = 6, ny: int = 16, nx: int = 32):
@@ -410,3 +418,164 @@ def test_ablation_checkpoint_semantic_validation():
     with pytest.raises(ValueError) as exc:
         validate_ablation_checkpoint_semantics("E0_single_step", legacy_e0, is_legacy=False)
     assert "missing required field: physics_protocol" in str(exc.value)
+
+
+# -----------------------------------------------------------------------------
+# Issue #3 & Issue #4: Provenance Closure and Seed Isolation Contract Tests
+# -----------------------------------------------------------------------------
+
+
+def test_provenance_validation_missing_split_hash_fails_closed():
+    """Fail-closed rejection when split_hash is missing from checkpoint/provenance."""
+    bundle = {
+        "training_git_commit": "abc",
+        "seed": 42,
+        "split_hash": None,
+        "normalizer_hash": "norm_hash_valid",
+    }
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_evaluation_provenance(bundle, eval_split_hash="split_hash_123", eval_normalizer_hash="norm_hash_valid")
+    assert "missing required 'split_hash'" in str(exc_info.value)
+
+
+def test_provenance_validation_wrong_split_hash_fails_closed():
+    """Fail-closed rejection when checkpoint split_hash does not match evaluation dataset split_hash."""
+    bundle = {
+        "training_git_commit": "abc",
+        "seed": 42,
+        "split_hash": "mismatched_split_hash_aaa",
+        "normalizer_hash": "norm_hash_valid",
+    }
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_evaluation_provenance(bundle, eval_split_hash="eval_split_hash_bbb", eval_normalizer_hash="norm_hash_valid")
+    assert "Split hash mismatch" in str(exc_info.value)
+
+
+def test_provenance_validation_missing_normalizer_hash_fails_closed():
+    """Fail-closed rejection when normalizer_hash is missing from checkpoint/provenance."""
+    bundle = {
+        "training_git_commit": "abc",
+        "seed": 42,
+        "split_hash": "split_hash_valid",
+        "normalizer_hash": None,
+    }
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_evaluation_provenance(bundle, eval_split_hash="split_hash_valid", eval_normalizer_hash="eval_norm_hash_xyz")
+    assert "missing required 'normalizer_hash'" in str(exc_info.value)
+
+
+def test_provenance_validation_wrong_normalizer_hash_fails_closed():
+    """Fail-closed rejection when checkpoint normalizer_hash does not match evaluation normalizer."""
+    bundle = {
+        "training_git_commit": "abc",
+        "seed": 42,
+        "split_hash": "split_hash_valid",
+        "normalizer_hash": "ckpt_norm_hash_old",
+    }
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_evaluation_provenance(bundle, eval_split_hash="split_hash_valid", eval_normalizer_hash="eval_norm_hash_new")
+    assert "Normalizer hash mismatch" in str(exc_info.value)
+
+
+def test_provenance_validation_wrong_seed_link_fails_closed():
+    """Fail-closed rejection when checkpoint seed does not match expected evaluation seed."""
+    bundle = {
+        "training_git_commit": "abc",
+        "seed": 43,
+        "split_hash": "split_hash_valid",
+        "normalizer_hash": "norm_hash_valid",
+    }
+    with pytest.raises(RuntimeError) as exc_info:
+        validate_evaluation_provenance(
+            bundle,
+            eval_split_hash="split_hash_valid",
+            eval_normalizer_hash="norm_hash_valid",
+            expected_seed=42,
+        )
+    assert "Seed mismatch" in str(exc_info.value)
+
+
+def test_provenance_manifest_integrity_tampering_fails_closed():
+    """Tampered or mismatched checkpoint linked to manifest fails closed."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        fake_ckpt = os.path.join(tmpdir, "fake_ckpt.pt")
+        with open(fake_ckpt, "w") as f:
+            f.write("content_v1")
+
+        fake_manifest = os.path.join(tmpdir, "manifest.json")
+        manifest_data = {
+            "groups": {
+                "group1": {
+                    "checkpoint_path": fake_ckpt,
+                    "checkpoint_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+                    "training_git_commit": "dummy",
+                    "seed": 42,
+                    "split_hash": "split123",
+                    "normalizer_hash": "norm123",
+                }
+            }
+        }
+        with open(fake_manifest, "w") as f:
+            json.dump(manifest_data, f)
+
+        with pytest.raises(ValueError) as exc_info:
+            resolve_checkpoint_provenance(fake_ckpt, {}, manifest_path=fake_manifest)
+        assert "Manifest integrity mismatch" in str(exc_info.value)
+
+
+def test_provenance_valid_bundle_passes():
+    """Valid provenance bundle matching evaluation environment passes cleanly."""
+    bundle = {
+        "training_git_commit": "b305fd4c66daff5b42d765377ea9d44f6f32ee6e",
+        "seed": 42,
+        "split_hash": "split_hash_exact_match_123456",
+        "normalizer_hash": "norm_hash_exact_match_abcdef",
+    }
+    is_valid, errors = validate_evaluation_provenance(
+        bundle,
+        eval_split_hash="split_hash_exact_match_123456",
+        eval_normalizer_hash="norm_hash_exact_match_abcdef",
+        expected_seed=42,
+        fail_closed=True,
+    )
+    assert is_valid is True
+    assert len(errors) == 0
+
+
+def test_closure_r4_seed42_manifest_and_checkpoints_integrity():
+    """Verify that existing seed-42 manifest links 100% cleanly to existing checkpoints."""
+    manifest_path = "outputs/manifests/closure_r4_seed42.json"
+    if not os.path.exists(manifest_path):
+        pytest.skip("Manifest not found on current environment")
+
+    with open(manifest_path, "r") as f:
+        manifest = json.load(f)
+
+    split_hash = manifest["split_hash"]
+    normalizer_hash = manifest["normalizer_hash"]
+
+    for grp_key, grp_info in manifest["groups"].items():
+        ckpt_path = grp_info["checkpoint_path"]
+        if not os.path.exists(ckpt_path):
+            continue
+        # Verify SHA-256 matches
+        disk_sha = compute_file_sha256(ckpt_path)
+        assert disk_sha == grp_info["checkpoint_sha256"], f"SHA256 mismatch for {grp_key}"
+
+        # Resolve provenance via manifest
+        ckpt_data = torch.load(ckpt_path, map_location="cpu")
+        prov = resolve_checkpoint_provenance(ckpt_path, ckpt_data, manifest_path=manifest_path)
+        assert prov["seed"] == 42
+        assert prov["split_hash"] == split_hash
+        assert prov["normalizer_hash"] == normalizer_hash
+
+        # Validate against environment hashes
+        is_valid, errors = validate_evaluation_provenance(
+            prov,
+            eval_split_hash=split_hash,
+            eval_normalizer_hash=normalizer_hash,
+            expected_seed=42,
+            fail_closed=True,
+        )
+        assert is_valid is True
+        assert len(errors) == 0

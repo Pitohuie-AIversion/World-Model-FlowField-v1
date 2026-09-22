@@ -1,0 +1,119 @@
+{
+  "manifest_version": "1.0",
+  "protocol": "Closure-R4",
+  "seed": 42,
+  "training_commit": "b305fd4c66daff5b42d765377ea9d44f6f32ee6e",
+  "split_file": "outputs/splits/grouped_split.json",
+  "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+  "normalizer_path": "outputs/normalization/stats_grouped.pt",
+  "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+  "metrics_json_v1": "outputs/metrics/closure_r4_physics_ablation.json",
+  "metrics_json_v2": "outputs/metrics/closure_r4_physics_ablation_v2.json",
+  "groups": {
+    "ablation_E0_single_step": {
+      "title": "E0: Single-Step Pure Field Loss",
+      "checkpoint_path": "outputs/checkpoints/dynamics/closure_r4/ablation_E0_single_step/latent_transformer/best_vrmse_mean.pt",
+      "horizon": 1,
+      "lambda_div": 0.0,
+      "lambda_vort": 0.0,
+      "checkpoint_sha256": "79b65f56eb6e58e6b6b074e93eeccd2a4dfab1e5fdfc223ff5b4f6fa8824205d",
+      "training_git_commit": "b305fd4c66daff5b42d765377ea9d44f6f32ee6e",
+      "seed": 42,
+      "split_type": "grouped",
+      "split_file": "outputs/splits/grouped_split.json",
+      "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+      "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+      "downsample_factor": 2,
+      "physics_protocol": "Closure-R4",
+      "spatial_axis_contract": "tensor(...,C,Nx,Ny):dim-2=x,dim-1=y",
+      "physics_domain_size_xy": [
+        1.0,
+        2.0
+      ]
+    },
+    "ablation_E1_rollout_field": {
+      "title": "E1: Rollout-Aware Field Loss",
+      "checkpoint_path": "outputs/checkpoints/dynamics/closure_r4/ablation_E1_rollout_field/latent_transformer/best_vrmse_mean.pt",
+      "horizon": 2,
+      "lambda_div": 0.0,
+      "lambda_vort": 0.0,
+      "checkpoint_sha256": "4db9523eb2a4fcb96a3fdd62bd0bf56da9a5f9858469a374a9a144e1901a57b5",
+      "training_git_commit": "b305fd4c66daff5b42d765377ea9d44f6f32ee6e",
+      "seed": 42,
+      "split_type": "grouped",
+      "split_file": "outputs/splits/grouped_split.json",
+      "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+      "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+      "downsample_factor": 2,
+      "physics_protocol": "Closure-R4",
+      "spatial_axis_contract": "tensor(...,C,Nx,Ny):dim-2=x,dim-1=y",
+      "physics_domain_size_xy": [
+        1.0,
+        2.0
+      ]
+    },
+    "ablation_E2_plus_L_div": {
+      "title": "E2: + Divergence Loss",
+      "checkpoint_path": "outputs/checkpoints/dynamics/closure_r4/ablation_E2_plus_L_div/latent_transformer/best_vrmse_mean.pt",
+      "horizon": 2,
+      "lambda_div": 0.01,
+      "lambda_vort": 0.0,
+      "checkpoint_sha256": "784f5ec27dd2deef407add4a09464bbdbe172aa33b0b4e7df23647174cba7ffe",
+      "training_git_commit": "b305fd4c66daff5b42d765377ea9d44f6f32ee6e",
+      "seed": 42,
+      "split_type": "grouped",
+      "split_file": "outputs/splits/grouped_split.json",
+      "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+      "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+      "downsample_factor": 2,
+      "physics_protocol": "Closure-R4",
+      "spatial_axis_contract": "tensor(...,C,Nx,Ny):dim-2=x,dim-1=y",
+      "physics_domain_size_xy": [
+        1.0,
+        2.0
+      ]
+    },
+    "ablation_E3_plus_L_vort": {
+      "title": "E3: + Vorticity Loss",
+      "checkpoint_path": "outputs/checkpoints/dynamics/closure_r4/ablation_E3_plus_L_vort/latent_transformer/best_vrmse_mean.pt",
+      "horizon": 2,
+      "lambda_div": 0.0,
+      "lambda_vort": 0.05,
+      "checkpoint_sha256": "76bd96dedd717deed173ab492abaff8ff4138674077190d8f423a89cb2ca02ef",
+      "training_git_commit": "b305fd4c66daff5b42d765377ea9d44f6f32ee6e",
+      "seed": 42,
+      "split_type": "grouped",
+      "split_file": "outputs/splits/grouped_split.json",
+      "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+      "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+      "downsample_factor": 2,
+      "physics_protocol": "Closure-R4",
+      "spatial_axis_contract": "tensor(...,C,Nx,Ny):dim-2=x,dim-1=y",
+      "physics_domain_size_xy": [
+        1.0,
+        2.0
+      ]
+    },
+    "ablation_E4_full_physics": {
+      "title": "E4: Full Physics Coupling",
+      "checkpoint_path": "outputs/checkpoints/dynamics/closure_r4/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt",
+      "horizon": 2,
+      "lambda_div": 0.01,
+      "lambda_vort": 0.05,
+      "checkpoint_sha256": "821891674ea80383ba07f02edbd1005e1005fc2a6b084b4146969c4f5570ca86",
+      "training_git_commit": "b305fd4c66daff5b42d765377ea9d44f6f32ee6e",
+      "seed": 42,
+      "split_type": "grouped",
+      "split_file": "outputs/splits/grouped_split.json",
+      "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+      "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+      "downsample_factor": 2,
+      "physics_protocol": "Closure-R4",
+      "spatial_axis_contract": "tensor(...,C,Nx,Ny):dim-2=x,dim-1=y",
+      "physics_domain_size_xy": [
+        1.0,
+        2.0
+      ]
+    }
+  }
+}
