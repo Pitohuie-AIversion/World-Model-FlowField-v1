@@ -237,3 +237,126 @@ def validate_evaluation_provenance(
         )
 
     return len(errors) == 0, errors
+
+
+def validate_init_checkpoint_contract(
+    init_ckpt: Dict[str, Any],
+    ckpt_path: Optional[str] = None,
+    manifest_path: Optional[str] = "outputs/manifests/closure_r4_seed42.json",
+    requested_model_type: str = "latent_transformer",
+    current_split_hash: Optional[str] = None,
+    current_normalizer_hash: Optional[str] = None,
+    expected_seed: Optional[int] = 42,
+    expected_horizon: Optional[int] = 2,
+    expected_lambda_div: Optional[float] = 0.01,
+    expected_lambda_vort: Optional[float] = 0.05,
+    expected_protocol: Optional[str] = PHYSICS_PROTOCOL,
+    expected_axis_contract: Optional[str] = SPATIAL_AXIS_CONTRACT,
+    expected_domain_size: Optional[Tuple[float, float]] = SHEAR_FLOW_DOMAIN_SIZE_XY,
+    expected_prediction_mode: Optional[str] = "direct",
+    expected_use_condition: Optional[bool] = True,
+    fail_closed: bool = True,
+) -> Tuple[bool, List[str]]:
+    """Enforces fail-closed semantic contract validation for warm-start parent checkpoints.
+
+    Validates that a checkpoint provided for warm-start initialization adheres strictly
+    to the scientific protocol and expected parameter specifications.
+
+    Args:
+        init_ckpt: Loaded checkpoint dictionary.
+        ckpt_path: Optional path to checkpoint file on disk.
+        manifest_path: Optional path to manifest for fallback resolution.
+        requested_model_type: Requested architecture type.
+        current_split_hash: Current dataset split hash.
+        current_normalizer_hash: Current normalizer hash.
+        expected_seed: Expected training seed (e.g. 42).
+        expected_horizon: Expected parent prediction horizon (e.g. 2).
+        expected_lambda_div: Expected incompressibility weight (e.g. 0.01).
+        expected_lambda_vort: Expected vorticity penalty weight (e.g. 0.05).
+        expected_protocol: Expected physics protocol ('Closure-R4').
+        expected_axis_contract: Expected spatial axis orientation contract.
+        expected_domain_size: Expected physical domain bounds (1.0, 2.0).
+        expected_prediction_mode: Expected prediction mode ('direct').
+        expected_use_condition: Expected conditioning flag (True).
+        fail_closed: If True, raises ValueError on violation.
+
+    Returns:
+        (is_valid, list_of_errors)
+    """
+    errors = []
+
+    # Resolve full provenance bundle if ckpt_path is available
+    prov = {}
+    if ckpt_path:
+        try:
+            prov = resolve_checkpoint_provenance(ckpt_path, init_ckpt, manifest_path=manifest_path)
+        except Exception:
+            pass
+
+    # 1. Model architecture
+    model_type = init_ckpt.get("model_type") or init_ckpt.get("config", {}).get("model_type")
+    if model_type and model_type != requested_model_type:
+        errors.append(f"Model type mismatch: parent has '{model_type}', requested '{requested_model_type}'")
+
+    # 2. Split hash
+    split_hash = init_ckpt.get("split_hash") or init_ckpt.get("config", {}).get("split_hash") or prov.get("split_hash")
+    if current_split_hash and current_split_hash != "UNKNOWN_SPLIT" and split_hash and split_hash != "UNKNOWN_SPLIT":
+        if split_hash != current_split_hash:
+            errors.append(f"Split contract violation: parent has {split_hash[:12]}..., current has {current_split_hash[:12]}...")
+
+    # 3. Normalizer hash
+    normalizer_hash = init_ckpt.get("normalizer_hash") or init_ckpt.get("config", {}).get("normalizer_hash") or prov.get("normalizer_hash")
+    if current_normalizer_hash and current_normalizer_hash != "NONE" and normalizer_hash and normalizer_hash != "NONE":
+        if normalizer_hash != current_normalizer_hash:
+            errors.append(f"Normalizer contract violation: parent has {normalizer_hash[:12]}..., current has {current_normalizer_hash[:12]}...")
+
+    # 4. Seed
+    seed = init_ckpt.get("seed") if "seed" in init_ckpt else init_ckpt.get("config", {}).get("seed")
+    if seed is None:
+        seed = prov.get("seed")
+    if expected_seed is not None and seed is not None and seed != expected_seed:
+        errors.append(f"Seed contract violation: parent checkpoint has seed={seed}, expected {expected_seed}")
+
+    # 5. Horizon
+    horizon = init_ckpt.get("horizon") if "horizon" in init_ckpt else init_ckpt.get("config", {}).get("horizon")
+    if expected_horizon is not None and horizon is not None and horizon != expected_horizon:
+        errors.append(f"Horizon contract violation: parent checkpoint has horizon={horizon}, expected {expected_horizon}")
+
+    # 6. Loss penalties (lambda_div and lambda_vort)
+    lambda_div = init_ckpt.get("lambda_div") if "lambda_div" in init_ckpt else init_ckpt.get("config", {}).get("lambda_div")
+    if expected_lambda_div is not None and lambda_div is not None and abs(float(lambda_div) - float(expected_lambda_div)) > 1e-4:
+        errors.append(f"Loss parameter mismatch (lambda_div): parent has {lambda_div}, expected {expected_lambda_div}")
+
+    lambda_vort = init_ckpt.get("lambda_vort") if "lambda_vort" in init_ckpt else init_ckpt.get("config", {}).get("lambda_vort")
+    if expected_lambda_vort is not None and lambda_vort is not None and abs(float(lambda_vort) - float(expected_lambda_vort)) > 1e-4:
+        errors.append(f"Loss parameter mismatch (lambda_vort): parent has {lambda_vort}, expected {expected_lambda_vort}")
+
+    # 7. Protocol and Physics contracts
+    physics_protocol = init_ckpt.get("physics_protocol") or init_ckpt.get("config", {}).get("physics_protocol") or prov.get("physics_protocol")
+    if expected_protocol is not None and physics_protocol and physics_protocol != expected_protocol:
+        errors.append(f"Physics protocol mismatch: parent has '{physics_protocol}', expected '{expected_protocol}'")
+
+    spatial_axis_contract = init_ckpt.get("spatial_axis_contract") or init_ckpt.get("config", {}).get("spatial_axis_contract") or prov.get("spatial_axis_contract")
+    if expected_axis_contract is not None and spatial_axis_contract and spatial_axis_contract != expected_axis_contract:
+        errors.append(f"Axis contract mismatch: parent has '{spatial_axis_contract}', expected '{expected_axis_contract}'")
+
+    domain_size = init_ckpt.get("physics_domain_size_xy") or init_ckpt.get("config", {}).get("physics_domain_size_xy") or prov.get("physics_domain_size_xy")
+    if expected_domain_size is not None and domain_size and list(domain_size) != list(expected_domain_size):
+        errors.append(f"Domain size mismatch: parent has {domain_size}, expected {expected_domain_size}")
+
+    # 8. Prediction mode and condition
+    prediction_mode = init_ckpt.get("prediction_mode") or init_ckpt.get("config", {}).get("prediction_mode")
+    if expected_prediction_mode is not None and prediction_mode and prediction_mode != expected_prediction_mode:
+        errors.append(f"Prediction mode mismatch: parent has '{prediction_mode}', expected '{expected_prediction_mode}'")
+
+    use_condition = init_ckpt.get("use_condition") if "use_condition" in init_ckpt else init_ckpt.get("config", {}).get("use_condition")
+    if expected_use_condition is not None and use_condition is not None and use_condition != expected_use_condition:
+        errors.append(f"Conditioning mismatch: parent has use_condition={use_condition}, expected {expected_use_condition}")
+
+    if errors and fail_closed:
+        raise ValueError(
+            "Init checkpoint semantic contract violation:\n"
+            + "\n".join(f"  - {e}" for e in errors)
+        )
+
+    return len(errors) == 0, errors
