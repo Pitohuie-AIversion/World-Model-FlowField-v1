@@ -811,3 +811,171 @@ class TestProvenanceHardeningAndDualTracker:
         )
 
 
+# ============================================================
+# Component 5: Horizon-R2 / H16 Extension Runner Tests
+# ============================================================
+
+class TestH16ExtensionRunner:
+    """Rigorous tests for the H16 extension runner and warm-start contracts."""
+
+    def test_h16_config_effective_batch_size(self):
+        """Verify H16 configuration strictly maintains Beff=8 invariant."""
+        from scripts.run_h16_extension import H16_CONFIG
+
+        eff = H16_CONFIG["batch_size"] * H16_CONFIG["grad_accum_steps"]
+        assert eff == 8, f"H16 effective batch size must be 8, got {eff}"
+        assert H16_CONFIG["effective_batch_size"] == 8
+        assert H16_CONFIG["expected_init_horizon"] == 8
+        assert H16_CONFIG["horizon"] == 16
+        assert H16_CONFIG["lambda_div"] == 0.01
+        assert H16_CONFIG["lambda_vort"] == 0.05
+
+    def test_h16_build_training_command(self):
+        """Verify H16 training command construction has all formal parameters."""
+        from scripts.run_h16_extension import build_training_command
+
+        cmd = build_training_command(
+            parent_path="/path/to/h8_ep11.pt",
+            gpu_id=1,
+            epochs=12,
+            lr=5e-5,
+            min_lr=1e-6,
+            batch_size=1,
+            grad_accum_steps=8,
+            effective_batch_size=8,
+            horizon=16,
+            expected_init_horizon=8,
+            output_dir="/path/to/output",
+            log_file="/path/to/log.log",
+        )
+        assert "--init_checkpoint" in cmd
+        assert "/path/to/h8_ep11.pt" in cmd
+        assert "--expected_init_horizon" in cmd
+        assert cmd[cmd.index("--expected_init_horizon") + 1] == "8"
+        assert "--horizon" in cmd
+        assert cmd[cmd.index("--horizon") + 1] == "16"
+        assert "--batch_size" in cmd
+        assert cmd[cmd.index("--batch_size") + 1] == "1"
+        assert "--grad_accum_steps" in cmd
+        assert cmd[cmd.index("--grad_accum_steps") + 1] == "8"
+        assert "--effective_batch_size" in cmd
+        assert cmd[cmd.index("--effective_batch_size") + 1] == "8"
+        assert "--val_diagnostic_horizons" in cmd
+        assert cmd[cmd.index("--val_diagnostic_horizons") + 1] == "10,20,30"
+
+    def test_h16_parent_semantic_contract_enforcement(self):
+        """Verify H16 semantic contract enforcement matrix against valid/invalid parents."""
+        from src.utils.provenance import (
+            validate_init_checkpoint_contract,
+            PHYSICS_PROTOCOL,
+            SPATIAL_AXIS_CONTRACT,
+            SHEAR_FLOW_DOMAIN_SIZE_XY,
+        )
+
+        canonical_h8_ckpt = {
+            "model_type": "latent_transformer",
+            "seed": 42,
+            "horizon": 8,
+            "lambda_div": 0.01,
+            "lambda_vort": 0.05,
+            "physics_protocol": PHYSICS_PROTOCOL,
+            "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+            "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+            "prediction_mode": "direct",
+            "use_condition": True,
+            "training_git_dirty": False,
+            "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+            "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+        }
+
+        # Case 1: H16 parent horizon=8 -> PASS
+        is_valid, errors = validate_init_checkpoint_contract(
+            canonical_h8_ckpt,
+            requested_model_type="latent_transformer",
+            current_split_hash=canonical_h8_ckpt["split_hash"],
+            current_normalizer_hash=canonical_h8_ckpt["normalizer_hash"],
+            expected_seed=42,
+            expected_horizon=8,
+            expected_protocol=PHYSICS_PROTOCOL,
+            expected_axis_contract=SPATIAL_AXIS_CONTRACT,
+            expected_domain_size=SHEAR_FLOW_DOMAIN_SIZE_XY,
+            expected_prediction_mode="direct",
+            expected_use_condition=True,
+            fail_closed=True,
+        )
+        assert is_valid is True
+        assert len(errors) == 0
+
+        # Case 2: H16 parent horizon=4 -> FAIL
+        ckpt_h4 = dict(canonical_h8_ckpt, horizon=4)
+        with pytest.raises(ValueError, match="Horizon contract violation"):
+            validate_init_checkpoint_contract(
+                ckpt_h4,
+                expected_horizon=8,
+                fail_closed=True,
+            )
+
+        # Case 3: H16 parent horizon missing -> FAIL
+        ckpt_no_h = dict(canonical_h8_ckpt)
+        del ckpt_no_h["horizon"]
+        with pytest.raises(ValueError, match="missing required field 'horizon'"):
+            validate_init_checkpoint_contract(
+                ckpt_no_h,
+                expected_horizon=8,
+                fail_closed=True,
+            )
+
+        # Case 4: H16 wrong seed -> FAIL
+        ckpt_wrong_seed = dict(canonical_h8_ckpt, seed=43)
+        with pytest.raises(ValueError, match="Seed contract violation"):
+            validate_init_checkpoint_contract(
+                ckpt_wrong_seed,
+                expected_seed=42,
+                fail_closed=True,
+            )
+
+        # Case 5: H16 wrong split_hash -> FAIL
+        with pytest.raises(ValueError, match="Split contract violation"):
+            validate_init_checkpoint_contract(
+                canonical_h8_ckpt,
+                current_split_hash="9999999999999999999999999999999999999999999999999999999999999999",
+                fail_closed=True,
+            )
+
+        # Case 6: H16 wrong normalizer_hash -> FAIL
+        with pytest.raises(ValueError, match="Normalizer contract violation"):
+            validate_init_checkpoint_contract(
+                canonical_h8_ckpt,
+                current_normalizer_hash="8888888888888888888888888888888888888888888888888888888888888888",
+                fail_closed=True,
+            )
+
+    def test_run_h16_extension_dry_run_subprocess(self):
+        """Verify run_h16_extension.py executes cleanly in dry-run mode via CLI."""
+        res = subprocess.run(
+            [
+                sys.executable,
+                "scripts/run_h16_extension.py",
+                "--dry_run",
+                "--gpu_id", "1",
+            ],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode == 0, f"run_h16_extension.py --dry_run failed with code {res.returncode}:\n{res.stderr}"
+        stdout = res.stdout
+        assert "HORIZON-R2 / H16 EXTENSION EXPERIMENT [DRY RUN]" in stdout
+        assert "Parent horizon:         8" in stdout
+        assert "Target horizon:         16" in stdout
+        assert "Expected init horizon:  8" in stdout
+        assert "Microbatch:             1" in stdout
+        assert "Grad accumulation:      8" in stdout
+        assert "Effective batch:        8" in stdout
+        assert "Seed:                   42" in stdout
+        assert "lambda_div:             0.01" in stdout
+        assert "lambda_vort:            0.05" in stdout
+        assert "GPU ID:                 1" in stdout
+        assert "DRY RUN COMPLETED: H16 preflight checks verified successfully." in stdout
+
+

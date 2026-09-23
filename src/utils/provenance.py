@@ -566,15 +566,8 @@ def validate_init_checkpoint_contract(
     if training_git_dirty is None:
         if not legacy_attestation:
             errors.append("Checkpoint is missing required field 'training_git_dirty'")
-        elif (
-            prov.get("legacy_attestation_verified") is not True
-            and not (
-                isinstance(legacy_attestation, dict)
-                and legacy_attestation.get("status") == "historical_untracked"
-                and legacy_attestation.get("checkpoint_sha256")
-            )
-        ):
-            errors.append("Checkpoint has invalid or unverified legacy_attestation for missing training_git_dirty")
+        elif prov.get("legacy_attestation_verified") is not True:
+            errors.append("Checkpoint has unverified legacy_attestation for missing training_git_dirty")
     elif training_git_dirty is True:
         errors.append("Checkpoint was trained on a dirty working tree (training_git_dirty=True)")
 
