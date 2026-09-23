@@ -74,6 +74,7 @@ def create_flow_datasets(
     train_stride: Optional[int] = None,
     valid_stride: Optional[int] = None,
     test_stride: Optional[int] = None,
+    valid_horizon: Optional[int] = None,
     downsample_factor: int = 1,
     normalize: bool = True,
     normalizer: Optional[FieldNormalizer] = None,
@@ -241,12 +242,14 @@ def create_flow_datasets(
     raw_train_ds.normalizer = fitted_normalizer
     train_dataset = raw_train_ds
 
+    v_horizon = valid_horizon if valid_horizon is not None else horizon
+
     if is_dict_trajs:
         valid_dataset = ShearFlowDataset(
             trajectories=valid_entries,
             data_root=data_root,
             history_length=history_length,
-            horizon=horizon,
+            horizon=v_horizon,
             stride=v_stride,
             normalizer=fitted_normalizer,
             preload_to_memory=preload_to_memory,
@@ -267,7 +270,7 @@ def create_flow_datasets(
             file_paths=valid_entries,
             data_root=data_root,
             history_length=history_length,
-            horizon=horizon,
+            horizon=v_horizon,
             stride=v_stride,
             normalizer=fitted_normalizer,
             preload_to_memory=preload_to_memory,
@@ -297,6 +300,7 @@ def create_flow_dataloaders(
     train_stride: Optional[int] = None,
     valid_stride: Optional[int] = None,
     test_stride: Optional[int] = None,
+    valid_horizon: Optional[int] = None,
     downsample_factor: int = 1,
     batch_size: int = 4,
     num_workers: int = 0,
@@ -324,6 +328,7 @@ def create_flow_dataloaders(
         train_stride=train_stride,
         valid_stride=valid_stride,
         test_stride=test_stride,
+        valid_horizon=valid_horizon,
         downsample_factor=downsample_factor,
         normalize=normalize,
         normalizer=normalizer,

@@ -2,6 +2,7 @@
 
 import argparse
 import glob
+import hashlib
 import os
 import sys
 import time
@@ -158,7 +159,13 @@ def train_forecaster(
     use_amp: bool = False,
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
     stats_dir: Optional[str] = None,
+    init_checkpoint: Optional[str] = None,
+    grad_accum_steps: int = 1,
+    val_diagnostic_horizons: Optional[List[int]] = None,
 ):
+    if grad_accum_steps < 1:
+        raise ValueError(f"grad_accum_steps must be >= 1, got {grad_accum_steps}")
+
     # Distributed Data Parallel (DDP) detection
     is_distributed = "WORLD_SIZE" in os.environ and int(os.environ["WORLD_SIZE"]) > 1
     if is_distributed:
@@ -195,12 +202,17 @@ def train_forecaster(
     if stats_dir is not None:
         loader_kwargs["stats_dir"] = stats_dir
 
+    effective_valid_horizon = horizon
+    if val_diagnostic_horizons:
+        effective_valid_horizon = max([horizon] + val_diagnostic_horizons)
+
     train_loader, valid_loader, test_loader, normalizer, train_sampler = create_flow_dataloaders(
         split_type=split_type,
         split_file=split_file,
         data_root=data_dir,
         history_length=4,
         horizon=horizon,
+        valid_horizon=effective_valid_horizon,
         train_stride=train_stride,
         valid_stride=valid_stride,
         downsample_factor=downsample_factor,
@@ -297,6 +309,59 @@ def train_forecaster(
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
 
+    # Load weights from init_checkpoint if provided (warm-start dynamics model)
+    parent_checkpoint_path = None
+    parent_checkpoint_sha256 = None
+    if init_checkpoint is not None:
+        if not os.path.exists(init_checkpoint):
+            raise FileNotFoundError(f"init_checkpoint not found at '{init_checkpoint}'")
+
+        hasher = hashlib.sha256()
+        with open(init_checkpoint, "rb") as f:
+            while chunk := f.read(65536):
+                hasher.update(chunk)
+        parent_checkpoint_sha256 = hasher.hexdigest()
+        parent_checkpoint_path = init_checkpoint
+
+        if global_rank == 0:
+            print(
+                f"Loading dynamics weights from init_checkpoint: {init_checkpoint} "
+                f"(SHA256: {parent_checkpoint_sha256[:12]}...)"
+            )
+
+        init_ckpt = torch.load(init_checkpoint, map_location="cpu")
+
+        # 1. Semantic compatibility check
+        init_model_type = init_ckpt.get("model_type") or init_ckpt.get("config", {}).get("model_type")
+        if init_model_type and init_model_type != model_type:
+            raise ValueError(
+                f"Semantic incompatibility: init_checkpoint has model_type '{init_model_type}', "
+                f"but current training requests model_type '{model_type}'."
+            )
+
+        # 2. Split contract check
+        init_split_hash = init_ckpt.get("split_hash") or init_ckpt.get("config", {}).get("split_hash")
+        if init_split_hash and init_split_hash != "UNKNOWN_SPLIT" and split_hash != "UNKNOWN_SPLIT":
+            if init_split_hash != split_hash:
+                raise ValueError(
+                    f"Data contract violation: init_checkpoint split_hash '{init_split_hash}' "
+                    f"does not match current split_hash '{split_hash}'."
+                )
+
+        # 3. Normalizer contract check
+        init_norm_hash = init_ckpt.get("normalizer_hash") or init_ckpt.get("config", {}).get("normalizer_hash")
+        if init_norm_hash and normalizer_hash and init_norm_hash != normalizer_hash:
+            raise ValueError(
+                f"Data contract violation: init_checkpoint normalizer_hash '{init_norm_hash}' "
+                f"does not match current normalizer_hash '{normalizer_hash}'."
+            )
+
+        # 4. Load weights strictly into model (without optimizer state)
+        state_dict_to_load = init_ckpt.get("model_state_dict") or init_ckpt.get("state_dict") or init_ckpt
+        load_msg = model.load_state_dict(state_dict_to_load, strict=True)
+        if global_rank == 0:
+            print(f"Successfully loaded dynamics model_state_dict: {load_msg}")
+
     # Wrap model with DDP
     if is_distributed:
         model = torch.nn.parallel.DistributedDataParallel(
@@ -315,7 +380,14 @@ def train_forecaster(
     tracker = None
     if global_rank == 0:
         tracker = BestCheckpointTracker(save_dir=output_dir, metric_name="vrmse_mean", mode="min", keep_top_k=3)
-        print(f"Training {model_type} on {device} (Distributed: {is_distributed}, World Size: {world_size}) | Horizon: {horizon} | Epochs: {epochs}")
+        effective_batch_size = batch_size * grad_accum_steps
+        diag_info = f" | Diag Horizons: {val_diagnostic_horizons}" if val_diagnostic_horizons else ""
+        warm_info = f" | Warm-Start from: {parent_checkpoint_path} (SHA256: {parent_checkpoint_sha256[:8]})" if parent_checkpoint_path else ""
+        print(
+            f"Training {model_type} on {device} (Distributed: {is_distributed}, World Size: {world_size}) | "
+            f"Horizon: {horizon} | Epochs: {epochs} | Microbatch: {batch_size} | "
+            f"Grad Accum: {grad_accum_steps} (Effective Batch: {effective_batch_size}) | LR: {lr}{diag_info}{warm_info}"
+        )
 
     scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
@@ -325,14 +397,14 @@ def train_forecaster(
 
         model.train()
         train_loss = 0.0
+        optimizer.zero_grad()
+        accum_count = 0
 
-        for batch in train_loader:
+        for batch_idx, batch in enumerate(train_loader):
             q_hist = batch["history"].to(device)  # (B, L, 4, Ny, Nx)
             q_future = batch["future"].to(device)  # (B, H, 4, Ny, Nx)
             re = batch["re"].to(device) if use_condition else None
             sc = batch["sc"].to(device) if use_condition else None
-
-            optimizer.zero_grad()
 
             with torch.amp.autocast('cuda', enabled=use_amp):
                 if model_type == "latent_transformer":
@@ -385,9 +457,17 @@ def train_forecaster(
                     if lambda_vort > 0:
                         loss = loss + lambda_vort * vort_loss_fn(pred_phys, target_phys)
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+                scaled_loss = loss / grad_accum_steps
+
+            scaler.scale(scaled_loss).backward()
+            accum_count += 1
+
+            if accum_count == grad_accum_steps or (batch_idx + 1) == len(train_loader):
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+                accum_count = 0
+
             train_loss += loss.item() * len(q_hist)
 
         train_loss /= len(train_loader.dataset)
@@ -395,7 +475,8 @@ def train_forecaster(
         # Validation only on rank 0
         if global_rank == 0:
             model.eval()
-            rollout_step_metrics_sum = {h: {} for h in range(horizon)}
+            eval_horizon = effective_valid_horizon
+            rollout_step_metrics_sum = {h: {} for h in range(eval_horizon)}
             with torch.no_grad():
                 with torch.amp.autocast('cuda', enabled=use_amp):
                     for batch in valid_loader:
@@ -406,24 +487,24 @@ def train_forecaster(
 
                         eval_model = model.module if is_distributed else model
                         if model_type == "latent_transformer":
-                            if horizon == 1:
+                            if eval_horizon == 1:
                                 pred = eval_model.forward_single_step(q_hist, re, sc)
                             else:
-                                pred = eval_model.forward_rollout(q_hist, re, sc, horizon=horizon)
+                                pred = eval_model.forward_rollout(q_hist, re, sc, horizon=eval_horizon)
                         elif model_type in ("direct_transformer", "pde_transformer"):
-                            if horizon == 1:
+                            if eval_horizon == 1:
                                 pred = eval_model(q_hist, re=re, sc=sc)
                             else:
                                 buf = HistoryBuffer(history_length=q_hist.shape[1])
                                 buf.reset(q_hist)
-                                pred = buf.rollout(lambda hist, _c: eval_model(hist, re=re, sc=sc), steps=horizon)
+                                pred = buf.rollout(lambda hist, _c: eval_model(hist, re=re, sc=sc), steps=eval_horizon)
                         elif model_type == "fno":
-                            if horizon == 1:
+                            if eval_horizon == 1:
                                 pred = eval_model(q_hist)
                             else:
                                 pred_list = []
                                 hist_window = q_hist
-                                for _ in range(horizon):
+                                for _ in range(eval_horizon):
                                     step_pred = eval_model(hist_window)
                                     pred_list.append(step_pred)
                                     hist_window = torch.cat([hist_window[:, 1:], step_pred], dim=1)
@@ -442,7 +523,7 @@ def train_forecaster(
                         target_eval[:, :, 2:3, :, :] = target_eval[:, :, 2:3, :, :] - target_eval[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
 
                         b_samples = len(q_hist)
-                        for h in range(horizon):
+                        for h in range(eval_horizon):
                             step_m = evaluate_field_metrics(pred_eval[:, h], target_eval[:, h])
                             for k, v in step_m.items():
                                 rollout_step_metrics_sum[h][k] = rollout_step_metrics_sum[h].get(k, 0.0) + v * b_samples
@@ -450,7 +531,7 @@ def train_forecaster(
             n_val = len(valid_dataset)
             val_step_metrics = {
                 h: {k: v / n_val for k, v in rollout_step_metrics_sum[h].items()}
-                for h in range(horizon)
+                for h in range(eval_horizon)
             }
 
             # Step 1 metrics
@@ -466,6 +547,15 @@ def train_forecaster(
             else:
                 val_criterion = val_metrics["vrmse_mean"]
 
+            diag_strs = []
+            if val_diagnostic_horizons:
+                for dh in sorted(val_diagnostic_horizons):
+                    if dh <= eval_horizon:
+                        dh_vrmse = val_step_metrics[dh - 1]["vrmse_mean"]
+                        val_metrics[f"val_h{dh}_vrmse"] = dh_vrmse
+                        diag_strs.append(f"h{dh}: {dh_vrmse:.4f}")
+            diag_suffix = f" | Diag [{', '.join(diag_strs)}]" if diag_strs else ""
+
             vram_gb = torch.cuda.max_memory_allocated(device=device) / (1024**3) if torch.cuda.is_available() else 0.0
             if horizon > 1:
                 print(
@@ -473,16 +563,16 @@ def train_forecaster(
                     f"Val Rollout Mean VRMSE: {val_metrics['rollout_mean_vrmse']:.4f} | "
                     f"Step 1 VRMSE: {val_metrics['vrmse_mean']:.4f} "
                     f"(u: {val_metrics['vrmse_u']:.4f}, v: {val_metrics['vrmse_v']:.4f}, "
-                    f"p: {val_metrics['vrmse_p']:.4f}, s: {val_metrics['vrmse_s']:.4f}) | "
-                    f"Max VRAM: {vram_gb:.2f} GB"
+                    f"p: {val_metrics['vrmse_p']:.4f}, s: {val_metrics['vrmse_s']:.4f})"
+                    f"{diag_suffix} | Max VRAM: {vram_gb:.2f} GB"
                 )
             else:
                 print(
                     f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {train_loss:.4e} | "
                     f"Val VRMSE Mean: {val_metrics['vrmse_mean']:.4f} "
                     f"(u: {val_metrics['vrmse_u']:.4f}, v: {val_metrics['vrmse_v']:.4f}, "
-                    f"p: {val_metrics['vrmse_p']:.4f}, s: {val_metrics['vrmse_s']:.4f}) | "
-                    f"Max VRAM: {vram_gb:.2f} GB"
+                    f"p: {val_metrics['vrmse_p']:.4f}, s: {val_metrics['vrmse_s']:.4f})"
+                    f"{diag_suffix} | Max VRAM: {vram_gb:.2f} GB"
                 )
 
             raw_model = model.module if is_distributed else model
@@ -501,6 +591,11 @@ def train_forecaster(
                 "split_type": split_type,
                 "split_hash": split_hash,
                 "normalizer_hash": normalizer_hash,
+                "parent_checkpoint_path": parent_checkpoint_path,
+                "parent_checkpoint_sha256": parent_checkpoint_sha256,
+                "grad_accum_steps": grad_accum_steps,
+                "effective_batch_size": batch_size * grad_accum_steps,
+                "val_diagnostic_horizons": val_diagnostic_horizons,
                 "config": {
                     "model_type": model_type,
                     "physics_protocol": PHYSICS_PROTOCOL,
@@ -525,6 +620,11 @@ def train_forecaster(
                     "field_loss_space": field_loss_space,
                     "lr": lr,
                     "batch_size": batch_size,
+                    "grad_accum_steps": grad_accum_steps,
+                    "effective_batch_size": batch_size * grad_accum_steps,
+                    "parent_checkpoint_path": parent_checkpoint_path,
+                    "parent_checkpoint_sha256": parent_checkpoint_sha256,
+                    "val_diagnostic_horizons": val_diagnostic_horizons,
                     "train_stride": train_stride,
                     "valid_stride": valid_stride,
                     "split_type": split_type,
@@ -589,6 +689,25 @@ if __name__ == "__main__":
     parser.add_argument("--preload_to_memory", action="store_true")
     parser.add_argument("--use_amp", action="store_true")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for training reproducibility")
+    parser.add_argument(
+        "--init_checkpoint",
+        type=str,
+        default=None,
+        help="Path to checkpoint for warm-start dynamics model weights.",
+    )
+    parser.add_argument(
+        "--grad_accum_steps",
+        type=int,
+        default=1,
+        help="Number of gradient accumulation steps (default: 1).",
+    )
+    parser.add_argument(
+        "--val_diagnostic_horizons",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Auxiliary rollout horizons to track on validation set (e.g. 10 20 30).",
+    )
     args = parser.parse_args()
 
     freeze_rep = False if args.joint else args.freeze_representation
@@ -622,4 +741,7 @@ if __name__ == "__main__":
         num_workers=args.num_workers,
         preload_to_memory=args.preload_to_memory,
         use_amp=args.use_amp,
+        init_checkpoint=args.init_checkpoint,
+        grad_accum_steps=args.grad_accum_steps,
+        val_diagnostic_horizons=args.val_diagnostic_horizons,
     )

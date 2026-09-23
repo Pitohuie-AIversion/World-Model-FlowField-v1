@@ -251,6 +251,7 @@ def analyze_all_logs(log_dir: str | Path) -> Dict[str, Any]:
     }
 
     return {
+        "log_dir": str(log_dir),
         "aggregate": aggregate,
         "runs": run_summaries,
         "raw_trajectories": runs_data,
@@ -334,7 +335,10 @@ def plot_convergence_curves(analysis: Dict[str, Any], output_path: str | Path) -
     ax_val.set_xlabel("Epoch", fontsize=12, fontweight="bold")
     ax_val.set_ylabel("Validation VRMSE (Mean)", fontsize=12, fontweight="bold")
     ax_val.set_title("(b) Validation Rollout VRMSE vs Epoch (Best Checkpoint Markers)", fontsize=13, fontweight="bold", pad=10)
-    ax_val.set_ylim(0.08, 0.55)
+    all_val = [v for run in analysis["raw_trajectories"] for v in run["val_vrmses"] if v is not None]
+    max_val = max(all_val) if all_val else 0.55
+    min_val = min(all_val) if all_val else 0.08
+    ax_val.set_ylim(max(0.05, min_val * 0.85), max_val * 1.05)
     ax_val.grid(True, linestyle="--", alpha=0.5)
     ax_val.legend(frameon=True, fontsize=9, loc="upper right")
 
@@ -417,19 +421,48 @@ def export_convergence_json(analysis: Dict[str, Any], output_path: str | Path) -
 
 
 def export_full_trajectories_json(analysis: Dict[str, Any], output_path: str | Path) -> None:
-    """Export complete epoch 1-30 trajectories for all runs for publication-grade archival."""
+    """Export complete epoch 1-30 trajectories for all runs with SHA256 and provenance."""
+    import hashlib
+    import subprocess
+    from datetime import datetime, timezone
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Compute source log SHA256 for each trajectory if present
+    log_dir = Path(analysis.get("log_dir", "outputs"))
+    trajectories_with_provenance = []
+    for traj in analysis["raw_trajectories"]:
+        traj_copy = dict(traj)
+        log_file = log_dir / traj["filename"]
+        if log_file.is_file():
+            with open(log_file, "rb") as f:
+                traj_copy["source_log_sha256"] = hashlib.sha256(f.read()).hexdigest()
+        else:
+            traj_copy["source_log_sha256"] = None
+        trajectories_with_provenance.append(traj_copy)
+
+    # Git metadata
+    git_commit = None
+    git_dirty = None
+    try:
+        git_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+        git_dirty = len(subprocess.check_output(["git", "status", "--porcelain"], stderr=subprocess.DEVNULL).decode().strip()) > 0
+    except Exception:
+        pass
 
     payload = {
         "metadata": {
             "description": "Full epoch-by-epoch training loss and validation VRMSE trajectories across Closure-R4 runs",
-            "total_runs": len(analysis["raw_trajectories"]),
+            "total_runs": len(trajectories_with_provenance),
             "epochs_per_run": 30,
             "seeds": [42, 43, 44],
             "groups": ["E0_single_step", "E1_rollout_field", "E2_plus_L_div", "E3_plus_L_vort", "E4_full_physics"],
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "analysis_git_commit": git_commit,
+            "analysis_git_dirty": git_dirty,
         },
-        "trajectories": analysis["raw_trajectories"],
+        "trajectories": trajectories_with_provenance,
     }
 
     with open(output_path, "w", encoding="utf-8") as f:

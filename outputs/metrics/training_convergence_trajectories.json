@@ -14,7 +14,10 @@
       "E2_plus_L_div",
       "E3_plus_L_vort",
       "E4_full_physics"
-    ]
+    ],
+    "generated_at": "2026-09-23T03:46:41.833184+00:00",
+    "analysis_git_commit": "db23dcd1b0ce857b8530a67f8bbd216210e8501e",
+    "analysis_git_dirty": true
   },
   "trajectories": [
     {
@@ -280,7 +283,8 @@
           0.0447,
           0.0496
         ]
-      }
+      },
+      "source_log_sha256": "619391c042a7df45c96c6dc5455d06f09f9b4c79767af250a9a12fcbad2a5466"
     },
     {
       "seed": 42,
@@ -545,7 +549,8 @@
           0.0474,
           0.0557
         ]
-      }
+      },
+      "source_log_sha256": "6789cd7762e61c7e4bfc18386652ac78d332b4b278626f3b6fe305b36255bea9"
     },
     {
       "seed": 43,
@@ -810,7 +815,8 @@
           0.0437,
           0.0419
         ]
-      }
+      },
+      "source_log_sha256": "2fe7cb05953559da1599b84fda7f314d464d600320a10b6c36ef6ac37c56b6a7"
     },
     {
       "seed": 44,
@@ -1075,7 +1081,8 @@
           0.0409,
           0.0482
         ]
-      }
+      },
+      "source_log_sha256": "48a84545275cf84c2e254f9fae4e09809f2a7f875ac78c5143a1729623e9159f"
     },
     {
       "seed": 42,
@@ -1340,7 +1347,8 @@
           0.0565,
           0.0595
         ]
-      }
+      },
+      "source_log_sha256": "09d1a228c1be1e999b126c324a04675078eb9c46881e67310976931c5f7289fe"
     },
     {
       "seed": 43,
@@ -1605,7 +1613,8 @@
           0.044,
           0.0475
         ]
-      }
+      },
+      "source_log_sha256": "b4a34e533516bcb82171a68155e7951d55401cc063623470d21159eec44dccdf"
     },
     {
       "seed": 44,
@@ -1870,7 +1879,8 @@
           0.0408,
           0.0471
         ]
-      }
+      },
+      "source_log_sha256": "af6f772cbd40feb4c41018475440d43a5589ba6780cebe4a1073c189a3a3bb6a"
     },
     {
       "seed": 42,
@@ -2135,7 +2145,8 @@
           0.0533,
           0.0588
         ]
-      }
+      },
+      "source_log_sha256": "20b53d6eb232387d087781aa2b69b44a1c16e510ea9cf01127006888896a53a7"
     },
     {
       "seed": 43,
@@ -2400,7 +2411,8 @@
           0.0463,
           0.0561
         ]
-      }
+      },
+      "source_log_sha256": "d6de0ae37852f6dcab129b75f6655d0c0c67a69919c4212eff121325d918f7f8"
     },
     {
       "seed": 44,
@@ -2665,7 +2677,8 @@
           0.0469,
           0.0495
         ]
-      }
+      },
+      "source_log_sha256": "e1a224a629070adf9e3b96b219ff2fb4fc973ee29cee8d28875a5f102341118f"
     },
     {
       "seed": 42,
@@ -2930,7 +2943,8 @@
           0.0541,
           0.0602
         ]
-      }
+      },
+      "source_log_sha256": "bec12ad0c2529141d4d01bdc06fe5cbe0404cf0cbc4602eaa99100b34fce1988"
     },
     {
       "seed": 43,
@@ -3195,7 +3209,8 @@
           0.0526,
           0.0455
         ]
-      }
+      },
+      "source_log_sha256": "b880d8e8e87ab83c0be56ef42eb0f7cdf0d4c015a426863b571e12e4b7e2b662"
     },
     {
       "seed": 44,
@@ -3460,7 +3475,8 @@
           0.0459,
           0.0526
         ]
-      }
+      },
+      "source_log_sha256": "688c308967a4aa11f9b74c5e83fd49c24910f8cb743b8d0ffbe8c3e1b70dc06e"
     }
   ]
 }
