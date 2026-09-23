@@ -171,6 +171,10 @@ def resolve_checkpoint_provenance(
                             f"file SHA256 is {ckpt_sha}, but manifest expected {manifest_expected_sha}"
                         )
                     commit = commit or grp_info.get("training_git_commit")
+                    if git_dirty is None and "training_git_dirty" in grp_info:
+                        git_dirty = grp_info.get("training_git_dirty")
+                    elif git_dirty is None and "training_git_dirty" in manifest:
+                        git_dirty = manifest.get("training_git_dirty")
                     seed = seed if seed is not None else grp_info.get("seed")
                     split_type = split_type or grp_info.get("split_type", "grouped")
                     split_hash = split_hash or grp_info.get("split_hash")
