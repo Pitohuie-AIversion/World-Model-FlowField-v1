@@ -11,10 +11,10 @@
   "variable": "vorticity",
   "error_type": "absolute_error",
   "maes_by_group": {
-    "E1_rollout_field": 1.8749563694000244,
-    "E4_full_physics": 1.5588191747665405
+    "E1_rollout_field": 1.8749496936798096,
+    "E4_full_physics": 1.5589237213134766
   },
-  "timestamp": "2026-09-23T10:19:44.503026",
+  "timestamp": "2026-09-23T10:22:39.633388",
   "split_name": "grouped",
   "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
   "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
@@ -25,8 +25,8 @@
   "end_t": 34,
   "re": 10000.0,
   "sc": 0.1,
-  "evaluation_git_commit": "71469919d8d04d09bffbfc460e9d6387d701f60f",
-  "evaluation_git_dirty": true,
+  "evaluation_git_commit": "25f572fc18d9c60ada1a027b08b3945c844cbc44",
+  "evaluation_git_dirty": false,
   "domain_size": [
     1.0,
     2.0

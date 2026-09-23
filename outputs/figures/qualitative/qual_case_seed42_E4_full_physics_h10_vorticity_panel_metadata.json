@@ -1,22 +1,15 @@
 {
-  "figure_type": "multihorizon",
-  "figure_path": "outputs/figures/qualitative/qual_case_seed42_E4_full_physics_vorticity_multihorizon.png",
+  "figure_type": "panel",
+  "figure_path": "outputs/figures/qualitative/qual_case_seed42_E4_full_physics_h10_vorticity_panel.png",
   "seed": 42,
   "group": "E4_full_physics",
   "sample_index": 0,
-  "horizons": [
-    1,
-    10,
-    30
-  ],
+  "horizon": 10,
   "variable": "vorticity",
   "error_type": "absolute_error",
-  "maes_by_horizon": {
-    "1": 0.544707179069519,
-    "10": 2.7517964839935303,
-    "30": 1.5589237213134766
-  },
-  "timestamp": "2026-09-23T10:22:34.093244",
+  "mae": 2.7517964839935303,
+  "max_err": 17.014328002929688,
+  "timestamp": "2026-09-23T10:22:29.171666",
   "split_name": "grouped",
   "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
   "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
