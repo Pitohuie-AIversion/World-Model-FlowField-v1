@@ -69,14 +69,20 @@ def resolve_parent_checkpoint(custom_path: Optional[str] = None) -> Path:
     """Resolve the canonical parent E4 Seed 42 H=2 checkpoint path."""
     if custom_path:
         p = Path(custom_path)
-        if p.is_file():
-            return p
+        try:
+            if p.is_file():
+                return p
+        except (PermissionError, OSError):
+            pass
         raise FileNotFoundError(f"Specified parent checkpoint not found: {custom_path}")
 
     for candidate in DEFAULT_PARENT_CHECKPOINTS:
         p = Path(candidate)
-        if p.is_file():
-            return p
+        try:
+            if p.is_file():
+                return p
+        except (PermissionError, OSError):
+            continue
 
     raise FileNotFoundError(
         "Could not resolve parent E4 Seed 42 H=2 checkpoint. Checked candidates:\n"

@@ -52,16 +52,25 @@ def test_compute_file_sha256(tmp_path):
     assert actual_sha == expected_sha
 
 
-def test_resolve_parent_checkpoint():
+def test_resolve_parent_checkpoint(tmp_path):
     """Verify canonical parent checkpoint resolution."""
     # Custom non-existent path should raise FileNotFoundError
     with pytest.raises(FileNotFoundError, match="Specified parent checkpoint not found"):
         resolve_parent_checkpoint("/non/existent/path/to/checkpoint.pt")
 
-    # Default resolution should find the existing parent checkpoint
-    parent_path = resolve_parent_checkpoint()
-    assert parent_path.is_file(), f"Parent checkpoint {parent_path} is not a valid file"
-    assert "best_vrmse_mean.pt" in parent_path.name
+    # Custom mock path should resolve cleanly
+    mock_ckpt = tmp_path / "best_vrmse_mean.pt"
+    mock_ckpt.write_bytes(b"mock checkpoint data")
+    resolved = resolve_parent_checkpoint(str(mock_ckpt))
+    assert resolved == mock_ckpt
+
+    # Default resolution on machines with real checkpoints
+    try:
+        parent_path = resolve_parent_checkpoint()
+        assert parent_path.is_file(), f"Parent checkpoint {parent_path} is not a valid file"
+        assert "best_vrmse_mean.pt" in parent_path.name
+    except FileNotFoundError:
+        pytest.skip("Parent checkpoint not present in current test environment (e.g. CI)")
 
 
 def test_build_training_command():
@@ -247,10 +256,19 @@ def test_grad_accum_math_equivalence():
     assert torch.allclose(linear1.bias, linear2.bias, atol=1e-6)
 
 
-def test_run_horizon_ablation_dry_run_subprocess():
+def test_run_horizon_ablation_dry_run_subprocess(tmp_path):
     """Execute run_horizon_ablation.py in dry-run mode and verify complete output and exit code."""
+    mock_ckpt = tmp_path / "mock_parent_for_cli.pt"
+    mock_ckpt.write_bytes(b"mock checkpoint payload for dry run")
+
     res = subprocess.run(
-        [sys.executable, "scripts/run_horizon_ablation.py", "--dry_run"],
+        [
+            sys.executable,
+            "scripts/run_horizon_ablation.py",
+            "--dry_run",
+            "--parent_checkpoint",
+            str(mock_ckpt),
+        ],
         cwd=str(PROJECT_ROOT),
         capture_output=True,
         text=True,
