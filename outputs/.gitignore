@@ -44,8 +44,8 @@ logs/*
 !metrics/*.json
 !normalization/*.pt
 !normalization/*.json
-!figures/*.png
-!figures/qualitative/
-!figures/qualitative/*.png
-!figures/qualitative/*.json
+!figures/**/*.png
+!figures/**/*.json
+!figures/**/
+!figures/README.md
 !tables/*.tex

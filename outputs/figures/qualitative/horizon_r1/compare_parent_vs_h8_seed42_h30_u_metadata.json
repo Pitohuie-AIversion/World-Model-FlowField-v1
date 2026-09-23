@@ -1,0 +1,71 @@
+{
+  "figure_type": "compare",
+  "figure_path": "outputs/figures/qualitative/compare_parent_vs_h8_seed42_h30_u.png",
+  "seed": 42,
+  "compare_models": [
+    "Parent Baseline",
+    "H8 Saved Long-Best"
+  ],
+  "compare_groups": [
+    "parent",
+    "H8_saved_long_best"
+  ],
+  "sample_index": 0,
+  "horizon": 30,
+  "variable": "u",
+  "error_type": "absolute_error",
+  "maes_by_group": {
+    "parent": 0.3263443112373352,
+    "H8_saved_long_best": 0.07456062734127045
+  },
+  "max_err_by_group": {
+    "parent": 0.7383145093917847,
+    "H8_saved_long_best": 0.3785857558250427
+  },
+  "improvement_pct": 77.15277009920884,
+  "colorbar_norm": {
+    "cmap": "coolwarm",
+    "vmin": -0.663489818572998,
+    "vmax": 0.654606819152832,
+    "shared_across": "Ground Truth and all Model Predictions"
+  },
+  "error_colorbar_norm": {
+    "cmap": "inferno",
+    "vmin": 0.0,
+    "vmax": 0.7383145093917847,
+    "shared_across": "All comparative error panels"
+  },
+  "timestamp": "2026-09-23T17:52:56.441747",
+  "split_name": "grouped",
+  "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+  "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+  "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+  "sim_idx": 1,
+  "start_t": 0,
+  "split_t": 4,
+  "end_t": 34,
+  "re": 10000.0,
+  "sc": 0.1,
+  "evaluation_git_commit": "0a8a4da137e3f73c4f696cc81f527c32a8ba8405",
+  "evaluation_git_dirty": true,
+  "domain_size": [
+    1.0,
+    2.0
+  ],
+  "spatial_axis_contract": "tensor(...,C,Nx,Ny):dim-2=x,dim-1=y",
+  "vorticity_operator": "compute_vorticity (spectral_grad_2d)",
+  "models_provenance": {
+    "parent": {
+      "checkpoint_path": "outputs/checkpoints/dynamics/closure_r4/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt",
+      "checkpoint_sha256": "821891674ea80383ba07f02edbd1005e1005fc2a6b084b4146969c4f5570ca86",
+      "training_git_commit": "UNKNOWN",
+      "training_git_dirty": null
+    },
+    "H8_saved_long_best": {
+      "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+      "checkpoint_sha256": "ea038c7af0f3a0fa5d851f25dd1ea224371b8c44ab2a80b8314f5c286c224147",
+      "training_git_commit": "6593b65005843c3f3c2640cb262bfd56708e11ad",
+      "training_git_dirty": false
+    }
+  }
+}

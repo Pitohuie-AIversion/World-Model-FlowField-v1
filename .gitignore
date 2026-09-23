@@ -134,7 +134,10 @@ outputs/*
 !outputs/metrics/*.json
 !outputs/normalization/*.pt
 !outputs/normalization/*.json
-!outputs/figures/*.png
+!outputs/figures/**/*.png
+!outputs/figures/**/*.json
+!outputs/figures/**/
+!outputs/figures/README.md
 
 # ------------------------------------------------------------------------------
 # 10. 生成的可视化图像与多媒体 (Generated Visualizations & Media)
