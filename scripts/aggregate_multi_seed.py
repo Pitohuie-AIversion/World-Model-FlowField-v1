@@ -30,17 +30,17 @@ DEFAULT_GROUPS = [
     "E4_full_physics",
 ]
 DEFAULT_METRICS = [
-    ("vrmse_mean", "Field Mean VRMSE", True),
-    ("rmse_mean", "Field Mean RMSE", True),
-    ("div_rmse", "Divergence RMSE", True),
-    ("vort_rmse", "Vorticity RMSE", True),
-    ("energy_spectrum_mae", "Energy Spectrum MAE", True),
-    ("ke_rel_err", "Kinetic Energy Rel Err", True),
-    ("enstrophy_rel_err", "Enstrophy Rel Err", True),
-    ("tracer_var_retention", "Tracer Var Retention", False),
-    ("tracer_out_of_bounds_rate", "Tracer OOB Rate", True),
-    ("tracer_mass_error", "Tracer Mass Error (L1)", True),
-    ("tracer_mean_err", "Tracer Mean Error", True),
+    ("vrmse_mean", "Field Mean VRMSE", "minimize"),
+    ("rmse_mean", "Field Mean RMSE", "minimize"),
+    ("div_rmse", "Divergence RMSE", "minimize"),
+    ("vort_rmse", "Vorticity RMSE", "minimize"),
+    ("energy_spectrum_mae", "Energy Spectrum MAE", "minimize"),
+    ("ke_rel_err", "Kinetic Energy Rel Err", "minimize"),
+    ("enstrophy_rel_err", "Enstrophy Rel Err", "minimize"),
+    ("tracer_var_retention", "Tracer Var Retention", "target_1.0"),
+    ("tracer_out_of_bounds_rate", "Tracer OOB Rate", "minimize"),
+    ("tracer_mass_error", "Tracer Mass Error (L1)", "minimize"),
+    ("tracer_mean_err", "Tracer Mean Error", "minimize"),
 ]
 
 
@@ -196,8 +196,15 @@ def compute_paired_deltas(
     if metric_keys is None:
         metric_keys = [m[0] for m in DEFAULT_METRICS]
 
-    # Map tuple to is_lower_better
-    lower_better_map = {m[0]: m[2] for m in DEFAULT_METRICS}
+    # Map metric to objective: "minimize", "maximize", or "target_1.0"
+    objective_map = {}
+    for m in DEFAULT_METRICS:
+        k = m[0]
+        obj = m[2]
+        if isinstance(obj, bool):
+            objective_map[k] = "minimize" if obj else "maximize"
+        else:
+            objective_map[k] = str(obj).lower()
 
     seeds = sorted(seed_metrics.keys())
     paired_effects = {}
@@ -210,6 +217,9 @@ def compute_paired_deltas(
             for mk in metric_keys:
                 per_seed_deltas = {}
                 delta_vals = []
+                wins = 0
+                obj = objective_map.get(mk, "minimize")
+
                 for s in seeds:
                     base_val = seed_metrics[s].get(baseline_group, {}).get(skey, {}).get(mk)
                     cmp_val = seed_metrics[s].get(cmp_grp, {}).get(skey, {}).get(mk)
@@ -217,6 +227,20 @@ def compute_paired_deltas(
                         d = float(cmp_val - base_val)
                         per_seed_deltas[str(s)] = d
                         delta_vals.append(d)
+
+                        # Scientific win condition
+                        if obj == "target_1.0":
+                            # Closer to 1.0 is an improvement
+                            err_cmp = abs(cmp_val - 1.0)
+                            err_base = abs(base_val - 1.0)
+                            if err_cmp < err_base:
+                                wins += 1
+                        elif obj == "maximize":
+                            if d > 0:
+                                wins += 1
+                        else:  # minimize
+                            if d < 0:
+                                wins += 1
 
                 if delta_vals:
                     stats = compute_sample_statistics(delta_vals)
@@ -233,9 +257,6 @@ def compute_paired_deltas(
                         else None
                     )
 
-                    # Win rate: improvement fraction
-                    is_lb = lower_better_map.get(mk, True)
-                    wins = sum(1 for d in delta_vals if (d < 0 if is_lb else d > 0))
                     win_rate = float(wins / len(delta_vals))
 
                     paired_effects[cmp_grp][skey][mk] = {
@@ -258,6 +279,7 @@ def aggregate_multi_seed_metrics(
     baseline_group: str = "E1_rollout_field",
     representation_ckpt_path: Optional[str] = "outputs/checkpoints/representation/best_vrmse_mean.pt",
     require_clean: bool = True,
+    require_complete: bool = True,
     manifest_path: Optional[str] = "outputs/manifests/closure_r4_seed42.json",
 ) -> Dict[str, Any]:
     """Full pipeline for aggregating multi-seed ablation metrics."""
@@ -314,6 +336,19 @@ def aggregate_multi_seed_metrics(
                     val = seed_data[s].get(grp, {}).get(skey, {}).get(mk)
                     if val is not None:
                         vals.append(float(val))
+
+                # Formal completeness check: all requested seeds must be present for multi-seed ablation groups
+                if require_complete and grp in groups:
+                    if len(vals) != len(seeds):
+                        missing_seeds = [
+                            s for s in seeds
+                            if seed_data[s].get(grp, {}).get(skey, {}).get(mk) is None
+                        ]
+                        raise ValueError(
+                            f"Formal completeness violation: missing metric '{mk}' for group '{grp}' "
+                            f"at horizon step_{h} for seed(s): {missing_seeds}. "
+                            f"Expected N={len(seeds)} observations, got N={len(vals)}."
+                        )
 
                 if vals:
                     st = compute_sample_statistics(vals)
@@ -397,7 +432,7 @@ def print_summary_tables(summary_bundle: Dict[str, Any]):
             print(f"{grp:<18} | {row[0]:<18} | {row[1]:<18} | {row[2]:<18} | {row[3]:<18} | {row[4]:<18}")
 
     print("\n" + "=" * 118)
-    print("PAIRED EFFECT ANALYSIS vs BASELINE E1: Rollout-Aware Field (Mean Delta ± Std, [Win Rate])")
+    print("WITHIN-SEED PAIRED DIFFERENCE ANALYSIS vs BASELINE E1: Rollout-Aware Field (Mean Delta ± Std, [Win Rate])")
     print("Format: Mean Delta (Rel %) ± Std [Wins/Total]")
     print("=" * 118)
 
@@ -434,6 +469,7 @@ def main():
     parser.add_argument("--representation_checkpoint", type=str, default="outputs/checkpoints/representation/best_vrmse_mean.pt", help="Path to representation checkpoint")
     parser.add_argument("--manifest", type=str, default="outputs/manifests/closure_r4_seed42.json", help="Path to seed 42 manifest")
     parser.add_argument("--allow_dirty", action="store_true", default=False, help="Allow dirty training git status (not recommended)")
+    parser.add_argument("--allow_incomplete", action="store_true", default=False, help="Allow incomplete seed observations (not recommended for formal benchmark)")
     args = parser.parse_args()
 
     seed_files = {}
@@ -451,6 +487,7 @@ def main():
         baseline_group=args.baseline_group,
         representation_ckpt_path=args.representation_checkpoint,
         require_clean=not args.allow_dirty,
+        require_complete=not args.allow_incomplete,
         manifest_path=args.manifest,
     )
 

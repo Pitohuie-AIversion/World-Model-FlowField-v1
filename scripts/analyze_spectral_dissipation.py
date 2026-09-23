@@ -33,12 +33,13 @@ from src.utils.physics_contract import (
     validate_ablation_checkpoint_semantics,
 )
 from src.utils.provenance import (
+    compute_file_sha256,
+    compute_normalizer_hash,
+    compute_split_hash_from_file,
     get_git_commit,
     is_git_dirty,
     resolve_checkpoint_provenance,
     validate_evaluation_provenance,
-    compute_split_hash_from_file,
-    compute_normalizer_hash,
 )
 from src.utils.reproducibility import seed_everything
 
@@ -123,13 +124,13 @@ def diagnose_dissipation_mode(
 
     if mean_high_ratio > 1.10:
         diagnosis = "spurious_high_frequency_accumulation"
-        description = f"High-frequency ratio {mean_high_ratio:.3f} > 1.10: energy is piling up at small scales (spurious noise/instability)."
+        description = f"High-frequency ratio {mean_high_ratio:.3f} > 1.10: energy piles up at small scales exceeding the +10% diagnostic tolerance."
     elif mean_high_ratio < 0.90:
         diagnosis = "numerical_over_dissipation"
-        description = f"High-frequency ratio {mean_high_ratio:.3f} < 0.90: excessive dissipation blurs fine-scale vortex filaments."
+        description = f"High-frequency ratio {mean_high_ratio:.3f} < 0.90: excessive dissipation damping exceeds the -10% diagnostic tolerance."
     else:
         diagnosis = "balanced_scale_preservation"
-        description = f"High-frequency ratio {mean_high_ratio:.3f} is within [0.90, 1.10]: scale distribution is physically preserved."
+        description = f"High-frequency ratio {mean_high_ratio:.3f} is within the predefined ±10% diagnostic tolerance band [0.90, 1.10]."
 
     return {
         "mean_high_k_ratio": mean_high_ratio,
@@ -138,19 +139,135 @@ def diagnose_dissipation_mode(
     }
 
 
+def resolve_group_checkpoint_path(grp: str, seed: int) -> str:
+    """Resolve checkpoint path for a group and seed with strict fail-closed check."""
+    if grp == "E0_single_step":
+        candidate_paths = [
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E0_single_step/latent_transformer/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E0_single_step/best_vrmse_mean.pt",
+        ]
+    else:
+        candidate_paths = [
+            f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/ablation_{grp}/latent_transformer/best_vrmse_mean.pt",
+            f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/ablation_{grp}/best_vrmse_mean.pt",
+            f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/{grp}/latent_transformer/best_vrmse_mean.pt",
+            f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/{grp}/best_vrmse_mean.pt",
+        ]
+        if seed == 42:
+            candidate_paths.extend([
+                f"outputs/checkpoints/dynamics/closure_r4/ablation_{grp}/latent_transformer/best_vrmse_mean.pt",
+                f"outputs/checkpoints/dynamics/closure_r4/ablation_{grp}/best_vrmse_mean.pt",
+            ])
+
+    for p in candidate_paths:
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(
+        f"No valid checkpoint found for group '{grp}' under seed {seed}. Looked in: {candidate_paths}"
+    )
+
+
+def load_and_validate_forecaster(
+    grp: str,
+    ckpt_path: str,
+    seed: int,
+    eval_split_hash: str,
+    eval_normalizer_hash: str,
+    manifest_path: Optional[str],
+    device: torch.device,
+) -> Tuple[LatentForecaster, Dict[str, Any]]:
+    """Load checkpoint, execute fail-closed semantic and provenance checks, and return model."""
+    ckpt_data = torch.load(ckpt_path, map_location="cpu")
+    cfg = ckpt_data.get("config", {})
+
+    # 1. Semantics validation: verify physics protocol and architecture contracts
+    validate_ablation_checkpoint_semantics(grp, cfg, is_legacy=False)
+
+    # 2. Checkpoint provenance resolution
+    ckpt_prov = resolve_checkpoint_provenance(
+        ckpt_path=ckpt_path,
+        ckpt_data=ckpt_data,
+        manifest_path=manifest_path,
+    )
+
+    # 3. Fail-closed evaluation provenance match
+    expected_seed = 42 if grp == "E0_single_step" else seed
+    validate_evaluation_provenance(
+        ckpt_provenance=ckpt_prov,
+        eval_split_hash=eval_split_hash,
+        eval_normalizer_hash=eval_normalizer_hash,
+        expected_seed=expected_seed,
+        fail_closed=True,
+    )
+
+    ckpt_sha256 = compute_file_sha256(ckpt_path)
+    provenance_info = {
+        "checkpoint_path": ckpt_path,
+        "checkpoint_sha256": ckpt_sha256,
+        "seed": expected_seed,
+        "training_git_commit": ckpt_prov.get("training_git_commit"),
+        "training_git_dirty": ckpt_prov.get("training_git_dirty", False),
+        "split_hash": ckpt_prov.get("split_hash"),
+        "normalizer_hash": ckpt_prov.get("normalizer_hash"),
+        "protocol": PHYSICS_PROTOCOL,
+    }
+
+    encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
+    decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=False)
+    transformer = LatentSTTransformer(
+        latent_channels=64,
+        embed_dim=cfg.get("embed_dim", 256),
+        cond_dim=128,
+        depth=cfg.get("depth", 6),
+        num_heads=cfg.get("num_heads", 8),
+        history_length=4,
+        prediction_mode=cfg.get("prediction_mode", "direct"),
+    )
+    forecaster = LatentForecaster(encoder=encoder, transformer=transformer, decoder=decoder).to(device)
+
+    if "model_state_dict" in ckpt_data:
+        forecaster.load_state_dict(ckpt_data["model_state_dict"])
+    elif "encoder_state_dict" in ckpt_data:
+        forecaster.encoder.load_state_dict(ckpt_data["encoder_state_dict"])
+        forecaster.transformer.load_state_dict(ckpt_data["transformer_state_dict"])
+        forecaster.decoder.load_state_dict(ckpt_data["decoder_state_dict"])
+
+    forecaster.eval()
+    return forecaster, provenance_info
+
+
 def analyze_spectral_dissipation_for_groups(
     data_dir: str = "/root/autodl-tmp/datasets/shear_flow",
     split_file: str = "outputs/splits/grouped_split.json",
-    seed: int = 42,
+    seeds: Optional[List[int]] = None,
+    seed: Optional[int] = None,
     groups: Optional[List[str]] = None,
     horizons: List[int] = [1, 5, 10, 20, 30],
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
     output_json: str = "outputs/metrics/directional_spectral_analysis.json",
     output_fig: str = "outputs/figures/directional_spectral_ratio_curves.png",
+    manifest_path: str = "outputs/manifests/closure_r4_seed42.json",
+    allow_dirty: bool = False,
 ) -> Dict[str, Any]:
-    """Run rollout and directional spectral dissipation analysis."""
+    """Run rollout and directional spectral dissipation analysis with fail-closed provenance."""
     seed_everything(42)
     device = torch.device(device_str)
+
+    git_commit = get_git_commit(PROJECT_ROOT)
+    git_dirty = is_git_dirty(PROJECT_ROOT)
+    if git_dirty and not allow_dirty:
+        raise RuntimeError(
+            "Working tree is dirty. Formal spectral dissipation analysis requires a clean git working tree. "
+            "Please commit all changes before running or pass allow_dirty=True for exploratory testing."
+        )
+
+    if seeds is None:
+        if seed is not None:
+            seeds = [seed]
+        else:
+            seeds = [42, 43, 44]
+    else:
+        seeds = sorted(list(seeds))
 
     if groups is None:
         groups = [
@@ -177,32 +294,31 @@ def analyze_spectral_dissipation_for_groups(
         normalize=True,
     )
 
-    print(f"Loaded {len(test_loader.dataset)} test trajectories.")
+    eval_split_hash = (
+        compute_split_hash_from_file(split_file)
+        if split_file and os.path.exists(split_file)
+        else "UNKNOWN_SPLIT"
+    )
+    eval_normalizer_hash = compute_normalizer_hash(normalizer)
 
-    # Candidate checkpoint locations
-    group_ckpts = {
-        "E0_single_step": f"outputs/checkpoints/dynamics/closure_r4/ablation_E0_single_step/latent_transformer/best_vrmse_mean.pt",
-        "E1_rollout_field": f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/ablation_E1_rollout_field/latent_transformer/best_vrmse_mean.pt",
-        "E2_plus_L_div": f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/ablation_E2_plus_L_div/latent_transformer/best_vrmse_mean.pt",
-        "E3_plus_L_vort": f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/ablation_E3_plus_L_vort/latent_transformer/best_vrmse_mean.pt",
-        "E4_full_physics": f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt",
-    }
-    if seed == 42:
-        for k in ["E1_rollout_field", "E2_plus_L_div", "E3_plus_L_vort", "E4_full_physics"]:
-            alt = f"outputs/checkpoints/dynamics/closure_r4/ablation_{k}/latent_transformer/best_vrmse_mean.pt"
-            if not os.path.exists(group_ckpts[k]) and os.path.exists(alt):
-                group_ckpts[k] = alt
+    print(f"Loaded {len(test_loader.dataset)} test trajectories.")
+    print(f"Evaluation split_hash:      {eval_split_hash}")
+    print(f"Evaluation normalizer_hash: {eval_normalizer_hash}")
+    print(f"Evaluating seeds:           {seeds}")
 
     results = {
         "__metadata__": {
             "analysis": "Directional Spectral Dissipation Analysis (Issue #4)",
             "protocol": PHYSICS_PROTOCOL,
-            "seed": seed,
+            "seeds": seeds,
             "domain_size": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+            "split_hash": eval_split_hash,
+            "normalizer_hash": eval_normalizer_hash,
             "horizons": horizons,
             "groups": groups,
-            "git_commit": get_git_commit(PROJECT_ROOT),
-            "git_dirty": is_git_dirty(PROJECT_ROOT),
+            "git_commit": git_commit,
+            "git_dirty": git_dirty,
+            "provenance_per_group": {},
         },
         "target_spectra": {},
         "group_spectra": {},
@@ -256,109 +372,154 @@ def analyze_spectral_dissipation_for_groups(
             },
         }
 
-    # Second pass: evaluate each model group
+    # Second pass: evaluate each model group across requested seeds
+    eps = 1e-10
+
     for grp in groups:
-        ckpt_path = group_ckpts.get(grp)
-        if not ckpt_path or not os.path.exists(ckpt_path):
-            print(f"Skipping {grp}: Checkpoint not found at {ckpt_path}")
-            continue
-
-        print(f"\n--- Analyzing Directional Spectra for [{grp}] ({ckpt_path}) ---")
-        ckpt_data = torch.load(ckpt_path, map_location="cpu")
-        cfg = ckpt_data.get("config", {})
-
-        encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
-        decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=False)
-        transformer = LatentSTTransformer(
-            latent_channels=64,
-            embed_dim=cfg.get("embed_dim", 256),
-            cond_dim=128,
-            depth=cfg.get("depth", 6),
-            num_heads=cfg.get("num_heads", 8),
-            history_length=4,
-            prediction_mode=cfg.get("prediction_mode", "direct"),
-        )
-        forecaster = LatentForecaster(encoder=encoder, transformer=transformer, decoder=decoder).to(device)
-
-        if "model_state_dict" in ckpt_data:
-            forecaster.load_state_dict(ckpt_data["model_state_dict"])
-        elif "encoder_state_dict" in ckpt_data:
-            forecaster.encoder.load_state_dict(ckpt_data["encoder_state_dict"])
-            forecaster.transformer.load_state_dict(ckpt_data["transformer_state_dict"])
-            forecaster.decoder.load_state_dict(ckpt_data["decoder_state_dict"])
-
-        forecaster.eval()
-
-        pred_radial_accum = {h: [] for h in horizons}
-        pred_stream_accum = {h: [] for h in horizons}
-        pred_cross_accum = {h: [] for h in horizons}
-
-        with torch.no_grad():
-            for batch in test_loader:
-                q_hist = batch["history"].to(device)
-                re = batch.get("re", None)
-                if re is not None:
-                    re = re.to(device)
-                sc = batch.get("sc", None)
-                if sc is not None:
-                    sc = sc.to(device)
-
-                pred_traj = forecaster.forward_rollout(q_hist, re, sc, horizon=max_h)
-                pred_phys = normalizer.denormalize(pred_traj) if normalizer else pred_traj
-
-                for h in horizons:
-                    step_idx = h - 1
-                    u_pred = pred_phys[:, step_idx, 0]
-                    v_pred = pred_phys[:, step_idx, 1]
-
-                    _, e_rad = compute_radial_energy_spectrum(u_pred, v_pred, domain_size=SHEAR_FLOW_DOMAIN_SIZE_XY)
-                    pred_radial_accum[h].append(e_rad.cpu().numpy())
-
-                    _, e_kx, _, e_ky = compute_directional_energy_spectra(u_pred, v_pred, domain_size=SHEAR_FLOW_DOMAIN_SIZE_XY)
-                    pred_stream_accum[h].append(e_kx.cpu().numpy())
-                    pred_cross_accum[h].append(e_ky.cpu().numpy())
-
-        # Average and compute ratios
         results["group_spectra"][grp] = {}
         results["spectral_ratios"][grp] = {}
         results["dissipation_diagnoses"][grp] = {}
+        results["__metadata__"]["provenance_per_group"][grp] = {}
 
-        eps = 1e-10
+        # E0 was only trained for single-step on seed 42
+        grp_seeds = [42] if grp == "E0_single_step" else seeds
+
+        seed_radial_ratios = {h: [] for h in horizons}
+        seed_stream_ratios = {h: [] for h in horizons}
+        seed_cross_ratios = {h: [] for h in horizons}
+        seed_high_k_ratios = {h: [] for h in horizons}
+        seed_diagnoses = {h: {} for h in horizons}
+        seed_mean_radial_spectra = {h: [] for h in horizons}
+        seed_mean_stream_spectra = {h: [] for h in horizons}
+        seed_mean_cross_spectra = {h: [] for h in horizons}
+
+        for s in grp_seeds:
+            ckpt_path = resolve_group_checkpoint_path(grp, s)
+            print(f"\n--- Analyzing Directional Spectra for [{grp}] Seed {s} ({ckpt_path}) ---")
+
+            forecaster, prov_info = load_and_validate_forecaster(
+                grp=grp,
+                ckpt_path=ckpt_path,
+                seed=s,
+                eval_split_hash=eval_split_hash,
+                eval_normalizer_hash=eval_normalizer_hash,
+                manifest_path=manifest_path,
+                device=device,
+            )
+            results["__metadata__"]["provenance_per_group"][grp][str(s)] = prov_info
+
+            pred_radial_accum = {h: [] for h in horizons}
+            pred_stream_accum = {h: [] for h in horizons}
+            pred_cross_accum = {h: [] for h in horizons}
+
+            with torch.no_grad():
+                for batch in test_loader:
+                    q_hist = batch["history"].to(device)
+                    re = batch.get("re", None)
+                    if re is not None:
+                        re = re.to(device)
+                    sc = batch.get("sc", None)
+                    if sc is not None:
+                        sc = sc.to(device)
+
+                    pred_traj = forecaster.forward_rollout(q_hist, re, sc, horizon=max_h)
+                    pred_phys = normalizer.denormalize(pred_traj) if normalizer else pred_traj
+
+                    for h in horizons:
+                        step_idx = h - 1
+                        u_pred = pred_phys[:, step_idx, 0]
+                        v_pred = pred_phys[:, step_idx, 1]
+
+                        _, e_rad = compute_radial_energy_spectrum(u_pred, v_pred, domain_size=SHEAR_FLOW_DOMAIN_SIZE_XY)
+                        pred_radial_accum[h].append(e_rad.cpu().numpy())
+
+                        _, e_kx, _, e_ky = compute_directional_energy_spectra(u_pred, v_pred, domain_size=SHEAR_FLOW_DOMAIN_SIZE_XY)
+                        pred_stream_accum[h].append(e_kx.cpu().numpy())
+                        pred_cross_accum[h].append(e_ky.cpu().numpy())
+
+            for h in horizons:
+                skey = f"step_{h}"
+                mean_rad = np.mean(pred_radial_accum[h], axis=0)
+                mean_kx = np.mean(pred_stream_accum[h], axis=0)
+                mean_ky = np.mean(pred_cross_accum[h], axis=0)
+
+                seed_mean_radial_spectra[h].append(mean_rad)
+                seed_mean_stream_spectra[h].append(mean_kx)
+                seed_mean_cross_spectra[h].append(mean_ky)
+
+                tgt_rad = np.array(results["target_spectra"][skey]["radial"]["e_k"])
+                tgt_kx = np.array(results["target_spectra"][skey]["streamwise"]["e_kx"])
+                tgt_ky = np.array(results["target_spectra"][skey]["cross_stream"]["e_ky"])
+
+                ratio_rad = (mean_rad + eps) / (tgt_rad + eps)
+                ratio_kx = (mean_kx + eps) / (tgt_kx + eps)
+                ratio_ky = (mean_ky + eps) / (tgt_ky + eps)
+
+                seed_radial_ratios[h].append(ratio_rad)
+                seed_stream_ratios[h].append(ratio_kx)
+                seed_cross_ratios[h].append(ratio_ky)
+
+                diag = diagnose_dissipation_mode(k_radial_bins, ratio_rad, cutoff_ratio=0.5)
+                seed_high_k_ratios[h].append(diag["mean_high_k_ratio"])
+                seed_diagnoses[h][str(s)] = diag
+                print(f"  Seed {s} Step {h:2d} -> High-k Ratio: {diag['mean_high_k_ratio']:.3f} | Diagnosis: {diag['diagnosis']}")
+
+        # Aggregate across seeds for this group
         for h in horizons:
             skey = f"step_{h}"
-            mean_rad = np.mean(pred_radial_accum[h], axis=0)
-            mean_kx = np.mean(pred_stream_accum[h], axis=0)
-            mean_ky = np.mean(pred_cross_accum[h], axis=0)
+            avg_rad_e = np.mean(seed_mean_radial_spectra[h], axis=0)
+            avg_kx_e = np.mean(seed_mean_stream_spectra[h], axis=0)
+            avg_ky_e = np.mean(seed_mean_cross_spectra[h], axis=0)
 
             results["group_spectra"][grp][skey] = {
-                "radial_e_k": mean_rad.tolist(),
-                "streamwise_e_kx": mean_kx.tolist(),
-                "cross_stream_e_ky": mean_ky.tolist(),
+                "radial_e_k": avg_rad_e.tolist(),
+                "streamwise_e_kx": avg_kx_e.tolist(),
+                "cross_stream_e_ky": avg_ky_e.tolist(),
             }
 
-            tgt_rad = np.array(results["target_spectra"][skey]["radial"]["e_k"])
-            tgt_kx = np.array(results["target_spectra"][skey]["streamwise"]["e_kx"])
-            tgt_ky = np.array(results["target_spectra"][skey]["cross_stream"]["e_ky"])
+            avg_rad_ratio = np.mean(seed_radial_ratios[h], axis=0)
+            avg_kx_ratio = np.mean(seed_stream_ratios[h], axis=0)
+            avg_ky_ratio = np.mean(seed_cross_ratios[h], axis=0)
 
-            ratio_rad = (mean_rad + eps) / (tgt_rad + eps)
-            ratio_kx = (mean_kx + eps) / (tgt_kx + eps)
-            ratio_ky = (mean_ky + eps) / (tgt_ky + eps)
+            std_rad_ratio = (
+                np.std(seed_radial_ratios[h], axis=0, ddof=1).tolist()
+                if len(grp_seeds) >= 2
+                else None
+            )
 
             results["spectral_ratios"][grp][skey] = {
-                "radial_ratio": ratio_rad.tolist(),
-                "streamwise_ratio": ratio_kx.tolist(),
-                "cross_stream_ratio": ratio_ky.tolist(),
+                "radial_ratio": avg_rad_ratio.tolist(),
+                "radial_ratio_std": std_rad_ratio,
+                "streamwise_ratio": avg_kx_ratio.tolist(),
+                "cross_stream_ratio": avg_ky_ratio.tolist(),
+                "per_seed_radial_ratios": {
+                    str(s): seed_radial_ratios[h][idx].tolist()
+                    for idx, s in enumerate(grp_seeds)
+                },
             }
 
-            diag = diagnose_dissipation_mode(k_radial_bins, ratio_rad, cutoff_ratio=0.5)
-            results["dissipation_diagnoses"][grp][skey] = diag
-            print(f"  Step {h:2d} -> High-k Ratio: {diag['mean_high_k_ratio']:.3f} | Diagnosis: {diag['diagnosis']}")
+            mean_hk = float(np.mean(seed_high_k_ratios[h]))
+            std_hk = (
+                float(np.std(seed_high_k_ratios[h], ddof=1))
+                if len(grp_seeds) >= 2
+                else None
+            )
+            overall_diag = diagnose_dissipation_mode(k_radial_bins, avg_rad_ratio, cutoff_ratio=0.5)
+
+            results["dissipation_diagnoses"][grp][skey] = {
+                "mean_high_k_ratio": mean_hk,
+                "std_high_k_ratio": std_hk,
+                "n_seeds": len(grp_seeds),
+                "diagnosis": overall_diag["diagnosis"],
+                "description": overall_diag["description"],
+                "per_seed": seed_diagnoses[h],
+            }
 
     # Save JSON metrics
     os.makedirs(os.path.dirname(output_json), exist_ok=True)
     with open(output_json, "w") as f:
         json.dump(results, f, indent=2)
-    print(f"\nSaved directional spectral analysis to: {output_json}")
+    print(f"\n[Provenance Verified] Saved directional spectral analysis to: {output_json}")
 
     # Generate Publication Figure
     plot_directional_spectral_figures(results, output_fig)
@@ -394,8 +555,9 @@ def plot_directional_spectral_figures(results: Dict[str, Any], save_path: str):
         st = styles.get(grp, {"label": grp, "color": "blue", "linestyle": "-", "marker": "o"})
         ax.plot(k_rad, r_rad, label=st["label"], color=st["color"], linestyle=st["linestyle"], marker=st["marker"], markersize=5, linewidth=2.0)
     ax.axhline(1.0, color="black", linestyle="--", linewidth=1.5, alpha=0.8, label="Ideal Conservation ($1.0$)")
-    ax.fill_between(k_rad, 0.0, 1.0, color="gray", alpha=0.08, label="Over-Dissipation ($<1.0$)")
-    ax.fill_between(k_rad, 1.0, 3.0, color="red", alpha=0.05, label="Spurious Noise ($>1.0$)")
+    ax.fill_between(k_rad, 0.90, 1.10, color="green", alpha=0.08, label=r"$\pm 10\%$ Diagnostic Tolerance Band")
+    ax.fill_between(k_rad, 0.0, 0.90, color="gray", alpha=0.06, label="Over-Dissipation ($<0.90$)")
+    ax.fill_between(k_rad, 1.10, 3.0, color="red", alpha=0.05, label="Spurious Noise ($>1.10$)")
     ax.set_title(r"(a) Radial Spectral Ratio $E_{\mathrm{pred}}(k) / E_{\mathrm{target}}(k)$ at $h=30$", fontsize=12, fontweight="bold")
     ax.set_xlabel(r"Radial Wavenumber $k = \sqrt{k_x^2 + k_y^2}$", fontsize=10)
     ax.set_ylabel(r"Energy Ratio $R(k)$", fontsize=10)
@@ -464,21 +626,27 @@ def main():
     parser = argparse.ArgumentParser(description="Run directional spectral dissipation analysis.")
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--split_file", type=str, default="outputs/splits/grouped_split.json")
-    parser.add_argument("--seed", type=int, default=42, help="Seed checkpoints to analyze")
+    parser.add_argument("--seeds", type=int, nargs="+", default=[42, 43, 44], help="Seed checkpoints to analyze")
+    parser.add_argument("--seed", type=int, default=None, help="Single seed override")
     parser.add_argument("--groups", type=str, nargs="+", default=None)
     parser.add_argument("--horizons", type=int, nargs="+", default=[1, 5, 10, 20, 30])
     parser.add_argument("--output_json", type=str, default="outputs/metrics/directional_spectral_analysis.json")
     parser.add_argument("--output_fig", type=str, default="outputs/figures/directional_spectral_ratio_curves.png")
+    parser.add_argument("--manifest", type=str, default="outputs/manifests/closure_r4_seed42.json")
+    parser.add_argument("--allow_dirty", action="store_true", default=False, help="Allow dirty working tree for testing")
     args = parser.parse_args()
 
     analyze_spectral_dissipation_for_groups(
         data_dir=args.data_dir,
         split_file=args.split_file,
+        seeds=args.seeds,
         seed=args.seed,
         groups=args.groups,
         horizons=args.horizons,
         output_json=args.output_json,
         output_fig=args.output_fig,
+        manifest_path=args.manifest,
+        allow_dirty=args.allow_dirty,
     )
 
 

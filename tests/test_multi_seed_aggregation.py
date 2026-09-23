@@ -24,6 +24,16 @@ def _create_mock_seed_json(
     vrmse_e1: float = 1.0,
     vrmse_e4: float = 0.8,
 ) -> dict:
+    from scripts.aggregate_multi_seed import DEFAULT_METRICS
+
+    def _make_step_metrics(v):
+        res = {mk: 0.1 for mk, _, _ in DEFAULT_METRICS}
+        res["vrmse_mean"] = v
+        res["div_rmse"] = 0.2
+        res["vort_rmse"] = 0.5
+        res["tracer_var_retention"] = 1.0
+        return res
+
     return {
         "E1_rollout_field": {
             "__metadata__": {
@@ -34,8 +44,8 @@ def _create_mock_seed_json(
                 "training_git_commit": "commit_123",
                 "training_git_dirty": training_git_dirty,
             },
-            "step_1": {"vrmse_mean": vrmse_e1, "div_rmse": 0.2, "vort_rmse": 0.5},
-            "step_5": {"vrmse_mean": vrmse_e1 * 2, "div_rmse": 0.4, "vort_rmse": 1.0},
+            "step_1": _make_step_metrics(vrmse_e1),
+            "step_5": _make_step_metrics(vrmse_e1 * 2),
         },
         "E4_full_physics": {
             "__metadata__": {
@@ -46,8 +56,8 @@ def _create_mock_seed_json(
                 "training_git_commit": "commit_123",
                 "training_git_dirty": training_git_dirty,
             },
-            "step_1": {"vrmse_mean": vrmse_e4, "div_rmse": 0.15, "vort_rmse": 0.3},
-            "step_5": {"vrmse_mean": vrmse_e4 * 2, "div_rmse": 0.3, "vort_rmse": 0.6},
+            "step_1": _make_step_metrics(vrmse_e4),
+            "step_5": _make_step_metrics(vrmse_e4 * 2),
         },
     }
 
@@ -175,3 +185,81 @@ def test_seed_identity_mismatch_rejection():
         with pytest.raises(ValueError) as exc_info:
             load_and_validate_seed_metrics(p43, expected_seed=43)
         assert "Seed mismatch" in str(exc_info.value)
+
+
+def test_tracer_var_retention_target_one_win_semantics():
+    """Verify tracer_var_retention uses target=1.0 error minimization, not higher-is-better."""
+    # Scenario 1: cmp=1.0 vs base=1.2 -> cmp has distance 0.0, base has 0.2 -> cmp wins!
+    # Scenario 2: cmp=0.9 vs base=1.3 -> cmp has distance 0.1, base has 0.3 -> cmp wins!
+    # Scenario 3: cmp=4.0 vs base=1.0 -> cmp has distance 3.0, base has 0.0 -> cmp loses (4.0 is NOT higher-is-better!)
+    seed_data = {
+        42: {
+            "E1_rollout_field": {"step_1": {"tracer_var_retention": 1.2}},
+            "E4_full_physics": {"step_1": {"tracer_var_retention": 1.0}},
+        },
+        43: {
+            "E1_rollout_field": {"step_1": {"tracer_var_retention": 1.3}},
+            "E4_full_physics": {"step_1": {"tracer_var_retention": 0.9}},
+        },
+        44: {
+            "E1_rollout_field": {"step_1": {"tracer_var_retention": 1.0}},
+            "E4_full_physics": {"step_1": {"tracer_var_retention": 4.0}},
+        },
+    }
+
+    res = compute_paired_deltas(
+        seed_metrics=seed_data,
+        baseline_group="E1_rollout_field",
+        compare_groups=["E4_full_physics"],
+        horizons=[1],
+        metric_keys=["tracer_var_retention"],
+    )
+
+    p_info = res["E4_full_physics"]["step_1"]["tracer_var_retention"]
+    # Seed 42: cmp=1.0 vs base=1.2 -> win
+    # Seed 43: cmp=0.9 vs base=1.3 -> win
+    # Seed 44: cmp=4.0 vs base=1.0 -> loss (4.0 is far from 1.0!)
+    assert p_info["win_count"] == 2
+    assert p_info["n"] == 3
+    assert p_info["win_rate"] == pytest.approx(2.0 / 3.0)
+
+
+def test_formal_completeness_rejection():
+    """Missing metric for any requested seed/group/horizon raises ValueError under require_complete=True."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        p42 = os.path.join(tmpdir, "seed42.json")
+        p43 = os.path.join(tmpdir, "seed43.json")
+
+        d42 = _create_mock_seed_json(42)
+        d43 = _create_mock_seed_json(43)
+        # Deliberately omit one metric in seed 43 for E4 at step_5
+        del d43["E4_full_physics"]["step_5"]["vrmse_mean"]
+
+        with open(p42, "w") as f:
+            json.dump(d42, f)
+        with open(p43, "w") as f:
+            json.dump(d43, f)
+
+        seed_files = {42: p42, 43: p43}
+
+        # Under default formal mode (require_complete=True), this must fail closed!
+        with pytest.raises(ValueError) as exc_info:
+            aggregate_multi_seed_metrics(
+                seed_files=seed_files,
+                groups=["E1_rollout_field", "E4_full_physics"],
+                horizons=[1, 5],
+                require_complete=True,
+            )
+        assert "Formal completeness violation" in str(exc_info.value)
+        assert "vrmse_mean" in str(exc_info.value)
+        assert "E4_full_physics" in str(exc_info.value)
+
+        # Under exploratory mode (require_complete=False), it should not raise:
+        summary = aggregate_multi_seed_metrics(
+            seed_files=seed_files,
+            groups=["E1_rollout_field", "E4_full_physics"],
+            horizons=[1, 5],
+            require_complete=False,
+        )
+        assert summary is not None
+
