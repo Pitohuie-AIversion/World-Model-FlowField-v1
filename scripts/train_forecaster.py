@@ -379,7 +379,7 @@ def train_forecaster(
         tracker = BestCheckpointTracker(save_dir=output_dir, metric_name="vrmse_mean", mode="min", keep_top_k=3)
         if val_diagnostic_horizons and {10, 20, 30}.issubset(set(val_diagnostic_horizons)):
             long_tracker = BestCheckpointTracker(save_dir=output_dir, metric_name="long_vrmse", mode="min", keep_top_k=3)
-        effective_batch_size = batch_size * grad_accum_steps
+        effective_batch_size = batch_size * grad_accum_steps * (world_size if is_distributed else 1)
         diag_info = f" | Diag Horizons: {val_diagnostic_horizons}" if val_diagnostic_horizons else ""
         warm_info = f" | Warm-Start from: {parent_checkpoint_path} (SHA256: {parent_checkpoint_sha256[:8]})" if parent_checkpoint_path else ""
         print(
@@ -612,7 +612,8 @@ def train_forecaster(
                 "parent_checkpoint_path": parent_checkpoint_path,
                 "parent_checkpoint_sha256": parent_checkpoint_sha256,
                 "grad_accum_steps": grad_accum_steps,
-                "effective_batch_size": batch_size * grad_accum_steps,
+                "effective_batch_size": batch_size * grad_accum_steps * (world_size if is_distributed else 1),
+                "world_size": world_size,
                 "val_diagnostic_horizons": val_diagnostic_horizons,
                 "config": {
                     "model_type": model_type,
@@ -639,7 +640,8 @@ def train_forecaster(
                     "lr": lr,
                     "batch_size": batch_size,
                     "grad_accum_steps": grad_accum_steps,
-                    "effective_batch_size": batch_size * grad_accum_steps,
+                    "effective_batch_size": batch_size * grad_accum_steps * (world_size if is_distributed else 1),
+                    "world_size": world_size,
                     "parent_checkpoint_path": parent_checkpoint_path,
                     "parent_checkpoint_sha256": parent_checkpoint_sha256,
                     "val_diagnostic_horizons": val_diagnostic_horizons,
@@ -666,6 +668,10 @@ def train_forecaster(
                 is_best_long = long_tracker.update(j_long, long_state, epoch)
                 if is_best_long:
                     print(f"  >>> New Best J_long: {j_long:.4f} (Saved to best_long_vrmse.pt)")
+
+        if is_distributed:
+            import torch.distributed as dist
+            dist.barrier()
 
     if global_rank == 0:
         if tracker is not None:

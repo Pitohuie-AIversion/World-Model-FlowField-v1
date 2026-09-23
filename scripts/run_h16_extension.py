@@ -110,15 +110,30 @@ def build_training_command(
     lambda_vort: float = 0.05,
     val_diagnostic_horizons: Optional[List[int]] = None,
     use_amp: bool = True,
+    num_gpus: int = 1,
+    master_port: int = 29500,
 ) -> List[str]:
     """Construct the formal training command for the H16 extension experiment."""
     out_dir = output_dir or str(PROJECT_ROOT / DEFAULT_OUTPUT_DIR)
     diags = val_diagnostic_horizons or H16_CONFIG["val_diagnostics"]
 
-    cmd = [
-        sys.executable,
-        "-u",
-        "scripts/train_forecaster.py",
+    if num_gpus > 1:
+        cmd = [
+            sys.executable,
+            "-m",
+            "torch.distributed.run",
+            f"--nproc_per_node={num_gpus}",
+            f"--master_port={master_port}",
+            "scripts/train_forecaster.py",
+        ]
+    else:
+        cmd = [
+            sys.executable,
+            "-u",
+            "scripts/train_forecaster.py",
+        ]
+
+    cmd.extend([
         "--model", "latent_transformer",
         "--output_dir", str(out_dir),
         "--init_checkpoint", str(parent_path),
@@ -132,7 +147,7 @@ def build_training_command(
         "--lambda_vort", str(lambda_vort),
         "--seed", str(seed),
         "--val_diagnostic_horizons", *[str(h) for h in diags],
-    ]
+    ])
     if use_amp:
         cmd.append("--use_amp")
 
@@ -169,12 +184,15 @@ def print_preflight_summary(
     parent_path: Path,
     parent_sha: str,
     parent_horizon: int,
-    gpu_id: int,
+    gpu_ids: List[int],
     epochs: int,
     lr: float,
     min_lr: float,
     output_dir: str,
     log_file: str,
+    batch_size: int,
+    grad_accum_steps: int,
+    effective_batch_size: int,
     dry_run: bool = False,
 ):
     """Print structured parameter table matching governance verification format."""
@@ -186,15 +204,17 @@ def print_preflight_summary(
     print(f"Parent horizon:         {parent_horizon}")
     print(f"Target horizon:         {H16_CONFIG['horizon']}")
     print(f"Expected init horizon:  {H16_CONFIG['expected_init_horizon']}")
-    print(f"Microbatch:             {H16_CONFIG['batch_size']}")
-    print(f"Grad accumulation:      {H16_CONFIG['grad_accum_steps']}")
-    print(f"Effective batch:        {H16_CONFIG['effective_batch_size']}")
+    print(f"Microbatch:             {batch_size}")
+    print(f"Grad accumulation:      {grad_accum_steps}")
+    print(f"Effective batch:        {effective_batch_size}")
     print(f"Seed:                   {H16_CONFIG['seed']}")
     print(f"lambda_div:             {H16_CONFIG['lambda_div']}")
     print(f"lambda_vort:            {H16_CONFIG['lambda_vort']}")
     print(f"Epochs:                 {epochs}")
     print(f"Learning rate:          {lr} (min: {min_lr})")
-    print(f"GPU ID:                 {gpu_id}")
+    gpu_str = ",".join(str(g) for g in gpu_ids)
+    print(f"GPU ID:                 {gpu_ids[0] if len(gpu_ids) == 1 else gpu_str}")
+    print(f"GPU count:              {len(gpu_ids)} ({'DDP Distributed' if len(gpu_ids) > 1 else 'Single GPU'})")
     print(f"Output dir:             {output_dir}")
     print(f"Log file:               {log_file}")
     dirty_flag = is_git_dirty()
@@ -205,12 +225,15 @@ def print_preflight_summary(
 def main():
     parser = argparse.ArgumentParser(description="Run Horizon-R2 / H16 Extension Study")
     parser.add_argument("--parent_checkpoint", type=str, default=None, help="Path to parent H8 Saved Long-Best checkpoint")
-    parser.add_argument("--gpu_id", type=int, default=0, help="GPU device ID to run on")
+    parser.add_argument("--gpu_id", type=int, default=None, help="Single GPU device ID to run on (backwards compatible)")
+    parser.add_argument("--gpu_ids", "--gpus", dest="gpu_ids", type=str, default=None, help="Comma-separated GPU IDs to run on (e.g. '0,1')")
+    parser.add_argument("--num_gpus", type=int, default=None, help="Number of GPUs to utilize (default: auto-detect)")
+    parser.add_argument("--master_port", type=int, default=29500, help="Master port for DDP")
     parser.add_argument("--epochs", type=int, default=H16_CONFIG["epochs"], help="Training epochs")
     parser.add_argument("--lr", type=float, default=H16_CONFIG["lr"], help="Initial learning rate")
     parser.add_argument("--min_lr", type=float, default=H16_CONFIG["min_lr"], help="Minimum learning rate")
-    parser.add_argument("--batch_size", type=int, default=H16_CONFIG["batch_size"], help="Microbatch size")
-    parser.add_argument("--grad_accum_steps", type=int, default=H16_CONFIG["grad_accum_steps"], help="Accumulation steps")
+    parser.add_argument("--batch_size", type=int, default=H16_CONFIG["batch_size"], help="Microbatch size per GPU")
+    parser.add_argument("--grad_accum_steps", type=int, default=None, help="Accumulation steps per GPU (default: computed to maintain Beff=8)")
     parser.add_argument("--effective_batch_size", type=int, default=H16_CONFIG["effective_batch_size"], help="Target effective batch size")
     parser.add_argument("--horizon", type=int, default=H16_CONFIG["horizon"], help="Target rollout horizon")
     parser.add_argument("--expected_init_horizon", type=int, default=H16_CONFIG["expected_init_horizon"], help="Required parent horizon")
@@ -219,6 +242,39 @@ def main():
     parser.add_argument("--dry_run", action="store_true", help="Print plan and training command without running")
 
     args = parser.parse_args()
+
+    # Determine GPUs
+    if args.gpu_ids is not None:
+        gpu_ids = [int(x.strip()) for x in args.gpu_ids.split(",") if x.strip()]
+    elif args.gpu_id is not None:
+        gpu_ids = [args.gpu_id]
+    elif args.num_gpus is not None:
+        gpu_ids = list(range(args.num_gpus))
+    else:
+        # Auto-detect available GPUs (default to using all available, e.g. 0,1)
+        avail = torch.cuda.device_count() if torch.cuda.is_available() else 1
+        if avail >= 2:
+            gpu_ids = [0, 1]
+        else:
+            gpu_ids = [0]
+
+    num_gpus = len(gpu_ids)
+
+    # Calculate grad_accum_steps to strictly preserve effective_batch_size invariant
+    if args.grad_accum_steps is not None:
+        grad_accum_steps = args.grad_accum_steps
+    else:
+        denom = args.batch_size * num_gpus
+        if args.effective_batch_size % denom != 0:
+            raise ValueError(
+                f"Effective batch size ({args.effective_batch_size}) must be evenly divisible by "
+                f"microbatch ({args.batch_size}) * num_gpus ({num_gpus}) = {denom}"
+            )
+        grad_accum_steps = args.effective_batch_size // denom
+
+    effective_batch = args.batch_size * grad_accum_steps * num_gpus
+    if effective_batch != args.effective_batch_size:
+        print(f"WARNING: Effective batch size ({effective_batch}) differs from target ({args.effective_batch_size})!")
 
     # 1. Resolve and validate parent checkpoint
     parent_path = resolve_parent_checkpoint(args.parent_checkpoint)
@@ -242,12 +298,15 @@ def main():
         parent_path=parent_path,
         parent_sha=parent_sha,
         parent_horizon=parent_horizon,
-        gpu_id=args.gpu_id,
+        gpu_ids=gpu_ids,
         epochs=args.epochs,
         lr=args.lr,
         min_lr=args.min_lr,
         output_dir=out_dir,
         log_file=log_file,
+        batch_size=args.batch_size,
+        grad_accum_steps=grad_accum_steps,
+        effective_batch_size=effective_batch,
         dry_run=args.dry_run,
     )
 
@@ -257,27 +316,31 @@ def main():
         epochs=args.epochs,
         lr=args.lr,
         batch_size=args.batch_size,
-        grad_accum_steps=args.grad_accum_steps,
+        grad_accum_steps=grad_accum_steps,
         horizon=args.horizon,
         expected_init_horizon=args.expected_init_horizon,
         output_dir=out_dir,
         seed=H16_CONFIG["seed"],
         lambda_div=H16_CONFIG["lambda_div"],
         lambda_vort=H16_CONFIG["lambda_vort"],
+        num_gpus=num_gpus,
+        master_port=args.master_port,
     )
 
+    gpu_env_val = ",".join(str(g) for g in gpu_ids)
     print("\n[Command]")
-    print(f"CUDA_VISIBLE_DEVICES={args.gpu_id} " + " ".join(cmd))
+    print(f"CUDA_VISIBLE_DEVICES={gpu_env_val} " + " ".join(cmd))
 
     if args.dry_run:
         print("\nDRY RUN COMPLETED: H16 preflight checks verified successfully.")
         return 0
 
     # 5. Launch training
-    print(f"\nLaunching H16 training on GPU {args.gpu_id}...")
+    gpu_desc = f"{num_gpus} GPUs ({gpu_env_val})" if num_gpus > 1 else f"GPU {gpu_ids[0]}"
+    print(f"\nLaunching H16 training on {gpu_desc}...")
     t0 = time.time()
     env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
+    env["CUDA_VISIBLE_DEVICES"] = gpu_env_val
     with open(log_file, "w") as lf:
         proc = subprocess.Popen(
             cmd,

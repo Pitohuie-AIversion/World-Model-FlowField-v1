@@ -859,6 +859,30 @@ class TestH16ExtensionRunner:
         assert "20" in cmd
         assert "30" in cmd
 
+    def test_h16_build_training_command_multi_gpu(self):
+        """Verify H16 training command construction with multi-GPU DDP."""
+        from scripts.run_h16_extension import build_training_command
+
+        cmd = build_training_command(
+            parent_path="/path/to/h8_ep11.pt",
+            epochs=12,
+            lr=5e-5,
+            batch_size=1,
+            grad_accum_steps=4,
+            horizon=16,
+            expected_init_horizon=8,
+            output_dir="/path/to/output",
+            num_gpus=2,
+            master_port=29500,
+        )
+        assert "torch.distributed.run" in cmd
+        assert "--nproc_per_node=2" in cmd
+        assert "--master_port=29500" in cmd
+        assert "--init_checkpoint" in cmd
+        assert "/path/to/h8_ep11.pt" in cmd
+        assert "--grad_accum_steps" in cmd
+        assert cmd[cmd.index("--grad_accum_steps") + 1] == "4"
+
     def test_h16_parent_semantic_contract_enforcement(self):
         """Verify H16 semantic contract enforcement matrix against valid/invalid parents."""
         from src.utils.provenance import (
@@ -1020,5 +1044,102 @@ class TestH16ExtensionRunner:
         )
         assert res.returncode == 0, f"run_h16_extension.py with default parent failed:\n{res.stderr}"
         assert "DRY RUN COMPLETED: H16 preflight checks verified successfully." in res.stdout
+
+    def test_run_h16_extension_dry_run_subprocess_dual_gpu(self, tmp_path):
+        """Verify run_h16_extension.py executes cleanly in dual-GPU dry-run mode with Beff=8."""
+        from src.utils.provenance import (
+            PHYSICS_PROTOCOL,
+            SPATIAL_AXIS_CONTRACT,
+            SHEAR_FLOW_DOMAIN_SIZE_XY,
+        )
+
+        mock_ckpt = tmp_path / "mock_h8_parent_dual.pt"
+        torch.save(
+            {
+                "model_type": "latent_transformer",
+                "model_state_dict": {},
+                "horizon": 8,
+                "seed": 42,
+                "lambda_div": 0.01,
+                "lambda_vort": 0.05,
+                "physics_protocol": PHYSICS_PROTOCOL,
+                "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+                "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+                "prediction_mode": "direct",
+                "use_condition": True,
+                "training_git_dirty": False,
+                "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+                "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+            },
+            mock_ckpt,
+        )
+
+        res = subprocess.run(
+            [
+                sys.executable,
+                "scripts/run_h16_extension.py",
+                "--dry_run",
+                "--gpu_ids", "0,1",
+                "--parent_checkpoint", str(mock_ckpt),
+            ],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode == 0, f"run_h16_extension.py --dry_run dual GPU failed with code {res.returncode}:\n{res.stderr}"
+        stdout = res.stdout
+        assert "HORIZON-R2 / H16 EXTENSION EXPERIMENT [DRY RUN]" in stdout
+        assert "Microbatch:             1" in stdout
+        assert "Grad accumulation:      4" in stdout
+        assert "Effective batch:        8" in stdout
+        assert "GPU ID:                 0,1" in stdout
+        assert "GPU count:              2 (DDP Distributed)" in stdout
+        assert "CUDA_VISIBLE_DEVICES=0,1" in stdout
+        assert "torch.distributed.run" in stdout
+        assert "--nproc_per_node=2" in stdout
+        assert "DRY RUN COMPLETED: H16 preflight checks verified successfully." in stdout
+
+    def test_h16_effective_batch_size_divisibility_error(self, tmp_path):
+        """Verify run_h16_extension.py rejects invalid effective batch size that cannot be divided evenly."""
+        from src.utils.provenance import (
+            PHYSICS_PROTOCOL,
+            SPATIAL_AXIS_CONTRACT,
+            SHEAR_FLOW_DOMAIN_SIZE_XY,
+        )
+
+        mock_ckpt = tmp_path / "mock_h8_parent_div.pt"
+        torch.save(
+            {
+                "model_type": "latent_transformer",
+                "model_state_dict": {},
+                "horizon": 8,
+                "seed": 42,
+                "lambda_div": 0.01,
+                "lambda_vort": 0.05,
+                "physics_protocol": PHYSICS_PROTOCOL,
+                "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+                "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+                "prediction_mode": "direct",
+                "use_condition": True,
+            },
+            mock_ckpt,
+        )
+
+        res = subprocess.run(
+            [
+                sys.executable,
+                "scripts/run_h16_extension.py",
+                "--dry_run",
+                "--gpu_ids", "0,1",
+                "--batch_size", "1",
+                "--effective_batch_size", "7",  # 7 is not divisible by 1 * 2
+                "--parent_checkpoint", str(mock_ckpt),
+            ],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode != 0
+        assert "Effective batch size (7) must be evenly divisible" in res.stderr
 
 
