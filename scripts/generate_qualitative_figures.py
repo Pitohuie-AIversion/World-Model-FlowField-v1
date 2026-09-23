@@ -590,6 +590,7 @@ def generate_qualitative_suite(
     sample_mode: str = "index",
     ranking_metric: str = "vrmse_mean",
     horizons: List[int] = [1, 10, 30],
+    panel_horizon: Optional[int] = None,
     variable: str = "u",
     data_dir: str = "/root/autodl-tmp/datasets/shear_flow",
     split_file: str = "outputs/splits/grouped_split.json",
@@ -620,6 +621,14 @@ def generate_qualitative_suite(
         plot_types = ["panel", "multihorizon", "compare"]
     elif "all" in plot_types:
         plot_types = ["panel", "multihorizon", "compare"]
+
+    if panel_horizon is not None:
+        panel_h = panel_horizon
+    else:
+        panel_h = horizons[0]
+
+    if panel_h not in horizons:
+        horizons = sorted(list(set(horizons + [panel_h])))
 
     max_h = max(horizons)
 
@@ -716,9 +725,8 @@ def generate_qualitative_suite(
 
     generated_figures = {}
 
-    # Output A: Panel figure (default at h=10 or last horizon)
+    # Output A: Panel figure
     if "panel" in plot_types:
-        panel_h = 10 if 10 in horizons else horizons[-1]
         panel_path = os.path.join(
             output_dir,
             f"qual_case_seed{seed}_{group}_h{panel_h}_{variable}_panel.png",
@@ -876,6 +884,12 @@ def main():
         help="Horizons to evaluate.",
     )
     parser.add_argument(
+        "--panel_horizon",
+        type=int,
+        default=None,
+        help="Explicit horizon for the 4-panel figure. Defaults to horizons[0] if not specified.",
+    )
+    parser.add_argument(
         "--variable",
         type=str,
         default="u",
@@ -907,6 +921,7 @@ def main():
         sample_mode=args.sample_mode,
         ranking_metric=args.ranking_metric,
         horizons=args.horizons,
+        panel_horizon=args.panel_horizon,
         variable=args.variable,
         data_dir=args.data_dir,
         split_file=args.split_file,
