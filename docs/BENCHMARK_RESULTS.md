@@ -1,5 +1,10 @@
 # 流场世界模型 V1 实验产物与基准评测报告
 
+> [!IMPORTANT]
+> **正式论文实验章节与三 Seed 终版聚合产物已更新**：  
+> 请参阅最新正式出版级实验结果与物理解析章节：[docs/MANUSCRIPT_RESULTS.md](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/MANUSCRIPT_RESULTS.md)。  
+> 包含完整的表 1~4（LaTeX）、图 A~C（高清 PNG）以及三 Seed（42/43/44）严格闭环的配对检验和全频段能谱分析。
+
 > **评测数据集**：The Well `shear_flow`（36 条严格隔离的独立测试轨迹）  
 > **对比模型**：Persistence、FNO-2D、PDE-Transformer (Direct ST Transformer)、Latent World Model  
 > **评测维度**：1/5/10/20/30 步自由滚动预测误差、速度散度守恒性、涡量均方误差、能量谱保持度  
