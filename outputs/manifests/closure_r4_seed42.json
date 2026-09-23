@@ -3,10 +3,12 @@
   "protocol": "Closure-R4",
   "seed": 42,
   "training_commit": "UNKNOWN",
-  "training_git_dirty": false,
+  "training_git_dirty": null,
   "legacy_attestation": {
     "status": "historical_untracked",
-    "note": "Historical Seed 42 checkpoints were trained prior to automated git provenance embedding; commit cannot be cryptographically reconstructed from disk. Cryptographic integrity is verified via file SHA-256."
+    "training_git_commit": "UNKNOWN",
+    "training_git_dirty": null,
+    "reason": "Historical Seed 42 checkpoints were trained prior to automated git provenance capture; working-tree state was unrecorded and commit cannot be cryptographically reconstructed from disk. Cryptographic integrity is verified via file SHA-256."
   },
   "split_file": "outputs/splits/grouped_split.json",
   "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
@@ -23,10 +25,13 @@
       "lambda_vort": 0.0,
       "checkpoint_sha256": "79b65f56eb6e58e6b6b074e93eeccd2a4dfab1e5fdfc223ff5b4f6fa8824205d",
       "training_git_commit": "UNKNOWN",
-      "training_git_dirty": false,
+      "training_git_dirty": null,
       "legacy_attestation": {
         "status": "historical_untracked",
-        "note": "Historical Seed 42 checkpoint trained prior to automated git provenance embedding; commit cannot be cryptographically reconstructed from disk. Cryptographic integrity is verified via file SHA-256."
+        "checkpoint_sha256": "79b65f56eb6e58e6b6b074e93eeccd2a4dfab1e5fdfc223ff5b4f6fa8824205d",
+        "training_git_commit": "UNKNOWN",
+        "training_git_dirty": null,
+        "reason": "Historical Seed 42 checkpoint trained prior to automated git provenance capture; working-tree state was unrecorded and commit cannot be cryptographically reconstructed from disk. Cryptographic integrity is verified via file SHA-256."
       },
       "seed": 42,
       "split_type": "grouped",
@@ -49,10 +54,13 @@
       "lambda_vort": 0.0,
       "checkpoint_sha256": "4db9523eb2a4fcb96a3fdd62bd0bf56da9a5f9858469a374a9a144e1901a57b5",
       "training_git_commit": "UNKNOWN",
-      "training_git_dirty": false,
+      "training_git_dirty": null,
       "legacy_attestation": {
         "status": "historical_untracked",
-        "note": "Historical Seed 42 checkpoint trained prior to automated git provenance embedding; commit cannot be cryptographically reconstructed from disk. Cryptographic integrity is verified via file SHA-256."
+        "checkpoint_sha256": "4db9523eb2a4fcb96a3fdd62bd0bf56da9a5f9858469a374a9a144e1901a57b5",
+        "training_git_commit": "UNKNOWN",
+        "training_git_dirty": null,
+        "reason": "Historical Seed 42 checkpoint trained prior to automated git provenance capture; working-tree state was unrecorded and commit cannot be cryptographically reconstructed from disk. Cryptographic integrity is verified via file SHA-256."
       },
       "seed": 42,
       "split_type": "grouped",
@@ -75,10 +83,13 @@
       "lambda_vort": 0.0,
       "checkpoint_sha256": "784f5ec27dd2deef407add4a09464bbdbe172aa33b0b4e7df23647174cba7ffe",
       "training_git_commit": "UNKNOWN",
-      "training_git_dirty": false,
+      "training_git_dirty": null,
       "legacy_attestation": {
         "status": "historical_untracked",
-        "note": "Historical Seed 42 checkpoint trained prior to automated git provenance embedding; commit cannot be cryptographically reconstructed from disk. Cryptographic integrity is verified via file SHA-256."
+        "checkpoint_sha256": "784f5ec27dd2deef407add4a09464bbdbe172aa33b0b4e7df23647174cba7ffe",
+        "training_git_commit": "UNKNOWN",
+        "training_git_dirty": null,
+        "reason": "Historical Seed 42 checkpoint trained prior to automated git provenance capture; working-tree state was unrecorded and commit cannot be cryptographically reconstructed from disk. Cryptographic integrity is verified via file SHA-256."
       },
       "seed": 42,
       "split_type": "grouped",
@@ -101,10 +112,13 @@
       "lambda_vort": 0.05,
       "checkpoint_sha256": "76bd96dedd717deed173ab492abaff8ff4138674077190d8f423a89cb2ca02ef",
       "training_git_commit": "UNKNOWN",
-      "training_git_dirty": false,
+      "training_git_dirty": null,
       "legacy_attestation": {
         "status": "historical_untracked",
-        "note": "Historical Seed 42 checkpoint trained prior to automated git provenance embedding; commit cannot be cryptographically reconstructed from disk. Cryptographic integrity is verified via file SHA-256."
+        "checkpoint_sha256": "76bd96dedd717deed173ab492abaff8ff4138674077190d8f423a89cb2ca02ef",
+        "training_git_commit": "UNKNOWN",
+        "training_git_dirty": null,
+        "reason": "Historical Seed 42 checkpoint trained prior to automated git provenance capture; working-tree state was unrecorded and commit cannot be cryptographically reconstructed from disk. Cryptographic integrity is verified via file SHA-256."
       },
       "seed": 42,
       "split_type": "grouped",
@@ -127,10 +141,13 @@
       "lambda_vort": 0.05,
       "checkpoint_sha256": "821891674ea80383ba07f02edbd1005e1005fc2a6b084b4146969c4f5570ca86",
       "training_git_commit": "UNKNOWN",
-      "training_git_dirty": false,
+      "training_git_dirty": null,
       "legacy_attestation": {
         "status": "historical_untracked",
-        "note": "Historical Seed 42 checkpoint trained prior to automated git provenance embedding; commit cannot be cryptographically reconstructed from disk. Cryptographic integrity is verified via file SHA-256."
+        "checkpoint_sha256": "821891674ea80383ba07f02edbd1005e1005fc2a6b084b4146969c4f5570ca86",
+        "training_git_commit": "UNKNOWN",
+        "training_git_dirty": null,
+        "reason": "Historical Seed 42 checkpoint trained prior to automated git provenance capture; working-tree state was unrecorded and commit cannot be cryptographically reconstructed from disk. Cryptographic integrity is verified via file SHA-256."
       },
       "seed": 42,
       "split_type": "grouped",

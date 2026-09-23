@@ -38,6 +38,7 @@ from src.utils.provenance import (
     resolve_checkpoint_provenance,
     validate_evaluation_provenance,
     validate_formal_provenance_bundle,
+    is_shallow_repository,
 )
 
 
@@ -585,6 +586,13 @@ def test_closure_r4_seed42_manifest_and_checkpoints_integrity():
         assert is_valid is True
         assert len(errors) == 0
 
+        # Formally validate that legacy attestation is cryptographically verified
+        assert prov["legacy_attestation_verified"] is True
+        is_formal_valid, formal_errors = validate_formal_provenance_bundle(prov, label=grp_key, fail_closed=True)
+        assert is_formal_valid is True
+        assert len(formal_errors) == 0
+        assert len(errors) == 0
+
 
 def test_evaluation_output_filename_seed_isolation():
     """Verify that evaluator automatically generates non-colliding output paths per seed."""
@@ -710,6 +718,9 @@ def test_validate_evaluation_provenance_rejects_short_hash_prefix():
 
 def test_formal_provenance_contract_rejects_unknown_or_dirty_git():
     """Verify formal provenance contract rejects checkpoints with unknown (None), dirty (True), or invalid git commit."""
+    if is_shallow_repository():
+        pytest.skip("Repository is shallow clone; full git history required for commit object verification")
+
     canonical_prov = {
         "physics_protocol": PHYSICS_PROTOCOL,
         "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
@@ -743,13 +754,67 @@ def test_formal_provenance_contract_rejects_unknown_or_dirty_git():
     with pytest.raises(RuntimeError, match="does not exist cryptographically in git history"):
         validate_formal_provenance_bundle(prov_bad_commit, fail_closed=True)
 
-    # Production test 5: legacy attestation allows UNKNOWN commit on historical checkpoints
-    prov_legacy = dict(
+    # Production test 5: arbitrary attestation dictionary -> rejected
+    prov_arbitrary = dict(
         canonical_prov,
         training_git_commit="UNKNOWN",
-        legacy_attestation={"status": "historical_untracked", "note": "Verified via SHA256"},
+        legacy_attestation={"anything": "anything"},
     )
-    is_valid_legacy, _ = validate_formal_provenance_bundle(prov_legacy, fail_closed=True)
+    with pytest.raises(RuntimeError, match="has invalid status"):
+        validate_formal_provenance_bundle(prov_arbitrary, fail_closed=True)
+
+    # Production test 6: missing checkpoint_sha256 in attestation -> rejected
+    prov_missing_sha = dict(
+        canonical_prov,
+        training_git_commit="UNKNOWN",
+        legacy_attestation={"status": "historical_untracked"},
+    )
+    with pytest.raises(RuntimeError, match="missing required 'checkpoint_sha256'"):
+        validate_formal_provenance_bundle(prov_missing_sha, fail_closed=True)
+
+    # Production test 7: wrong attested SHA256 -> rejected
+    prov_wrong_sha = dict(
+        canonical_prov,
+        training_git_commit="UNKNOWN",
+        full_sha256="821891674ea80383ba07f02edbd1005e1005fc2a6b084b4146969c4f5570ca86",
+        legacy_attestation={
+            "status": "historical_untracked",
+            "checkpoint_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        },
+        legacy_attestation_verified=True,
+    )
+    with pytest.raises(RuntimeError, match="checkpoint SHA256 mismatch"):
+        validate_formal_provenance_bundle(prov_wrong_sha, fail_closed=True)
+
+    # Production test 8: unverified legacy attestation -> rejected
+    prov_unverified = dict(
+        canonical_prov,
+        training_git_commit="UNKNOWN",
+        full_sha256="821891674ea80383ba07f02edbd1005e1005fc2a6b084b4146969c4f5570ca86",
+        legacy_attestation={
+            "status": "historical_untracked",
+            "checkpoint_sha256": "821891674ea80383ba07f02edbd1005e1005fc2a6b084b4146969c4f5570ca86",
+        },
+        legacy_attestation_verified=False,
+    )
+    with pytest.raises(RuntimeError, match="could not be cryptographically verified"):
+        validate_formal_provenance_bundle(prov_unverified, fail_closed=True)
+
+    # Production test 9: verified manifest SHA -> cleanly accepted
+    prov_verified = dict(
+        canonical_prov,
+        training_git_commit="UNKNOWN",
+        training_git_dirty=None,
+        full_sha256="821891674ea80383ba07f02edbd1005e1005fc2a6b084b4146969c4f5570ca86",
+        legacy_attestation={
+            "status": "historical_untracked",
+            "checkpoint_sha256": "821891674ea80383ba07f02edbd1005e1005fc2a6b084b4146969c4f5570ca86",
+            "reason": "Verified via manifest file SHA-256",
+        },
+        legacy_attestation_verified=True,
+    )
+    is_valid_legacy, errors_legacy = validate_formal_provenance_bundle(prov_verified, fail_closed=True)
     assert is_valid_legacy is True
+    assert len(errors_legacy) == 0
 
 

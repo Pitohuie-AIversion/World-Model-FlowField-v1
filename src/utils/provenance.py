@@ -55,6 +55,25 @@ def is_git_dirty(project_root: Optional[str] = None) -> bool:
     return False
 
 
+def is_shallow_repository(project_root: Optional[str] = None) -> bool:
+    """Check whether the local git repository is a shallow clone."""
+    cwd = project_root or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        ret = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+        )
+        if ret.returncode == 0:
+            return ret.stdout.strip().lower() == "true"
+    except Exception:
+        pass
+    return False
+
+
 def git_commit_exists(commit_sha: Optional[str], project_root: Optional[str] = None) -> bool:
     """Verify whether a git commit object exists cryptographically in the repository."""
     if not commit_sha or commit_sha == "UNKNOWN":
@@ -185,18 +204,25 @@ def resolve_checkpoint_provenance(
     legacy_attestation = ckpt_data.get("legacy_attestation") or (
         ckpt_data.get("config", {}).get("legacy_attestation") if isinstance(ckpt_data.get("config"), dict) else None
     )
+    legacy_attestation_verified = False
+    ckpt_sha = None
+    if os.path.exists(ckpt_path):
+        try:
+            ckpt_sha = compute_file_sha256(ckpt_path)
+        except Exception:
+            pass
+
     if needs_manifest and manifest_path and os.path.exists(manifest_path):
         try:
             with open(manifest_path, "r") as mf:
                 manifest = json.load(mf)
-            ckpt_sha = compute_file_sha256(ckpt_path)
             for grp_key, grp_info in manifest.get("groups", {}).items():
                 manifest_path_match = os.path.abspath(grp_info.get("checkpoint_path", "")) == os.path.abspath(ckpt_path)
-                manifest_sha_match = grp_info.get("checkpoint_sha256") == ckpt_sha
+                manifest_sha_match = ckpt_sha and grp_info.get("checkpoint_sha256") == ckpt_sha
                 if manifest_path_match or manifest_sha_match:
                     # Enforce SHA-256 integrity when matching by path
                     manifest_expected_sha = grp_info.get("checkpoint_sha256")
-                    if manifest_expected_sha and manifest_expected_sha != ckpt_sha:
+                    if manifest_expected_sha and ckpt_sha and manifest_expected_sha != ckpt_sha:
                         raise ValueError(
                             f"Manifest integrity mismatch for {ckpt_path}: "
                             f"file SHA256 is {ckpt_sha}, but manifest expected {manifest_expected_sha}"
@@ -216,16 +242,36 @@ def resolve_checkpoint_provenance(
                     physics_protocol = physics_protocol or grp_info.get("physics_protocol", PHYSICS_PROTOCOL)
                     spatial_axis_contract = spatial_axis_contract or grp_info.get("spatial_axis_contract", SPATIAL_AXIS_CONTRACT)
                     physics_domain_size_xy = physics_domain_size_xy or grp_info.get("physics_domain_size_xy", list(SHEAR_FLOW_DOMAIN_SIZE_XY))
-                    legacy_attestation = legacy_attestation or grp_info.get("legacy_attestation") or manifest.get("legacy_attestation")
+                    grp_attestation = grp_info.get("legacy_attestation") or manifest.get("legacy_attestation")
+                    if grp_attestation:
+                        legacy_attestation = grp_attestation
+                        if isinstance(legacy_attestation, dict):
+                            attested_sha = legacy_attestation.get("checkpoint_sha256")
+                            status_ok = legacy_attestation.get("status") == "historical_untracked"
+                            if status_ok and attested_sha:
+                                if ckpt_sha and attested_sha == ckpt_sha:
+                                    legacy_attestation_verified = True
+                                elif manifest_expected_sha and attested_sha == manifest_expected_sha:
+                                    legacy_attestation_verified = True
                     break
         except ValueError:
             raise
         except Exception:
             pass
 
+    # Check if legacy_attestation directly provided in ckpt_data matches file sha
+    if legacy_attestation and not legacy_attestation_verified and isinstance(legacy_attestation, dict):
+        attested_sha = legacy_attestation.get("checkpoint_sha256")
+        status_ok = legacy_attestation.get("status") == "historical_untracked"
+        if status_ok and attested_sha and ckpt_sha and attested_sha == ckpt_sha:
+            legacy_attestation_verified = True
+
     return {
+        "checkpoint_path": ckpt_path,
+        "sha256": ckpt_sha[:16] if ckpt_sha else None,
+        "full_sha256": ckpt_sha,
         "training_git_commit": commit or "UNKNOWN",
-        "training_git_dirty": git_dirty,  # Note: None if missing, do NOT default to False!
+        "training_git_dirty": git_dirty,  # Note: None if missing/historical, do NOT default to False!
         "seed": seed,  # Note: DO NOT fallback to 42. If seed is missing, keep None to fail closed!
         "split_type": split_type,
         "split_hash": split_hash,
@@ -235,6 +281,7 @@ def resolve_checkpoint_provenance(
         "spatial_axis_contract": spatial_axis_contract,
         "physics_domain_size_xy": physics_domain_size_xy,
         "legacy_attestation": legacy_attestation,
+        "legacy_attestation_verified": legacy_attestation_verified,
     }
 
 
@@ -315,12 +362,39 @@ def validate_formal_provenance_bundle(
         errors.append(f"Domain mismatch: expected {SHEAR_FLOW_DOMAIN_SIZE_XY}, got {prov.get('physics_domain_size_xy')}")
 
     legacy_attestation = prov.get("legacy_attestation")
-    if not legacy_attestation:
+    if legacy_attestation is not None:
+        if not isinstance(legacy_attestation, dict):
+            errors.append(f"Legacy attestation for {label} must be a dictionary, got {type(legacy_attestation).__name__}")
+        elif legacy_attestation.get("status") != "historical_untracked":
+            errors.append(
+                f"Legacy attestation for {label} has invalid status: '{legacy_attestation.get('status')}', "
+                f"must be 'historical_untracked'"
+            )
+        elif not legacy_attestation.get("checkpoint_sha256"):
+            errors.append(f"Legacy attestation for {label} is missing required 'checkpoint_sha256'")
+        elif (
+            prov.get("full_sha256")
+            and legacy_attestation.get("checkpoint_sha256") != prov.get("full_sha256")
+        ):
+            errors.append(
+                f"Legacy attestation checkpoint SHA256 mismatch for {label}: "
+                f"attestation has {legacy_attestation.get('checkpoint_sha256')}, but model is {prov.get('full_sha256')}"
+            )
+        elif prov.get("legacy_attestation_verified") is not True:
+            errors.append(
+                f"Legacy attestation for {label} could not be cryptographically verified against file SHA256 or manifest"
+            )
+    else:
         commit = prov.get("training_git_commit")
         if not commit or commit == "UNKNOWN":
             errors.append(f"Training git commit is UNKNOWN or missing for {label}")
         elif not git_commit_exists(commit):
-            errors.append(f"Training git commit '{commit}' does not exist cryptographically in git history for {label}")
+            if is_shallow_repository():
+                errors.append(
+                    f"Git history unavailable for provenance verification (shallow clone) for commit '{commit}' on {label}"
+                )
+            else:
+                errors.append(f"Training git commit '{commit}' does not exist cryptographically in git history for {label}")
 
         if prov.get("training_git_dirty") is not False:
             errors.append(
@@ -489,8 +563,18 @@ def validate_init_checkpoint_contract(
     if training_git_dirty is None:
         training_git_dirty = prov.get("training_git_dirty")
     legacy_attestation = init_ckpt.get("legacy_attestation") or prov.get("legacy_attestation")
-    if training_git_dirty is None and not legacy_attestation:
-        errors.append("Checkpoint is missing required field 'training_git_dirty'")
+    if training_git_dirty is None:
+        if not legacy_attestation:
+            errors.append("Checkpoint is missing required field 'training_git_dirty'")
+        elif (
+            prov.get("legacy_attestation_verified") is not True
+            and not (
+                isinstance(legacy_attestation, dict)
+                and legacy_attestation.get("status") == "historical_untracked"
+                and legacy_attestation.get("checkpoint_sha256")
+            )
+        ):
+            errors.append("Checkpoint has invalid or unverified legacy_attestation for missing training_git_dirty")
     elif training_git_dirty is True:
         errors.append("Checkpoint was trained on a dirty working tree (training_git_dirty=True)")
 

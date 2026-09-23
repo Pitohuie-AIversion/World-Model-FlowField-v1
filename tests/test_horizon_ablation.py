@@ -692,7 +692,10 @@ class TestProvenanceHardeningAndDualTracker:
 
     def test_git_commit_exists_cryptographic_verification(self):
         """Verify git_commit_exists accurately checks repository object database."""
-        from src.utils.provenance import git_commit_exists
+        from src.utils.provenance import git_commit_exists, is_shallow_repository
+
+        if is_shallow_repository():
+            pytest.skip("Repository is shallow clone; full git history required for commit object verification")
 
         # Real existing commit in this repository
         assert git_commit_exists("6593b65005843c3f3c2640cb262bfd56708e11ad") is True
