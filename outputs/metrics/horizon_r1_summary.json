@@ -1,0 +1,113 @@
+{
+  "H2-control": {
+    "group": "H2-control",
+    "total_epochs": 12,
+    "saved_checkpoint_epochs": [
+      7,
+      8,
+      9
+    ],
+    "short_best": {
+      "epoch": 8,
+      "val_vrmse": 0.1296,
+      "step1_vrmse": 0.1216,
+      "diag_h10": 3.8367,
+      "diag_h20": 6.982,
+      "diag_h30": 9.1348,
+      "j_long": 6.651166666666666,
+      "checkpoint": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H2_control/latent_transformer/best_vrmse_mean.pt"
+    },
+    "long_best_all": {
+      "epoch": 2,
+      "j_long": 4.201266666666666,
+      "val_vrmse": 0.2451,
+      "diag_h10": 5.2074,
+      "diag_h20": 3.9747,
+      "diag_h30": 3.4217,
+      "checkpoint_saved": false
+    },
+    "long_best_saved": {
+      "epoch": 9,
+      "j_long": 5.3690999999999995,
+      "val_vrmse": 0.1394,
+      "diag_h10": 4.6237,
+      "diag_h20": 6.0289,
+      "diag_h30": 5.4547,
+      "checkpoint": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H2_control/latent_transformer/checkpoint_step_9_vrmse_mean_0.1394.pt"
+    }
+  },
+  "H4": {
+    "group": "H4",
+    "total_epochs": 12,
+    "saved_checkpoint_epochs": [
+      7,
+      8,
+      10
+    ],
+    "short_best": {
+      "epoch": 10,
+      "val_vrmse": 0.1496,
+      "step1_vrmse": 0.1398,
+      "diag_h10": 2.6631,
+      "diag_h20": 5.8713,
+      "diag_h30": 6.3687,
+      "j_long": 4.9677,
+      "checkpoint": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H4/latent_transformer/best_vrmse_mean.pt"
+    },
+    "long_best_all": {
+      "epoch": 6,
+      "j_long": 4.223066666666667,
+      "val_vrmse": 0.2339,
+      "diag_h10": 2.1852,
+      "diag_h20": 5.2909,
+      "diag_h30": 5.1931,
+      "checkpoint_saved": false
+    },
+    "long_best_saved": {
+      "epoch": 7,
+      "j_long": 4.399633333333334,
+      "val_vrmse": 0.1594,
+      "diag_h10": 2.517,
+      "diag_h20": 5.1573,
+      "diag_h30": 5.5246,
+      "checkpoint": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H4/latent_transformer/checkpoint_step_7_vrmse_mean_0.1594.pt"
+    }
+  },
+  "H8": {
+    "group": "H8",
+    "total_epochs": 12,
+    "saved_checkpoint_epochs": [
+      9,
+      11,
+      12
+    ],
+    "short_best": {
+      "epoch": 9,
+      "val_vrmse": 0.1879,
+      "step1_vrmse": 0.1487,
+      "diag_h10": 0.4707,
+      "diag_h20": 3.5981,
+      "diag_h30": 9.9806,
+      "j_long": 4.683133333333334,
+      "checkpoint": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/best_vrmse_mean.pt"
+    },
+    "long_best_all": {
+      "epoch": 1,
+      "j_long": 2.0884,
+      "val_vrmse": 0.4389,
+      "diag_h10": 0.8291,
+      "diag_h20": 2.0275,
+      "diag_h30": 3.4086,
+      "checkpoint_saved": false
+    },
+    "long_best_saved": {
+      "epoch": 11,
+      "j_long": 3.4711999999999996,
+      "val_vrmse": 0.2186,
+      "diag_h10": 0.4856,
+      "diag_h20": 3.3032,
+      "diag_h30": 6.6248,
+      "checkpoint": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt"
+    }
+  }
+}

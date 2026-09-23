@@ -281,3 +281,135 @@ def test_run_horizon_ablation_dry_run_subprocess(tmp_path):
     assert "E4_H4" in stdout
     assert "E4_H8" in stdout
     assert "DRY RUN COMPLETED: All invariant controls verified successfully." in stdout
+
+
+# ============================================================
+# Component 4: Horizon-R1 Formal Analysis Tests
+# ============================================================
+
+class TestJLongCriterion:
+    """Tests for J_long = mean(h10, h20, h30) checkpoint selection criterion."""
+
+    def test_j_long_computation(self):
+        """Verify J_long is the arithmetic mean of h10, h20, h30."""
+        from scripts.analyze_horizon_ablation import parse_log
+        import tempfile
+
+        # Create a mock training log
+        log_content = (
+            "Epoch [01/03] | Train Loss: 1.0e-02 | "
+            "Val Rollout Mean VRMSE: 0.2000 | "
+            "Step 1 VRMSE: 0.1500 (u: 0.0300, v: 0.2000, p: 0.3000, s: 0.0700) | "
+            "Diag [h10: 3.0000, h20: 6.0000, h30: 9.0000] | Max VRAM: 4.00 GB\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".log", delete=False) as f:
+            f.write(log_content)
+            f.flush()
+            result = parse_log(f.name)
+
+        assert len(result) == 1
+        ep = result[0]
+        expected_j = (3.0 + 6.0 + 9.0) / 3.0
+        assert abs(ep["j_long"] - expected_j) < 1e-6, (
+            f"J_long should be {expected_j}, got {ep['j_long']}"
+        )
+        os.unlink(f.name)
+
+    def test_j_long_selects_different_from_val_vrmse(self):
+        """Demonstrate that J_long and val VRMSE can select different epochs."""
+        # Epoch A: good val VRMSE but bad long-range
+        # Epoch B: worse val VRMSE but better long-range
+        epochs = [
+            {"epoch": 1, "val_vrmse": 0.10, "j_long": 8.0},
+            {"epoch": 2, "val_vrmse": 0.20, "j_long": 3.0},
+        ]
+        best_short = min(epochs, key=lambda e: e["val_vrmse"])
+        best_long = min(epochs, key=lambda e: e["j_long"])
+        assert best_short["epoch"] == 1
+        assert best_long["epoch"] == 2
+        assert best_short["epoch"] != best_long["epoch"]
+
+    def test_find_saved_checkpoints(self, tmp_path):
+        """Verify saved checkpoint epoch extraction from filenames."""
+        from scripts.analyze_horizon_ablation import find_saved_checkpoints
+
+        # Create mock checkpoint files
+        (tmp_path / "checkpoint_step_3_vrmse_mean_0.1500.pt").write_bytes(b"mock")
+        (tmp_path / "checkpoint_step_7_vrmse_mean_0.1200.pt").write_bytes(b"mock")
+        (tmp_path / "best_vrmse_mean.pt").write_bytes(b"mock")
+
+        saved = find_saved_checkpoints(str(tmp_path))
+        assert 3 in saved
+        assert 7 in saved
+        assert len(saved) == 2  # best_vrmse_mean.pt should not be included
+
+    def test_analyze_script_smoke(self):
+        """Verify analyze_horizon_ablation.py can be imported without errors."""
+        import scripts.analyze_horizon_ablation as mod
+        assert hasattr(mod, "parse_log")
+        assert hasattr(mod, "analyze_group")
+        assert hasattr(mod, "find_saved_checkpoints")
+        assert hasattr(mod, "generate_figures")
+
+    def test_evaluate_script_importable(self):
+        """Verify evaluate_horizon_ablation.py can be imported without errors."""
+        import scripts.evaluate_horizon_ablation as mod
+        assert hasattr(mod, "evaluate_at_horizons")
+        assert hasattr(mod, "load_forecaster")
+        assert hasattr(mod, "parse_training_logs")
+        assert hasattr(mod, "find_long_best_checkpoints")
+        assert hasattr(mod, "compute_file_sha256")
+
+    def test_analysis_outputs_exist(self):
+        """Verify that formal analysis outputs have been generated."""
+        expected_files = [
+            "outputs/metrics/horizon_r1_epoch_trajectories.json",
+            "outputs/metrics/horizon_r1_summary.json",
+            "outputs/figures/horizon_r1_comparison.png",
+            "outputs/figures/horizon_r1_checkpoint_selection.png",
+        ]
+        for fpath in expected_files:
+            full = os.path.join(PROJECT_ROOT, fpath)
+            assert os.path.exists(full), f"Expected output file not found: {fpath}"
+
+    def test_summary_json_has_dual_selection(self):
+        """Verify summary JSON contains both short-best and long-best for each group."""
+        summary_path = os.path.join(PROJECT_ROOT, "outputs/metrics/horizon_r1_summary.json")
+        if not os.path.exists(summary_path):
+            pytest.skip("Summary JSON not yet generated")
+
+        with open(summary_path) as f:
+            summary = json.load(f)
+
+        for group in ["H2-control", "H4", "H8"]:
+            assert group in summary, f"Missing group {group}"
+            assert "short_best" in summary[group], f"Missing short_best for {group}"
+            assert "long_best_all" in summary[group], f"Missing long_best_all for {group}"
+            assert "long_best_saved" in summary[group], f"Missing long_best_saved for {group}"
+
+            sb = summary[group]["short_best"]
+            assert "j_long" in sb, f"short_best missing j_long for {group}"
+            assert "epoch" in sb, f"short_best missing epoch for {group}"
+
+    def test_test_evaluation_json_structure(self):
+        """Verify test evaluation JSON has expected structure."""
+        eval_path = os.path.join(PROJECT_ROOT, "outputs/metrics/horizon_r1_test_evaluation.json")
+        if not os.path.exists(eval_path):
+            pytest.skip("Test evaluation JSON not yet generated")
+
+        with open(eval_path) as f:
+            results = json.load(f)
+
+        # Must have parent baseline
+        assert "parent_test" in results, "Missing parent_test"
+        assert "parent_val" in results, "Missing parent_val"
+
+        # Must have all horizons
+        for label in ["parent_test", "H8_short"]:
+            if label not in results:
+                continue
+            for h in [1, 5, 10, 20, 30]:
+                h_key = f"h{h}"
+                assert h_key in results[label], f"Missing {h_key} in {label}"
+                assert "vrmse_mean" in results[label][h_key], f"Missing vrmse_mean in {label}/{h_key}"
+
