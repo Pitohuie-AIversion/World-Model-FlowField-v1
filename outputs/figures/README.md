@@ -32,16 +32,7 @@ outputs/figures/
 │   │   ├── compare_parent_vs_h8_seed42_h30_u.png (+ metadata.json)
 │   │   ├── h8_saved_long_best_seed42_h30_u_panel.png (+ metadata.json)
 │   │   └── h8_saved_long_best_seed42_multistep_evolution_u.png (+ metadata.json)
-│   ├── closure_r4/                # Closure-R4 物理实验定性图 (E1 vs E4 涡量与速度场)
-│   │   ├── qual_case_seed42_E1_rollout_field_h1_u_panel.png (+ metadata.json)
-│   │   ├── qual_case_seed42_E1_rollout_field_h10_u_panel.png (+ metadata.json)
-│   │   ├── qual_case_seed42_E4_full_physics_h1_u_panel.png (+ metadata.json)
-│   │   ├── qual_case_seed42_E4_full_physics_h10_u_panel.png (+ metadata.json)
-│   │   ├── qual_case_seed42_E4_full_physics_h1_vorticity_panel.png (+ metadata.json)
-│   │   ├── qual_case_seed42_E4_full_physics_h10_vorticity_panel.png (+ metadata.json)
-│   │   ├── qual_case_seed42_E4_full_physics_vorticity_multihorizon.png (+ metadata.json)
-│   │   └── qual_case_seed42_compare_h30_vorticity.png (+ metadata.json)
-│   └── [symlinks]                 # 指向上述子目录的向后兼容相对软链接
+│   └── [symlinks]                 # 指向 horizon_r1/ 的向后兼容相对软链接
 └── [symlinks]                     # 根目录保留指向各模块的向后兼容相对软链接
 ```
 
