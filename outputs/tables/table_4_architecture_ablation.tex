@@ -1,0 +1,49 @@
+\begin{table*}[t]
+\centering
+\small
+\caption{\textbf{Architectural and Operator Baseline Comparison Across Autoregressive Rollout Horizons.} Compares direct physical-space forecasting, neural operator baselines, and our latent world model framework across horizons $t \in \{1, 5, 10, 20, 30\}$. Direct ST-Transformer operates on raw $128 \times 128$ physical fields and suffers from catastrophic derivative explosion ($\|\nabla \cdot \mathbf{u}\| = 89.73$ at $t=30$). FNO-2D maintains stability via Fourier mode truncation but incurs high initial field error ($\mathrm{VRMSE} = 0.6450$ at $t=1$). Our Latent World Model with physics regularization (E4) achieves high initial fidelity ($\mathrm{VRMSE} = 0.0532 \pm 0.0076$) while stabilizing vorticity and enstrophy over 30 autoregressive steps. $^\dagger$E0 evaluated on Seed 42.}
+\label{tab:architecture_and_baselines}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{llcccccc}
+\toprule
+\textbf{Model / Architecture} & \textbf{Param Count} & \textbf{Physical Metric} & \textbf{Step 1 ($t=1$)} & \textbf{Step 5 ($t=5$)} & \textbf{Step 10 ($t=10$)} & \textbf{Step 20 ($t=20$)} & \textbf{Step 30 ($t=30$)} \\
+\midrule
+\multirow{4}{*}{\shortstack[l]{Persistence Baseline}} & \multirow{4}{*}{---}
+ & Field Mean VRMSE & 0.0299 & 0.1390 & 0.2294 & 0.3593 & 0.4879 \\
+ & Divergence RMSE ($\|\nabla \cdot \mathbf{u}\|$) & 4.6998 & 4.6998 & 4.6998 & 4.6998 & 4.6998 \\
+ & Vorticity RMSE ($\|\omega - \omega^*\|$) & 0.0662 & 0.3177 & 0.4108 & 0.4107 & 0.4630 \\
+ & Energy Spectrum MAE & 0.0330 & 0.1094 & 0.1448 & 0.1365 & 0.1623 \\
+\midrule
+\multirow{4}{*}{\shortstack[l]{Direct ST-Transformer (Physical Grid)}} & \multirow{4}{*}{7.73M}
+ & Field Mean VRMSE & 0.8511 & 1.9948 & 6.3670 & 22.3700 & 26.8328 \\
+ & Divergence RMSE ($\|\nabla \cdot \mathbf{u}\|$) & 8.9352 & 16.6996 & 33.2842 & 79.9667 & 89.7318 \\
+ & Vorticity RMSE ($\|\omega - \omega^*\|$) & 6.9586 & 11.0093 & 26.6111 & 70.4159 & 81.1527 \\
+ & Energy Spectrum MAE & 0.2037 & 0.3763 & 0.5042 & 0.7284 & 0.9457 \\
+\midrule
+\multirow{4}{*}{\shortstack[l]{FNO-2D (Fourier Neural Operator)}} & \multirow{4}{*}{16.80M}
+ & Field Mean VRMSE & 0.6450 & 0.7575 & 0.8385 & 0.9580 & 1.0720 \\
+ & Divergence RMSE ($\|\nabla \cdot \mathbf{u}\|$) & 0.1708 & 0.0913 & 0.0779 & 0.0559 & 0.0389 \\
+ & Vorticity RMSE ($\|\omega - \omega^*\|$) & 0.1170 & 0.3241 & 0.5166 & 0.6903 & 0.7961 \\
+ & Energy Spectrum MAE & 0.2340 & 0.3148 & 0.3382 & 0.3333 & 0.3336 \\
+\midrule
+\multirow{4}{*}{\shortstack[l]{Latent World Model (E0: Single-Step, $H=1$)$^\dagger$}} & \multirow{4}{*}{9.75M}
+ & Field Mean VRMSE & 0.0446 & 0.8473 & 1.3356 & 1.4044 & 1.2572 \\
+ & Divergence RMSE ($\|\nabla \cdot \mathbf{u}\|$) & 0.1644 & 1.3167 & 0.9851 & 0.5415 & 0.0654 \\
+ & Vorticity RMSE ($\|\omega - \omega^*\|$) & 0.4882 & 2.5398 & 2.4354 & 2.5371 & 2.9736 \\
+ & Energy Spectrum MAE & 0.1624 & 0.3198 & 0.3297 & 0.2447 & 0.3383 \\
+\midrule
+\multirow{4}{*}{\shortstack[l]{Latent World Model (E1: Rollout Field, $H=2$)}} & \multirow{4}{*}{9.75M}
+ & Field Mean VRMSE & 0.0449 $\pm$ 0.0048 & 0.5845 $\pm$ 0.4449 & 1.0436 $\pm$ 0.4329 & 1.3964 $\pm$ 0.1909 & 1.5132 $\pm$ 0.0962 \\
+ & Divergence RMSE ($\|\nabla \cdot \mathbf{u}\|$) & 0.1715 $\pm$ 0.0277 & 1.1089 $\pm$ 1.0283 & 1.5667 $\pm$ 0.7079 & 2.2179 $\pm$ 1.3706 & 1.9192 $\pm$ 1.5992 \\
+ & Vorticity RMSE ($\|\omega - \omega^*\|$) & 0.4595 $\pm$ 0.0388 & 1.8746 $\pm$ 1.2722 & 3.0814 $\pm$ 1.4725 & 4.2214 $\pm$ 1.7304 & 4.7293 $\pm$ 1.5311 \\
+ & Energy Spectrum MAE & 0.1672 $\pm$ 0.0214 & 0.3239 $\pm$ 0.1705 & 0.4148 $\pm$ 0.1156 & 0.4971 $\pm$ 0.2324 & 0.5780 $\pm$ 0.2303 \\
+\midrule
+\multirow{4}{*}{\shortstack[l]{Latent World Model (E4: Full Physics)}} & \multirow{4}{*}{9.75M}
+ & Field Mean VRMSE & 0.0532 $\pm$ 0.0088 & 0.4375 $\pm$ 0.1502 & 1.1607 $\pm$ 0.4868 & 1.2751 $\pm$ 0.1776 & 1.5560 $\pm$ 0.1334 \\
+ & Divergence RMSE ($\|\nabla \cdot \mathbf{u}\|$) & 0.1455 $\pm$ 0.0189 & 0.7818 $\pm$ 0.2465 & 2.0637 $\pm$ 0.9234 & 2.2140 $\pm$ 1.2845 & 1.8302 $\pm$ 1.3583 \\
+ & Vorticity RMSE ($\|\omega - \omega^*\|$) & 0.2847 $\pm$ 0.0345 & 1.4191 $\pm$ 0.4512 & 3.5561 $\pm$ 1.6115 & 3.5439 $\pm$ 1.3137 & 3.9015 $\pm$ 1.3585 \\
+ & Energy Spectrum MAE & 0.1213 $\pm$ 0.0149 & 0.2693 $\pm$ 0.0687 & 0.4664 $\pm$ 0.1663 & 0.4422 $\pm$ 0.1869 & 0.5144 $\pm$ 0.2342 \\
+\bottomrule
+\end{tabular}
+}
+\end{table*}

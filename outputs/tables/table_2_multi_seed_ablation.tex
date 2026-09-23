@@ -1,0 +1,55 @@
+\begin{table*}[t]
+\centering
+\small
+\caption{\textbf{Multi-Seed Autoregressive Rollout Benchmark under Closure-R4 Protocol.} Results report $\text{Mean} \pm \text{Sample Std}$ across $N=3$ independent training seeds (Seeds 42, 43, 44) on test trajectories ($N_{\mathrm{test}}=45$). $^\dagger$E0 evaluated on Seed 42.}
+\label{tab:multi_seed_ablation}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{llccccc}
+\toprule
+\textbf{Metric} & \textbf{Model Group} & \textbf{Step 1 ($t=1$)} & \textbf{Step 5 ($t=5$)} & \textbf{Step 10 ($t=10$)} & \textbf{Step 20 ($t=20$)} & \textbf{Step 30 ($t=30$)} \\
+\midrule
+\multirow{5}{*}{\shortstack[l]{Field Mean VRMSE}}
+ & E0: Single-Step Pure Field ($H=1$)$^\dagger$ & 0.0446 & 0.8473 & 1.3356 & 1.4044 & 1.2572 \\
+ & E1: Rollout-Aware Field ($H=2$) & 0.0449 $\pm$ 0.0048 & 0.5845 $\pm$ 0.4449 & 1.0436 $\pm$ 0.4329 & 1.3964 $\pm$ 0.1909 & 1.5132 $\pm$ 0.0962 \\
+ & E2: $+ L_{\mathrm{div}}$ (Divergence-Free) & 0.0462 $\pm$ 0.0051 & 0.5760 $\pm$ 0.4663 & 1.1209 $\pm$ 0.4881 & 1.3443 $\pm$ 0.1503 & 1.4773 $\pm$ 0.1754 \\
+ & E3: $+ L_\omega$ (Vorticity-Aware) & 0.0531 $\pm$ 0.0097 & 0.4568 $\pm$ 0.1508 & 1.2442 $\pm$ 0.5483 & 1.4006 $\pm$ 0.2856 & 1.6194 $\pm$ 0.2644 \\
+ & E4: $+ L_{\mathrm{div}} + L_\omega$ (Full Physics) & 0.0532 $\pm$ 0.0088 & 0.4375 $\pm$ 0.1502 & 1.1607 $\pm$ 0.4868 & 1.2751 $\pm$ 0.1776 & 1.5560 $\pm$ 0.1334 \\
+\midrule
+\multirow{5}{*}{\shortstack[l]{Divergence RMSE ($\|\nabla \cdot \mathbf{u}\|$)}}
+ & E0: Single-Step Pure Field ($H=1$)$^\dagger$ & 0.1644 & 1.3167 & 0.9851 & 0.5415 & 0.0654 \\
+ & E1: Rollout-Aware Field ($H=2$) & 0.1715 $\pm$ 0.0277 & 1.1089 $\pm$ 1.0283 & 1.5667 $\pm$ 0.7079 & 2.2179 $\pm$ 1.3706 & 1.9192 $\pm$ 1.5992 \\
+ & E2: $+ L_{\mathrm{div}}$ (Divergence-Free) & 0.1340 $\pm$ 0.0202 & 1.0505 $\pm$ 0.9840 & 1.6348 $\pm$ 0.6345 & 1.9498 $\pm$ 0.9991 & 1.7985 $\pm$ 1.4833 \\
+ & E3: $+ L_\omega$ (Vorticity-Aware) & 0.1698 $\pm$ 0.0154 & 0.7598 $\pm$ 0.1899 & 2.0802 $\pm$ 0.8473 & 1.9328 $\pm$ 0.6620 & 1.9766 $\pm$ 1.4692 \\
+ & E4: $+ L_{\mathrm{div}} + L_\omega$ (Full Physics) & 0.1455 $\pm$ 0.0189 & 0.7818 $\pm$ 0.2465 & 2.0637 $\pm$ 0.9234 & 2.2140 $\pm$ 1.2845 & 1.8302 $\pm$ 1.3583 \\
+\midrule
+\multirow{5}{*}{\shortstack[l]{Vorticity RMSE ($\|\omega - \omega^*\|$)}}
+ & E0: Single-Step Pure Field ($H=1$)$^\dagger$ & 0.4882 & 2.5398 & 2.4354 & 2.5371 & 2.9736 \\
+ & E1: Rollout-Aware Field ($H=2$) & 0.4595 $\pm$ 0.0388 & 1.8746 $\pm$ 1.2722 & 3.0814 $\pm$ 1.4725 & 4.2214 $\pm$ 1.7304 & 4.7293 $\pm$ 1.5311 \\
+ & E2: $+ L_{\mathrm{div}}$ (Divergence-Free) & 0.4708 $\pm$ 0.0504 & 1.6928 $\pm$ 1.0645 & 3.2065 $\pm$ 1.4290 & 4.2977 $\pm$ 1.7704 & 4.8253 $\pm$ 1.8539 \\
+ & E3: $+ L_\omega$ (Vorticity-Aware) & 0.2749 $\pm$ 0.0375 & 1.4558 $\pm$ 0.4232 & 3.8788 $\pm$ 1.9190 & 4.5373 $\pm$ 2.2656 & 4.5110 $\pm$ 1.9924 \\
+ & E4: $+ L_{\mathrm{div}} + L_\omega$ (Full Physics) & 0.2847 $\pm$ 0.0345 & 1.4191 $\pm$ 0.4512 & 3.5561 $\pm$ 1.6115 & 3.5439 $\pm$ 1.3137 & 3.9015 $\pm$ 1.3585 \\
+\midrule
+\multirow{5}{*}{\shortstack[l]{Energy Spectrum MAE}}
+ & E0: Single-Step Pure Field ($H=1$)$^\dagger$ & 0.1624 & 0.3198 & 0.3297 & 0.2447 & 0.3383 \\
+ & E1: Rollout-Aware Field ($H=2$) & 0.1672 $\pm$ 0.0214 & 0.3239 $\pm$ 0.1705 & 0.4148 $\pm$ 0.1156 & 0.4971 $\pm$ 0.2324 & 0.5780 $\pm$ 0.2303 \\
+ & E2: $+ L_{\mathrm{div}}$ (Divergence-Free) & 0.1611 $\pm$ 0.0141 & 0.3007 $\pm$ 0.1361 & 0.4285 $\pm$ 0.1240 & 0.4898 $\pm$ 0.2178 & 0.5656 $\pm$ 0.2368 \\
+ & E3: $+ L_\omega$ (Vorticity-Aware) & 0.1193 $\pm$ 0.0168 & 0.2681 $\pm$ 0.0571 & 0.4886 $\pm$ 0.1728 & 0.5360 $\pm$ 0.2360 & 0.6448 $\pm$ 0.3451 \\
+ & E4: $+ L_{\mathrm{div}} + L_\omega$ (Full Physics) & 0.1213 $\pm$ 0.0149 & 0.2693 $\pm$ 0.0687 & 0.4664 $\pm$ 0.1663 & 0.4422 $\pm$ 0.1869 & 0.5144 $\pm$ 0.2342 \\
+\midrule
+\multirow{5}{*}{\shortstack[l]{Enstrophy Rel. Err. ($\frac{|\Omega - \Omega^*|}{\Omega^*}$)}}
+ & E0: Single-Step Pure Field ($H=1$)$^\dagger$ & 0.0375 & 0.5685 & 0.5243 & 0.6556 & 0.9980 \\
+ & E1: Rollout-Aware Field ($H=2$) & 0.0361 $\pm$ 0.0051 & 0.2524 $\pm$ 0.2749 & 0.3336 $\pm$ 0.1779 & 1.1351 $\pm$ 0.7128 & 1.7571 $\pm$ 0.7416 \\
+ & E2: $+ L_{\mathrm{div}}$ (Divergence-Free) & 0.0403 $\pm$ 0.0074 & 0.2078 $\pm$ 0.1637 & 0.3777 $\pm$ 0.1647 & 1.4470 $\pm$ 0.7792 & 2.0484 $\pm$ 1.0889 \\
+ & E3: $+ L_\omega$ (Vorticity-Aware) & 0.0226 $\pm$ 0.0031 & 0.1747 $\pm$ 0.0988 & 0.6683 $\pm$ 0.5219 & 0.8110 $\pm$ 0.7683 & 1.0874 $\pm$ 0.8600 \\
+ & E4: $+ L_{\mathrm{div}} + L_\omega$ (Full Physics) & 0.0250 $\pm$ 0.0073 & 0.1619 $\pm$ 0.0912 & 0.3902 $\pm$ 0.1704 & 0.4355 $\pm$ 0.1243 & 0.5131 $\pm$ 0.2162 \\
+\midrule
+\multirow{5}{*}{\shortstack[l]{Tracer Particle Escape Rate}}
+ & E0: Single-Step Pure Field ($H=1$)$^\dagger$ & 0.0040 & 0.0742 & 0.0661 & 0.3647 & 0.0522 \\
+ & E1: Rollout-Aware Field ($H=2$) & 0.0022 $\pm$ 0.0017 & 0.1398 $\pm$ 0.1002 & 0.1330 $\pm$ 0.0172 & 0.1247 $\pm$ 0.0497 & 0.1819 $\pm$ 0.0953 \\
+ & E2: $+ L_{\mathrm{div}}$ (Divergence-Free) & 0.0057 $\pm$ 0.0046 & 0.1325 $\pm$ 0.1014 & 0.1486 $\pm$ 0.0030 & 0.1259 $\pm$ 0.0507 & 0.1742 $\pm$ 0.1024 \\
+ & E3: $+ L_\omega$ (Vorticity-Aware) & 0.0135 $\pm$ 0.0091 & 0.1807 $\pm$ 0.1546 & 0.1744 $\pm$ 0.0239 & 0.1269 $\pm$ 0.0329 & 0.1523 $\pm$ 0.0589 \\
+ & E4: $+ L_{\mathrm{div}} + L_\omega$ (Full Physics) & 0.0165 $\pm$ 0.0072 & 0.0854 $\pm$ 0.0219 & 0.1544 $\pm$ 0.0279 & 0.0902 $\pm$ 0.0028 & 0.1032 $\pm$ 0.0041 \\
+\bottomrule
+\end{tabular}
+}
+\end{table*}

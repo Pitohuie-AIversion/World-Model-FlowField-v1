@@ -1,0 +1,20 @@
+\begin{table}[t]
+\centering
+\small
+\caption{\textbf{Pretrained Spatial Autoencoder ($4 \times$ Downsampled Latent Space) Representation Performance.} Evaluated on The Well Shear Flow grouped split ($N_{\mathrm{val}}=45, N_{\mathrm{test}}=45$ trajectories).}
+\label{tab:representation_performance}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Flow Variable} & \textbf{Validation RMSE} & \textbf{Validation VRMSE} & \textbf{Test RMSE} & \textbf{Test VRMSE} \\
+\midrule
+Streamwise Velocity ($u$) & 0.0186 & 0.0486 & 0.0221 & 0.0517 \\
+Cross-Stream Velocity ($v$) & 0.0050 & 0.3580 & 0.0062 & 0.0834 \\
+Gauge Pressure ($p$) & 0.0034 & 0.5396 & 0.0046 & 0.1504 \\
+Passive Tracer Concentration ($s$) & 0.0287 & 0.0881 & 0.0232 & 0.1204 \\
+\midrule
+\textbf{Field Mean} & \textbf{0.0139} & \textbf{0.2586} & \textbf{0.0140} & \textbf{0.1015} \\
+Vorticity RMSE ($\|\omega - \omega^*\|$) & \multicolumn{2}{c}{0.2605} & \multicolumn{2}{c}{0.3902} \\
+Zero-Mean Gauge Error ($|\bar{p}|$) & \multicolumn{2}{c}{2.49e-07} & \multicolumn{2}{c}{2.49e-07} \\
+\bottomrule
+\end{tabular}
+\end{table}

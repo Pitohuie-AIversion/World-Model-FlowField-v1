@@ -17,6 +17,7 @@
 !manifests/
 !metrics/
 !splits/
+!tables/
 
 # 严格屏蔽检查点权重、图片与日志产物
 checkpoints/*
@@ -44,3 +45,4 @@ logs/*
 !normalization/*.pt
 !normalization/*.json
 !figures/*.png
+!tables/*.tex
