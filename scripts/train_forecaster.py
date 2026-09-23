@@ -41,6 +41,7 @@ from src.utils.provenance import (
     is_git_dirty,
     compute_split_hash_from_file,
     compute_normalizer_hash,
+    validate_init_checkpoint_contract,
 )
 
 
@@ -331,30 +332,24 @@ def train_forecaster(
 
         init_ckpt = torch.load(init_checkpoint, map_location="cpu")
 
-        # 1. Semantic compatibility check
-        init_model_type = init_ckpt.get("model_type") or init_ckpt.get("config", {}).get("model_type")
-        if init_model_type and init_model_type != model_type:
-            raise ValueError(
-                f"Semantic incompatibility: init_checkpoint has model_type '{init_model_type}', "
-                f"but current training requests model_type '{model_type}'."
-            )
-
-        # 2. Split contract check
-        init_split_hash = init_ckpt.get("split_hash") or init_ckpt.get("config", {}).get("split_hash")
-        if init_split_hash and init_split_hash != "UNKNOWN_SPLIT" and split_hash != "UNKNOWN_SPLIT":
-            if init_split_hash != split_hash:
-                raise ValueError(
-                    f"Data contract violation: init_checkpoint split_hash '{init_split_hash}' "
-                    f"does not match current split_hash '{split_hash}'."
-                )
-
-        # 3. Normalizer contract check
-        init_norm_hash = init_ckpt.get("normalizer_hash") or init_ckpt.get("config", {}).get("normalizer_hash")
-        if init_norm_hash and normalizer_hash and init_norm_hash != normalizer_hash:
-            raise ValueError(
-                f"Data contract violation: init_checkpoint normalizer_hash '{init_norm_hash}' "
-                f"does not match current normalizer_hash '{normalizer_hash}'."
-            )
+        # Enforce fail-closed semantic contract validation for warm-start parent checkpoint
+        validate_init_checkpoint_contract(
+            init_ckpt=init_ckpt,
+            ckpt_path=init_checkpoint,
+            requested_model_type=model_type,
+            current_split_hash=split_hash,
+            current_normalizer_hash=normalizer_hash,
+            expected_seed=seed,
+            expected_horizon=None,  # Horizon can expand in ablation
+            expected_lambda_div=lambda_div,
+            expected_lambda_vort=lambda_vort,
+            expected_protocol=PHYSICS_PROTOCOL,
+            expected_axis_contract=SPATIAL_AXIS_CONTRACT,
+            expected_domain_size=SHEAR_FLOW_DOMAIN_SIZE_XY,
+            expected_prediction_mode=prediction_mode,
+            expected_use_condition=use_condition,
+            fail_closed=True,
+        )
 
         # 4. Load weights strictly into model (without optimizer state)
         state_dict_to_load = init_ckpt.get("model_state_dict") or init_ckpt.get("state_dict") or init_ckpt
@@ -378,8 +373,11 @@ def train_forecaster(
     vort_loss_fn = VorticityLoss(domain_size=(1.0, 2.0)).to(device)
 
     tracker = None
+    long_tracker = None
     if global_rank == 0:
         tracker = BestCheckpointTracker(save_dir=output_dir, metric_name="vrmse_mean", mode="min", keep_top_k=3)
+        if val_diagnostic_horizons and {10, 20, 30}.issubset(set(val_diagnostic_horizons)):
+            long_tracker = BestCheckpointTracker(save_dir=output_dir, metric_name="long_vrmse", mode="min", keep_top_k=3)
         effective_batch_size = batch_size * grad_accum_steps
         diag_info = f" | Diag Horizons: {val_diagnostic_horizons}" if val_diagnostic_horizons else ""
         warm_info = f" | Warm-Start from: {parent_checkpoint_path} (SHA256: {parent_checkpoint_sha256[:8]})" if parent_checkpoint_path else ""
@@ -457,7 +455,9 @@ def train_forecaster(
                     if lambda_vort > 0:
                         loss = loss + lambda_vort * vort_loss_fn(pred_phys, target_phys)
 
-                scaled_loss = loss / grad_accum_steps
+                # Exact accumulation window handling (handles tail microbatches with drop_last=False)
+                chunk_len = min(grad_accum_steps, len(train_loader) - (batch_idx - accum_count))
+                scaled_loss = loss / chunk_len
 
             scaler.scale(scaled_loss).backward()
             accum_count += 1
@@ -638,8 +638,22 @@ def train_forecaster(
             }
             tracker.update(val_criterion, state, epoch)
 
-    if global_rank == 0 and tracker is not None:
-        print(f"Training completed. Best VRMSE: {tracker.best_score:.4f}")
+            # Dual tracking: save true long-best checkpoint if diagnostic horizons are monitored
+            if long_tracker is not None and all(f"val_h{dh}_vrmse" in val_metrics for dh in [10, 20, 30]):
+                j_long = (val_metrics["val_h10_vrmse"] + val_metrics["val_h20_vrmse"] + val_metrics["val_h30_vrmse"]) / 3.0
+                val_metrics["j_long"] = j_long
+                long_state = dict(state)
+                long_state["j_long"] = j_long
+                long_state["selection_criterion"] = "j_long"
+                is_best_long = long_tracker.update(j_long, long_state, epoch)
+                if is_best_long:
+                    print(f"  >>> New Best J_long: {j_long:.4f} (Saved to best_long_vrmse.pt)")
+
+    if global_rank == 0:
+        if tracker is not None:
+            print(f"Training completed. Best VRMSE: {tracker.best_score:.4f}")
+        if long_tracker is not None:
+            print(f"Best J_long: {long_tracker.best_score:.4f} (Saved at best_long_vrmse.pt)")
 
     if is_distributed:
         import torch.distributed as dist

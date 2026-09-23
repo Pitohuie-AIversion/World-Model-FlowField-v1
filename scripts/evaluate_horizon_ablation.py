@@ -28,7 +28,7 @@ if PROJECT_ROOT not in sys.path:
 
 import torch
 from torch.utils.data import DataLoader
-from src.data.pipeline import create_flow_dataloaders
+from src.data.pipeline import create_flow_dataloaders, FieldNormalizer
 from src.metrics.field import evaluate_field_metrics
 from src.models.decoder import Decoder2D
 from src.models.encoder import Encoder2D
@@ -41,7 +41,15 @@ from src.utils.physics_contract import (
     SPATIAL_AXIS_CONTRACT,
     SHEAR_FLOW_DOMAIN_SIZE_XY,
 )
-from src.utils.provenance import get_git_commit, is_git_dirty
+from src.utils.provenance import (
+    get_git_commit,
+    is_git_dirty,
+    compute_file_sha256 as compute_full_sha256,
+    compute_split_hash_from_file,
+    compute_normalizer_hash,
+    resolve_checkpoint_provenance,
+    validate_evaluation_provenance,
+)
 
 
 # ============================================================
@@ -72,13 +80,10 @@ LONG_BEST_REGISTRY = {
 }
 
 
-def compute_file_sha256(path: str, prefix_len: int = 16) -> str:
-    """Compute SHA256 hash of a file, return first prefix_len hex chars."""
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()[:prefix_len]
+def compute_file_sha256(path: str, prefix_len: Optional[int] = 16) -> str:
+    """Compute SHA256 hash of a file, return first prefix_len hex chars (or full if None)."""
+    full = compute_full_sha256(path)
+    return full[:prefix_len] if prefix_len else full
 
 
 def load_forecaster(ckpt_path: str, device: torch.device) -> Tuple[LatentForecaster, dict]:
@@ -277,6 +282,7 @@ def run_evaluation(
     output_file: str = "outputs/metrics/horizon_r1_test_evaluation.json",
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
     include_validation: bool = True,
+    formal: bool = False,
 ):
     """Run the full Horizon-R1 unified evaluation."""
     seed_everything(42)
@@ -284,31 +290,62 @@ def run_evaluation(
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     print("=" * 90)
-    print("HORIZON-R1 UNIFIED TEST-SET EVALUATION")
+    print("HORIZON-R1 UNIFIED TEST-SET EVALUATION" + (" [FORMAL MODE]" if formal else ""))
     print("=" * 90)
 
     # ────────────────────────────────────────────────
-    # 1. Parse training logs for J_long analysis
+    # 0. Formal mode preflight: Fail-closed git cleanliness
     # ────────────────────────────────────────────────
-    print("\n[1/5] Parsing training logs for J_long checkpoint selection...")
+    if formal:
+        dirty = is_git_dirty()
+        if dirty:
+            raise RuntimeError(
+                "Formal evaluation failed-closed: git working tree is dirty (git_dirty=True). "
+                "Publication-grade formal artifacts require a clean git working tree."
+            )
+        print("  [Formal Preflight] Working tree clean (git_dirty=False): PASSED")
+
+    # ────────────────────────────────────────────────
+    # 1. Parse training logs and resolve long-best checkpoints
+    # ────────────────────────────────────────────────
+    print("\n[1/5] Resolving long-best checkpoints...")
     training_data = parse_training_logs()
     long_best_paths = find_long_best_checkpoints(training_data)
 
-    # Update LONG_BEST_REGISTRY with dynamically found paths
+    # Priority 1: Check for true best_long_vrmse.pt saved by training long_tracker
+    for group_dirname, label in [("E4_H2_control", "H2_long"), ("E4_H4", "H4_long"), ("E4_H8", "H8_long")]:
+        direct_long_path = f"{HORIZON_R1_BASE}/{group_dirname}/latent_transformer/best_long_vrmse.pt"
+        if os.path.exists(direct_long_path):
+            print(f"  Found direct long-tracker checkpoint for {label}: {direct_long_path}")
+            LONG_BEST_REGISTRY[label] = direct_long_path
+
+    # Priority 2: Fallback to saved checkpoint with lowest J_long from logs
     label_map = {"H2-control": "H2_long", "H4": "H4_long", "H8": "H8_long"}
     for group, label in label_map.items():
-        if group in long_best_paths and long_best_paths[group]:
-            LONG_BEST_REGISTRY[label] = long_best_paths[group]
+        if label not in LONG_BEST_REGISTRY or not os.path.exists(LONG_BEST_REGISTRY[label]):
+            if group in long_best_paths and long_best_paths[group]:
+                LONG_BEST_REGISTRY[label] = long_best_paths[group]
 
     # ────────────────────────────────────────────────
-    # 2. Load test dataset
+    # 2. Load test dataset with strictly read-only normalizer
     # ────────────────────────────────────────────────
-    print("\n[2/5] Loading test dataset...")
+    print("\n[2/5] Loading test dataset with read-only normalizer...")
     split_file = "outputs/splits/grouped_split.json"
     if not os.path.exists(split_file):
         split_file = "outputs/splits/grouped.json"
 
-    _, val_loader, test_loader, normalizer = create_flow_dataloaders(
+    # Strictly load fitted normalizer in read-only mode so outputs/normalization/ is NEVER touched
+    stats_path = "outputs/normalization/stats_grouped.pt"
+    if not os.path.exists(stats_path):
+        raise FileNotFoundError(f"Required normalizer statistics not found: {stats_path}")
+    normalizer = FieldNormalizer()
+    normalizer.load_state_dict(torch.load(stats_path, weights_only=True, map_location="cpu"))
+    eval_normalizer_hash = compute_normalizer_hash(normalizer)
+    eval_split_hash = compute_split_hash_from_file(split_file)
+    print(f"  Eval Normalizer SHA256: {eval_normalizer_hash[:12]}...")
+    print(f"  Eval Split SHA256:      {eval_split_hash[:12]}...")
+
+    _, val_loader, test_loader, _ = create_flow_dataloaders(
         split_type="grouped",
         split_file=split_file,
         data_root=data_dir,
@@ -319,10 +356,44 @@ def run_evaluation(
         batch_size=2,
         num_workers=0,
         normalize=True,
+        normalizer=normalizer,  # Preloaded normalizer: NEVER touches outputs/normalization/
     )
     print(f"  Test samples: {len(test_loader.dataset)}")
     if val_loader:
         print(f"  Val samples: {len(val_loader.dataset)}")
+
+    def validate_and_record_ckpt(ckpt_path: str, label: str) -> Tuple[str, str]:
+        sha_16 = compute_file_sha256(ckpt_path, prefix_len=16)
+        sha_full = compute_file_sha256(ckpt_path, prefix_len=None)
+        ckpt_data = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        prov = resolve_checkpoint_provenance(ckpt_path, ckpt_data)
+
+        # Enforce fail-closed protocol identity validation
+        validate_evaluation_provenance(
+            ckpt_provenance=prov,
+            eval_split_hash=eval_split_hash,
+            eval_normalizer_hash=eval_normalizer_hash,
+            expected_seed=42,
+            fail_closed=formal,
+        )
+
+        if formal:
+            formal_errors = []
+            if prov.get("physics_protocol") != PHYSICS_PROTOCOL:
+                formal_errors.append(f"Protocol mismatch: expected {PHYSICS_PROTOCOL}, got {prov.get('physics_protocol')}")
+            if prov.get("spatial_axis_contract") != SPATIAL_AXIS_CONTRACT:
+                formal_errors.append(f"Axis mismatch: expected {SPATIAL_AXIS_CONTRACT}, got {prov.get('spatial_axis_contract')}")
+            if list(prov.get("physics_domain_size_xy") or []) != list(SHEAR_FLOW_DOMAIN_SIZE_XY):
+                formal_errors.append(f"Domain mismatch: expected {SHEAR_FLOW_DOMAIN_SIZE_XY}, got {prov.get('physics_domain_size_xy')}")
+            if prov.get("training_git_dirty") is True:
+                formal_errors.append("Checkpoint was trained on a dirty working tree (training_git_dirty=True)")
+            if formal_errors:
+                raise RuntimeError(
+                    f"Formal validation failed for {label} ({ckpt_path}):\n"
+                    + "\n".join(f"  - {e}" for e in formal_errors)
+                )
+
+        return sha_16, sha_full
 
     # ────────────────────────────────────────────────
     # 3. Evaluate parent baseline
@@ -332,12 +403,15 @@ def run_evaluation(
         "eval_horizons": EVAL_HORIZONS,
         "git_commit": get_git_commit(),
         "git_dirty": is_git_dirty(),
+        "formal_evaluation": formal,
+        "eval_split_hash": eval_split_hash,
+        "eval_normalizer_hash": eval_normalizer_hash,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }}
 
     if os.path.exists(PARENT_CKPT):
-        parent_sha = compute_file_sha256(PARENT_CKPT)
-        print(f"  Parent checkpoint SHA256: {parent_sha}")
+        parent_sha16, parent_sha_full = validate_and_record_ckpt(PARENT_CKPT, "parent")
+        print(f"  Parent checkpoint SHA256: {parent_sha16}")
 
         forecaster, cfg = load_forecaster(PARENT_CKPT, device)
 
@@ -346,7 +420,8 @@ def run_evaluation(
         parent_test = evaluate_at_horizons(forecaster, test_loader, device, EVAL_HORIZONS, normalizer)
         results["parent_test"] = parent_test
         results["parent_test"]["__ckpt__"] = PARENT_CKPT
-        results["parent_test"]["__sha256__"] = parent_sha
+        results["parent_test"]["__sha256__"] = parent_sha16
+        results["parent_test"]["__full_sha256__"] = parent_sha_full
 
         # Validation set (for epoch-0 baseline comparison)
         if include_validation and val_loader:
@@ -372,11 +447,12 @@ def run_evaluation(
             continue
 
         print(f"\n  --- {label} ---")
-        sha = compute_file_sha256(ckpt_path)
+        sha16, sha_full = validate_and_record_ckpt(ckpt_path, label)
         forecaster, cfg = load_forecaster(ckpt_path, device)
         test_metrics = evaluate_at_horizons(forecaster, test_loader, device, EVAL_HORIZONS, normalizer)
         test_metrics["__ckpt__"] = ckpt_path
-        test_metrics["__sha256__"] = sha
+        test_metrics["__sha256__"] = sha16
+        test_metrics["__full_sha256__"] = sha_full
         test_metrics["__selection__"] = "short-best (val VRMSE)"
         test_metrics["__training_horizon__"] = int(label.split("_")[0].replace("H", ""))
         results[label] = test_metrics
@@ -404,11 +480,12 @@ def run_evaluation(
                 continue
 
         print(f"\n  --- {label} ---")
-        sha = compute_file_sha256(ckpt_path)
+        sha16, sha_full = validate_and_record_ckpt(ckpt_path, label)
         forecaster, cfg = load_forecaster(ckpt_path, device)
         test_metrics = evaluate_at_horizons(forecaster, test_loader, device, EVAL_HORIZONS, normalizer)
         test_metrics["__ckpt__"] = ckpt_path
-        test_metrics["__sha256__"] = sha
+        test_metrics["__sha256__"] = sha16
+        test_metrics["__full_sha256__"] = sha_full
         test_metrics["__selection__"] = "long-best (J_long)"
         results[label] = test_metrics
 
@@ -478,6 +555,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_file", type=str, default="outputs/metrics/horizon_r1_test_evaluation.json")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--no_validation", action="store_true", help="Skip parent validation baseline")
+    parser.add_argument("--formal", action="store_true", help="Enforce fail-closed provenance validation and clean git state")
     args = parser.parse_args()
 
     run_evaluation(
@@ -485,4 +563,5 @@ if __name__ == "__main__":
         output_file=args.output_file,
         device_str=args.device,
         include_validation=not args.no_validation,
+        formal=args.formal,
     )

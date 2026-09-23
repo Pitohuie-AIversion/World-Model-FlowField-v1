@@ -413,3 +413,127 @@ class TestJLongCriterion:
                 assert h_key in results[label], f"Missing {h_key} in {label}"
                 assert "vrmse_mean" in results[label][h_key], f"Missing vrmse_mean in {label}/{h_key}"
 
+
+# ============================================================
+# Component 5: Provenance Hardening & True Long-Best Tests
+# ============================================================
+
+class TestProvenanceHardeningAndDualTracker:
+    """Tests for true long-best tracking, formal evaluation, and accumulation math."""
+
+    def test_true_long_best_tracker_preserves_early_optimum(self, tmp_path):
+        """Verify BestCheckpointTracker with metric_name='long_vrmse' preserves Epoch 1.
+
+        Even when later epochs have better short-metric VRMSE, best_long_vrmse.pt
+        must remain at Epoch 1 if Epoch 1 has the lowest J_long.
+        """
+        from src.utils.checkpoint import BestCheckpointTracker
+
+        short_tracker = BestCheckpointTracker(str(tmp_path / "short"), metric_name="vrmse_mean", keep_top_k=2)
+        long_tracker = BestCheckpointTracker(str(tmp_path / "long"), metric_name="long_vrmse", keep_top_k=2)
+
+        # Epoch 1: High short-loss, but lowest J_long (like H8 in actual training!)
+        state_ep1 = {"epoch": 1, "model": "mock_ep1"}
+        short_tracker.update(0.30, state_ep1, step_or_epoch=1)
+        long_tracker.update(2.08, state_ep1, step_or_epoch=1)
+
+        # Epoch 2: Low short-loss, but high J_long
+        state_ep2 = {"epoch": 2, "model": "mock_ep2"}
+        short_tracker.update(0.20, state_ep2, step_or_epoch=2)
+        long_tracker.update(4.50, state_ep2, step_or_epoch=2)
+
+        # Epoch 3: Lowest short-loss, intermediate J_long
+        state_ep3 = {"epoch": 3, "model": "mock_ep3"}
+        short_tracker.update(0.15, state_ep3, step_or_epoch=3)
+        long_tracker.update(3.80, state_ep3, step_or_epoch=3)
+
+        # Verify best_long_vrmse.pt still points to Epoch 1!
+        best_long_file = tmp_path / "long" / "best_long_vrmse.pt"
+        assert best_long_file.exists(), "best_long_vrmse.pt should exist"
+        best_long_ckpt = torch.load(best_long_file, map_location="cpu")
+        assert best_long_ckpt["epoch"] == 1, (
+            f"best_long_vrmse.pt must preserve Epoch 1 (J_long=2.08), got epoch={best_long_ckpt['epoch']}"
+        )
+
+        # Verify short tracker correctly selected Epoch 3
+        best_short_file = tmp_path / "short" / "best_vrmse_mean.pt"
+        assert best_short_file.exists()
+        best_short_ckpt = torch.load(best_short_file, map_location="cpu")
+        assert best_short_ckpt["epoch"] == 3
+
+    def test_tail_accumulation_chunk_len_math(self):
+        """Verify tail microbatch gradient accumulation chunk size math.
+
+        For any dataloader length and grad_accum_steps, each microbatch must be
+        divided by the exact chunk length so total weighting is mathematically balanced.
+        """
+        total_batches = 10
+        grad_accum_steps = 4
+
+        accum_count = 0
+        chunks = []
+        current_chunk_weights = []
+
+        for batch_idx in range(total_batches):
+            chunk_len = min(grad_accum_steps, total_batches - (batch_idx - accum_count))
+            weight = 1.0 / chunk_len
+            current_chunk_weights.append(weight)
+            accum_count += 1
+
+            if accum_count == grad_accum_steps or (batch_idx + 1) == total_batches:
+                # Optimizer step occurs
+                assert abs(sum(current_chunk_weights) - 1.0) < 1e-7, (
+                    f"Chunk weights must sum to exactly 1.0, got {sum(current_chunk_weights)}"
+                )
+                chunks.append((len(current_chunk_weights), chunk_len))
+                accum_count = 0
+                current_chunk_weights = []
+
+        assert len(chunks) == 3  # Chunks of size 4, 4, 2
+        assert chunks[0] == (4, 4)
+        assert chunks[1] == (4, 4)
+        assert chunks[2] == (2, 2)
+
+    def test_validate_init_checkpoint_contract_catches_violations(self):
+        """Verify validate_init_checkpoint_contract rejects invalid warm-start checkpoints."""
+        from src.utils.provenance import validate_init_checkpoint_contract
+
+        # Corrupt model type
+        bad_ckpt = {
+            "model_type": "fno",
+            "seed": 42,
+            "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+            "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+        }
+        with pytest.raises(ValueError, match="Model type mismatch"):
+            validate_init_checkpoint_contract(
+                bad_ckpt,
+                requested_model_type="latent_transformer",
+                fail_closed=True,
+            )
+
+        # Corrupt seed
+        bad_seed_ckpt = {
+            "model_type": "latent_transformer",
+            "seed": 999,
+            "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+            "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+        }
+        with pytest.raises(ValueError, match="Seed contract violation"):
+            validate_init_checkpoint_contract(
+                bad_seed_ckpt,
+                requested_model_type="latent_transformer",
+                expected_seed=42,
+                fail_closed=True,
+            )
+
+    def test_formal_evaluation_flag_presence(self):
+        """Verify evaluate_horizon_ablation.py exposes --formal in argparse."""
+        import subprocess
+
+        cmd = [sys.executable, "scripts/evaluate_horizon_ablation.py", "--help"]
+        res = subprocess.run(cmd, capture_output=True, text=True, cwd=PROJECT_ROOT)
+        assert res.returncode == 0
+        assert "--formal" in res.stdout
+
+

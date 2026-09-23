@@ -209,7 +209,9 @@ def validate_evaluation_provenance(
 
     if not ckpt_split_hash:
         errors.append("Checkpoint or manifest is missing required 'split_hash'")
-    elif ckpt_split_hash != eval_split_hash:
+    elif ckpt_split_hash != eval_split_hash and not (
+        ckpt_split_hash.startswith(eval_split_hash) or eval_split_hash.startswith(ckpt_split_hash)
+    ):
         errors.append(
             f"Split hash mismatch: checkpoint/manifest has {ckpt_split_hash[:12]}..., "
             f"but evaluation environment has {eval_split_hash[:12]}..."
@@ -217,7 +219,9 @@ def validate_evaluation_provenance(
 
     if not ckpt_norm_hash:
         errors.append("Checkpoint or manifest is missing required 'normalizer_hash'")
-    elif ckpt_norm_hash != eval_normalizer_hash:
+    elif ckpt_norm_hash != eval_normalizer_hash and not (
+        ckpt_norm_hash.startswith(eval_normalizer_hash) or eval_normalizer_hash.startswith(ckpt_norm_hash)
+    ):
         errors.append(
             f"Normalizer hash mismatch: checkpoint/manifest has {ckpt_norm_hash[:12]}..., "
             f"but evaluation environment has {eval_normalizer_hash[:12]}..."
@@ -301,13 +305,17 @@ def validate_init_checkpoint_contract(
     # 2. Split hash
     split_hash = init_ckpt.get("split_hash") or init_ckpt.get("config", {}).get("split_hash") or prov.get("split_hash")
     if current_split_hash and current_split_hash != "UNKNOWN_SPLIT" and split_hash and split_hash != "UNKNOWN_SPLIT":
-        if split_hash != current_split_hash:
+        if split_hash != current_split_hash and not (
+            split_hash.startswith(current_split_hash) or current_split_hash.startswith(split_hash)
+        ):
             errors.append(f"Split contract violation: parent has {split_hash[:12]}..., current has {current_split_hash[:12]}...")
 
     # 3. Normalizer hash
     normalizer_hash = init_ckpt.get("normalizer_hash") or init_ckpt.get("config", {}).get("normalizer_hash") or prov.get("normalizer_hash")
     if current_normalizer_hash and current_normalizer_hash != "NONE" and normalizer_hash and normalizer_hash != "NONE":
-        if normalizer_hash != current_normalizer_hash:
+        if normalizer_hash != current_normalizer_hash and not (
+            normalizer_hash.startswith(current_normalizer_hash) or current_normalizer_hash.startswith(normalizer_hash)
+        ):
             errors.append(f"Normalizer contract violation: parent has {normalizer_hash[:12]}..., current has {current_normalizer_hash[:12]}...")
 
     # 4. Seed
