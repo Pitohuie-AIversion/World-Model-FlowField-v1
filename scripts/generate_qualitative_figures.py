@@ -34,6 +34,7 @@ from src.models.latent_forecaster import LatentForecaster
 from src.models.latent_transformer import LatentSTTransformer
 from src.utils.fft_derivatives import compute_vorticity
 from src.utils.physics_contract import (
+    ABLATION_SEMANTIC_SPECS,
     PHYSICS_PROTOCOL,
     SPATIAL_AXIS_CONTRACT,
     SHEAR_FLOW_DOMAIN_SIZE_XY,
@@ -68,9 +69,87 @@ VARIABLE_DISPLAY_TITLES = {
     "vorticity": r"Vorticity $\omega = \partial_x v - \partial_y u$",
 }
 
+MODEL_DISPLAY_NAMES = {
+    "parent": "Parent Baseline",
+    "parent_baseline": "Parent Baseline",
+    "Parent Baseline": "Parent Baseline",
+    "parent_test": "Parent Baseline",
+    "baseline": "Parent Baseline",
+    "h8": "H8 Saved Long-Best",
+    "h8_long": "H8 Saved Long-Best",
+    "h8_saved_long_best": "H8 Saved Long-Best",
+    "H8_saved_long_best": "H8 Saved Long-Best",
+    "H8 Saved Long-Best": "H8 Saved Long-Best",
+    "E4_H8_long": "H8 Saved Long-Best",
+    "E4_H8": "E4-H8 (Horizon=8)",
+    "E4_H4": "E4-H4 (Horizon=4)",
+    "E4_H2_control": "E4-H2 Control",
+    "E4_full_physics": "Parent Baseline (E4-H2)",
+    "E1_rollout_field": "E1 Rollout Field",
+    "E0_single_step": "E0 Single Step",
+}
+
+
+def get_model_display_name(grp: str) -> str:
+    """Return user-friendly display name for a model group or checkpoint."""
+    if grp in MODEL_DISPLAY_NAMES:
+        return MODEL_DISPLAY_NAMES[grp]
+    grp_lower = grp.lower().replace("-", "_").replace(" ", "_")
+    if grp_lower in MODEL_DISPLAY_NAMES:
+        return MODEL_DISPLAY_NAMES[grp_lower]
+    return grp
+
 
 def resolve_group_checkpoint_path(grp: str, seed: int) -> str:
     """Resolve checkpoint path for a group and seed with strict fail-closed check."""
+    # 1. Direct file path
+    if os.path.isfile(grp):
+        return grp
+
+    # 2. Known semantic aliases
+    grp_clean = grp.strip()
+    grp_lower = grp_clean.lower().replace("-", "_").replace(" ", "_")
+
+    if grp_lower in ("parent", "parent_baseline", "parent_test", "baseline"):
+        candidate_paths = [
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt",
+            f"outputs/checkpoints/dynamics/closure_r4/seed_{seed}/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt",
+            "outputs/checkpoints/dynamics/closure_r4/ablation_E4_full_physics/best_vrmse_mean.pt",
+        ]
+        for p in candidate_paths:
+            if os.path.exists(p):
+                return p
+        raise FileNotFoundError(f"Parent Baseline checkpoint not found in {candidate_paths}")
+
+    if grp_lower in ("h8_saved_long_best", "h8_long", "h8", "e4_h8_long", "h8_long_best"):
+        candidate_paths = [
+            f"outputs/checkpoints/dynamics/horizon_r1/seed_{seed}/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+            "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+            f"outputs/checkpoints/dynamics/horizon_r1/seed_{seed}/E4_H8/latent_transformer/best_long_vrmse.pt",
+            f"outputs/checkpoints/dynamics/horizon_r1/seed_{seed}/E4_H8/latent_transformer/best_vrmse_mean.pt",
+        ]
+        for p in candidate_paths:
+            if os.path.exists(p):
+                return p
+        raise FileNotFoundError(f"H8 Saved Long-Best checkpoint not found in {candidate_paths}")
+
+    if grp_lower in ("h4_long", "e4_h4_long"):
+        p = f"outputs/checkpoints/dynamics/horizon_r1/seed_{seed}/E4_H4/latent_transformer/checkpoint_step_7_vrmse_mean_0.1594.pt"
+        if os.path.exists(p):
+            return p
+
+    if grp_lower in ("h2_long", "e4_h2_long"):
+        p = f"outputs/checkpoints/dynamics/horizon_r1/seed_{seed}/E4_H2_control/latent_transformer/checkpoint_step_9_vrmse_mean_0.1394.pt"
+        if os.path.exists(p):
+            return p
+
+    # Horizon-R1 standard groups
+    if grp in ("E4_H8", "E4_H4", "E4_H2_control"):
+        p = f"outputs/checkpoints/dynamics/horizon_r1/seed_{seed}/{grp}/latent_transformer/best_vrmse_mean.pt"
+        if os.path.exists(p):
+            return p
+
+    # Closure-R4 groups
     if grp == "E0_single_step":
         candidate_paths = [
             "outputs/checkpoints/dynamics/closure_r4/ablation_E0_single_step/latent_transformer/best_vrmse_mean.pt",
@@ -110,11 +189,37 @@ def load_and_validate_forecaster(
     if not os.path.exists(ckpt_path):
         raise FileNotFoundError(f"Checkpoint does not exist: {ckpt_path}")
 
-    ckpt_data = torch.load(ckpt_path, map_location="cpu")
+    ckpt_data = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     cfg = ckpt_data.get("config", {})
 
+    grp_clean = grp.strip()
+    grp_lower = grp_clean.lower().replace("-", "_").replace(" ", "_")
+
     # 1. Semantics validation: verify physics protocol and architecture contracts
-    validate_ablation_checkpoint_semantics(grp, cfg, is_legacy=False)
+    if grp in ABLATION_SEMANTIC_SPECS:
+        validate_ablation_checkpoint_semantics(grp, cfg, is_legacy=False)
+    elif grp_lower in ("parent", "parent_baseline", "parent_test", "baseline"):
+        validate_ablation_checkpoint_semantics("E4_full_physics", cfg, is_legacy=False)
+    elif "h8" in grp_lower:
+        ckpt_h = cfg.get("horizon", ckpt_data.get("horizon"))
+        if ckpt_h != 8:
+            raise ValueError(f"H8 model semantic violation: expected horizon=8, got {ckpt_h}")
+        if not math.isclose(float(cfg.get("lambda_div", 0.0)), 0.01, abs_tol=1e-5):
+            raise ValueError(f"H8 model semantic violation: expected lambda_div=0.01, got {cfg.get('lambda_div')}")
+        if not math.isclose(float(cfg.get("lambda_vort", 0.0)), 0.05, abs_tol=1e-5):
+            raise ValueError(f"H8 model semantic violation: expected lambda_vort=0.05, got {cfg.get('lambda_vort')}")
+        if cfg.get("physics_protocol") != PHYSICS_PROTOCOL:
+            raise ValueError(f"H8 model semantic violation: expected protocol={PHYSICS_PROTOCOL}, got {cfg.get('physics_protocol')}")
+    elif "h4" in grp_lower:
+        if cfg.get("horizon", ckpt_data.get("horizon")) != 4:
+            raise ValueError(f"H4 model semantic violation: expected horizon=4, got {cfg.get('horizon')}")
+    elif "h2" in grp_lower:
+        if cfg.get("horizon", ckpt_data.get("horizon")) != 2:
+            raise ValueError(f"H2 model semantic violation: expected horizon=2, got {cfg.get('horizon')}")
+    else:
+        # Fallback to standard validation if possible
+        if grp in ABLATION_SEMANTIC_SPECS:
+            validate_ablation_checkpoint_semantics(grp, cfg, is_legacy=False)
 
     # 2. Checkpoint provenance resolution
     ckpt_prov = resolve_checkpoint_provenance(
@@ -147,14 +252,19 @@ def load_and_validate_forecaster(
 
     encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
     decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=False)
+    emb_dim = cfg.get("embed_dim", ckpt_data.get("embed_dim", 256))
+    depth = cfg.get("depth", ckpt_data.get("depth", 6))
+    num_heads = cfg.get("num_heads", ckpt_data.get("num_heads", 8))
+    pred_mode = cfg.get("prediction_mode", ckpt_data.get("prediction_mode", "direct"))
+
     transformer = LatentSTTransformer(
         latent_channels=64,
-        embed_dim=cfg.get("embed_dim", 256),
+        embed_dim=emb_dim,
         cond_dim=128,
-        depth=cfg.get("depth", 6),
-        num_heads=cfg.get("num_heads", 8),
+        depth=depth,
+        num_heads=num_heads,
         history_length=4,
-        prediction_mode=cfg.get("prediction_mode", "direct"),
+        prediction_mode=pred_mode,
     )
     forecaster = LatentForecaster(encoder=encoder, transformer=transformer, decoder=decoder).to(device)
 
@@ -289,6 +399,7 @@ def generate_panel_figure(
 
     cmap, vmin, vmax = get_colormap_and_norm(var_name, input_field, pred_field, gt_field)
     err_cmap = "inferno"
+    model_name = get_model_display_name(group)
 
     fig, axes = plt.subplots(1, 4, figsize=(20, 5), dpi=200)
 
@@ -301,7 +412,7 @@ def generate_panel_figure(
 
     # 2. Prediction (t=h)
     im1 = axes[1].imshow(pred_field.T, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax, aspect="auto")
-    axes[1].set_title(f"Prediction ($t={horizon}$)\n{group}", fontsize=12)
+    axes[1].set_title(f"Prediction ($t={horizon}$)\n{model_name}", fontsize=12)
     axes[1].set_xlabel("x (Streamwise)")
     plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
@@ -319,7 +430,7 @@ def generate_panel_figure(
 
     var_title = VARIABLE_DISPLAY_TITLES.get(var_name, var_name)
     fig.suptitle(
-        f"Qualitative Rollout Field Verification — {var_title} | Seed {seed} | Sample #{sample_index} | Horizon $h={horizon}$",
+        f"Qualitative Rollout Field Verification — Model: {model_name} | Horizon: $h={horizon}$ | Variable: {var_title} (${var_name}$) | Seed: {seed} | Sample #{sample_index}",
         fontsize=14,
         fontweight="bold",
         y=1.03,
@@ -333,14 +444,26 @@ def generate_panel_figure(
     meta_record = {
         "figure_type": "panel",
         "figure_path": out_path,
-        "seed": seed,
+        "model": model_name,
         "group": group,
+        "seed": seed,
         "sample_index": sample_index,
         "horizon": horizon,
         "variable": var_name,
         "error_type": "absolute_error",
         "mae": mae,
         "max_err": max_err,
+        "colorbar_norm": {
+            "cmap": cmap,
+            "vmin": vmin,
+            "vmax": vmax,
+            "shared_across": ["Input", "Prediction", "Ground Truth"],
+        },
+        "error_colorbar_norm": {
+            "cmap": err_cmap,
+            "vmin": 0.0,
+            "vmax": max_err,
+        },
         "timestamp": datetime.datetime.now().isoformat(),
         **meta_info,
     }
@@ -366,6 +489,7 @@ def generate_multihorizon_figure(
     all_phys = list(pred_fields_by_h.values()) + list(gt_fields_by_h.values())
     cmap, vmin, vmax = get_colormap_and_norm(var_name, *all_phys)
     err_cmap = "inferno"
+    model_name = get_model_display_name(group)
 
     n_cols = len(horizons)
     fig, axes = plt.subplots(3, n_cols, figsize=(5.5 * n_cols, 11), dpi=200)
@@ -373,17 +497,21 @@ def generate_multihorizon_figure(
         axes = axes[:, np.newaxis]
 
     maes_by_h = {}
+    max_errs_by_h = {}
+    unified_max_err = max(float(np.max(np.abs(pred_fields_by_h[h] - gt_fields_by_h[h]))) for h in horizons)
+
     for col_idx, h in enumerate(horizons):
         pred_h = pred_fields_by_h[h]
         gt_h = gt_fields_by_h[h]
         abs_err = np.abs(pred_h - gt_h)
         maes_by_h[h] = float(np.mean(abs_err))
+        max_errs_by_h[h] = float(np.max(abs_err))
 
         # Row 0: Prediction
         im0 = axes[0, col_idx].imshow(pred_h.T, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax, aspect="auto")
         axes[0, col_idx].set_title(f"Prediction ($t={h}$)", fontsize=13)
         if col_idx == 0:
-            axes[0, col_idx].set_ylabel(f"Prediction\n({group})", fontsize=12)
+            axes[0, col_idx].set_ylabel(f"Prediction\n({model_name})", fontsize=12)
         plt.colorbar(im0, ax=axes[0, col_idx], fraction=0.046, pad=0.04)
 
         # Row 1: Ground Truth
@@ -394,16 +522,17 @@ def generate_multihorizon_figure(
         plt.colorbar(im1, ax=axes[1, col_idx], fraction=0.046, pad=0.04)
 
         # Row 2: Error
-        im2 = axes[2, col_idx].imshow(abs_err.T, origin="lower", cmap=err_cmap, vmin=0, aspect="auto")
-        axes[2, col_idx].set_title(f"Error ($t={h}$)\nMAE: {maes_by_h[h]:.4f}", fontsize=13)
+        im2 = axes[2, col_idx].imshow(abs_err.T, origin="lower", cmap=err_cmap, vmin=0, vmax=unified_max_err, aspect="auto")
+        axes[2, col_idx].set_title(f"Error ($t={h}$)\nMAE: {maes_by_h[h]:.4f} | Max: {max_errs_by_h[h]:.4f}", fontsize=13)
         axes[2, col_idx].set_xlabel("x (Streamwise)", fontsize=11)
         if col_idx == 0:
             axes[2, col_idx].set_ylabel("Absolute Error\n($|\\mathrm{Pred} - \\mathrm{GT}|$)", fontsize=12)
         plt.colorbar(im2, ax=axes[2, col_idx], fraction=0.046, pad=0.04)
 
     var_title = VARIABLE_DISPLAY_TITLES.get(var_name, var_name)
+    h_str = ", ".join(str(h) for h in horizons)
     fig.suptitle(
-        f"Multi-Horizon Autoregressive Rollout Degradation — {var_title} | Model: {group} (Seed {seed}) | Sample #{sample_index}",
+        f"Multi-Step Rollout Evolution — Model: {model_name} | Horizons: $h \\in \\{{{h_str}\\}}$ | Variable: {var_title} (${var_name}$) | Seed: {seed} | Sample #{sample_index}",
         fontsize=15,
         fontweight="bold",
         y=1.02,
@@ -417,13 +546,27 @@ def generate_multihorizon_figure(
     meta_record = {
         "figure_type": "multihorizon",
         "figure_path": out_path,
-        "seed": seed,
+        "model": model_name,
         "group": group,
+        "seed": seed,
         "sample_index": sample_index,
         "horizons": horizons,
         "variable": var_name,
         "error_type": "absolute_error",
         "maes_by_horizon": maes_by_h,
+        "max_err_by_horizon": max_errs_by_h,
+        "colorbar_norm": {
+            "cmap": cmap,
+            "vmin": vmin,
+            "vmax": vmax,
+            "shared_across": "All Prediction and Ground Truth subplots",
+        },
+        "error_colorbar_norm": {
+            "cmap": err_cmap,
+            "vmin": 0.0,
+            "vmax": unified_max_err,
+            "shared_across": "All Absolute Error subplots",
+        },
         "timestamp": datetime.datetime.now().isoformat(),
         **meta_info,
     }
@@ -450,34 +593,47 @@ def generate_compare_figure(
     cmap, vmin, vmax = get_colormap_and_norm(var_name, *all_phys)
     err_cmap = "inferno"
 
-    # Layout: Row 0: Ground Truth (large on left) or 1 row per model
-    # Elegant, clean layout: N_models rows, 3 columns: [Ground Truth, Model Pred, Model Error]
     n_models = len(groups)
     fig, axes = plt.subplots(n_models, 3, figsize=(16, 4.5 * n_models), dpi=200)
     if n_models == 1:
         axes = axes[np.newaxis, :]
 
     maes_by_grp = {}
+    max_err_by_grp = {}
+    unified_max_err = max(float(np.max(np.abs(p - gt_field))) for p in pred_fields_by_grp.values())
+
+    model_display_names = [get_model_display_name(grp) for grp in groups]
+
     for row_idx, grp in enumerate(groups):
+        model_disp = model_display_names[row_idx]
         pred = pred_fields_by_grp[grp]
         abs_err = np.abs(pred - gt_field)
         mae = float(np.mean(abs_err))
+        max_err = float(np.max(abs_err))
         maes_by_grp[grp] = mae
+        max_err_by_grp[grp] = max_err
 
         # Col 0: Ground Truth
         im0 = axes[row_idx, 0].imshow(gt_field.T, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax, aspect="auto")
         axes[row_idx, 0].set_title(f"Ground Truth ($t={horizon}$)", fontsize=12)
-        axes[row_idx, 0].set_ylabel(f"{grp}", fontsize=12, fontweight="bold")
+        axes[row_idx, 0].set_ylabel(f"{model_disp}", fontsize=12, fontweight="bold")
         plt.colorbar(im0, ax=axes[row_idx, 0], fraction=0.046, pad=0.04)
 
         # Col 1: Model Prediction
         im1 = axes[row_idx, 1].imshow(pred.T, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax, aspect="auto")
-        axes[row_idx, 1].set_title(f"Prediction ($t={horizon}$)\n{grp}", fontsize=12)
+        axes[row_idx, 1].set_title(f"Prediction ($t={horizon}$)\n{model_disp}", fontsize=12)
         plt.colorbar(im1, ax=axes[row_idx, 1], fraction=0.046, pad=0.04)
 
-        # Col 2: Model Absolute Error
-        im2 = axes[row_idx, 2].imshow(abs_err.T, origin="lower", cmap=err_cmap, vmin=0, aspect="auto")
-        axes[row_idx, 2].set_title(f"Absolute Error\nMAE: {mae:.4f} | Max: {abs_err.max():.4f}", fontsize=12)
+        # Col 2: Model Absolute Error (shared scale for direct visual contrast)
+        im2 = axes[row_idx, 2].imshow(abs_err.T, origin="lower", cmap=err_cmap, vmin=0, vmax=unified_max_err, aspect="auto")
+        
+        # If second row in a 2-model comparison, show improvement relative to first model
+        if row_idx == 1 and n_models == 2 and groups[0] in maes_by_grp:
+            base_mae = maes_by_grp[groups[0]]
+            impr_pct = (base_mae - mae) / (base_mae + 1e-8) * 100.0
+            axes[row_idx, 2].set_title(f"Absolute Error\nMAE: {mae:.4f} | Max: {max_err:.4f} (Impr: {impr_pct:+.1f}%)", fontsize=12)
+        else:
+            axes[row_idx, 2].set_title(f"Absolute Error\nMAE: {mae:.4f} | Max: {max_err:.4f}", fontsize=12)
         plt.colorbar(im2, ax=axes[row_idx, 2], fraction=0.046, pad=0.04)
 
         if row_idx == n_models - 1:
@@ -485,8 +641,9 @@ def generate_compare_figure(
                 axes[row_idx, c].set_xlabel("x (Streamwise)", fontsize=11)
 
     var_title = VARIABLE_DISPLAY_TITLES.get(var_name, var_name)
+    models_header = " vs ".join(model_display_names)
     fig.suptitle(
-        f"Comparative Model Invariant & Rollout Verification — {var_title} | Horizon $t={horizon}$ | Seed {seed} | Sample #{sample_index}",
+        f"Comparative Rollout Verification — Models: {models_header} | Horizon: $h={horizon}$ | Variable: {var_title} (${var_name}$) | Seed: {seed} | Sample #{sample_index}",
         fontsize=15,
         fontweight="bold",
         y=1.02,
@@ -495,18 +652,40 @@ def generate_compare_figure(
     plt.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
+    # Compute comparative improvement metric if comparing 2 models
+    improvement_pct = None
+    if n_models == 2:
+        m0 = maes_by_grp[groups[0]]
+        m1 = maes_by_grp[groups[1]]
+        improvement_pct = (m0 - m1) / (m0 + 1e-8) * 100.0
+
     # Write companion metadata JSON
     meta_json_path = out_path.replace(".png", "_metadata.json")
     meta_record = {
         "figure_type": "compare",
         "figure_path": out_path,
         "seed": seed,
+        "compare_models": model_display_names,
         "compare_groups": groups,
         "sample_index": sample_index,
         "horizon": horizon,
         "variable": var_name,
         "error_type": "absolute_error",
         "maes_by_group": maes_by_grp,
+        "max_err_by_group": max_err_by_grp,
+        "improvement_pct": improvement_pct,
+        "colorbar_norm": {
+            "cmap": cmap,
+            "vmin": vmin,
+            "vmax": vmax,
+            "shared_across": "Ground Truth and all Model Predictions",
+        },
+        "error_colorbar_norm": {
+            "cmap": err_cmap,
+            "vmin": 0.0,
+            "vmax": unified_max_err,
+            "shared_across": "All comparative error panels",
+        },
         "timestamp": datetime.datetime.now().isoformat(),
         **meta_info,
     }
@@ -600,6 +779,9 @@ def generate_qualitative_suite(
     allow_dirty: bool = False,
     device_str: str = "cuda" if torch.cuda.is_available() else "cpu",
     plot_types: Optional[List[str]] = None,
+    panel_output_path: Optional[str] = None,
+    multihorizon_output_path: Optional[str] = None,
+    compare_output_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute complete qualitative visualization workflow with provenance guarantees."""
     seed_everything(seed)
@@ -634,6 +816,12 @@ def generate_qualitative_suite(
 
     # 2. Data loader & split provenance
     print(f"Loading test split from {split_file} (max horizon: {max_h})...")
+    normalizer = None
+    stats_path = "outputs/normalization/stats_grouped.pt"
+    if os.path.exists(stats_path):
+        normalizer = FieldNormalizer()
+        normalizer.load_state_dict(torch.load(stats_path, weights_only=True, map_location="cpu"))
+
     _, _, test_loader, normalizer = create_flow_dataloaders(
         split_type="grouped",
         split_file=split_file,
@@ -645,6 +833,7 @@ def generate_qualitative_suite(
         batch_size=1,
         num_workers=0,
         normalize=True,
+        normalizer=normalizer,
     )
     test_dataset = test_loader.dataset
     eval_split_hash = compute_split_hash_from_file(split_file) if os.path.exists(split_file) else "UNKNOWN"
@@ -727,7 +916,7 @@ def generate_qualitative_suite(
 
     # Output A: Panel figure
     if "panel" in plot_types:
-        panel_path = os.path.join(
+        panel_path = panel_output_path or os.path.join(
             output_dir,
             f"qual_case_seed{seed}_{group}_h{panel_h}_{variable}_panel.png",
         )
@@ -755,7 +944,7 @@ def generate_qualitative_suite(
 
     # Output B: Multi-horizon figure
     if "multihorizon" in plot_types:
-        mh_path = os.path.join(
+        mh_path = multihorizon_output_path or os.path.join(
             output_dir,
             f"qual_case_seed{seed}_{group}_{variable}_multihorizon.png",
         )
@@ -783,9 +972,10 @@ def generate_qualitative_suite(
     # Output C: Comparative figure across models
     if "compare" in plot_types:
         compare_h = 30 if 30 in horizons else horizons[-1]
-        compare_path = os.path.join(
+        compare_tag = "_vs_".join(compare_groups)
+        compare_path = compare_output_path or os.path.join(
             output_dir,
-            f"qual_case_seed{seed}_compare_h{compare_h}_{variable}.png",
+            f"qual_case_seed{seed}_compare_{compare_tag}_h{compare_h}_{variable}.png",
         )
 
         compare_preds = {}
@@ -903,6 +1093,16 @@ def main():
         choices=["panel", "multihorizon", "compare", "all"],
         help="Plot types to generate.",
     )
+    parser.add_argument("--panel_output_path", type=str, default=None, help="Explicit path for panel figure.")
+    parser.add_argument("--multihorizon_output_path", type=str, default=None, help="Explicit path for multihorizon figure.")
+    parser.add_argument("--compare_output_path", type=str, default=None, help="Explicit path for comparative figure.")
+    parser.add_argument(
+        "--preset",
+        type=str,
+        default=None,
+        choices=["h8_long_eval"],
+        help="Preset configuration profile (e.g. h8_long_eval).",
+    )
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
     parser.add_argument("--split_file", type=str, default="outputs/splits/grouped_split.json")
     parser.add_argument("--output_dir", type=str, default="outputs/figures/qualitative")
@@ -912,6 +1112,22 @@ def main():
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
 
     args = parser.parse_args()
+
+    # Handle preset configuration
+    if args.preset == "h8_long_eval":
+        args.group = "H8_saved_long_best"
+        args.compare_groups = ["parent", "H8_saved_long_best"]
+        args.horizons = [1, 5, 10, 20, 30]
+        args.panel_horizon = 30
+        args.variable = "u"
+        args.seed = 42
+        args.sample_index = 0
+        if not args.panel_output_path:
+            args.panel_output_path = os.path.join(args.output_dir, "h8_saved_long_best_seed42_h30_u_panel.png")
+        if not args.compare_output_path:
+            args.compare_output_path = os.path.join(args.output_dir, "compare_parent_vs_h8_seed42_h30_u.png")
+        if not args.multihorizon_output_path:
+            args.multihorizon_output_path = os.path.join(args.output_dir, "h8_saved_long_best_seed42_multistep_evolution_u.png")
 
     res = generate_qualitative_suite(
         seed=args.seed,
@@ -931,6 +1147,9 @@ def main():
         allow_dirty=args.allow_dirty,
         device_str=args.device,
         plot_types=args.plot_types,
+        panel_output_path=args.panel_output_path,
+        multihorizon_output_path=args.multihorizon_output_path,
+        compare_output_path=args.compare_output_path,
     )
     print(f"\nCompleted successfully: {len(res['figures'])} figures created.")
 

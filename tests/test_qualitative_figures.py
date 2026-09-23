@@ -15,6 +15,7 @@ from scripts.generate_qualitative_figures import (
     resolve_group_checkpoint_path,
     load_and_validate_forecaster,
     generate_qualitative_suite,
+    get_model_display_name,
 )
 from src.models.decoder import Decoder2D
 from src.models.encoder import Encoder2D
@@ -356,3 +357,79 @@ def test_qualitative_formal_dirty_git_rejection(monkeypatch):
             allow_dirty=False,
         )
     assert "Working tree is dirty" in str(exc_info.value)
+
+
+def test_get_model_display_name():
+    """Verify that canonical aliases map to publication-grade display names."""
+    assert get_model_display_name("parent") == "Parent Baseline"
+    assert get_model_display_name("parent_baseline") == "Parent Baseline"
+    assert get_model_display_name("H8_saved_long_best") == "H8 Saved Long-Best"
+    assert get_model_display_name("h8_long") == "H8 Saved Long-Best"
+    assert get_model_display_name("E4_full_physics") == "Parent Baseline (E4-H2)"
+    assert get_model_display_name("Custom_Model") == "Custom_Model"
+
+
+def test_resolve_parent_and_h8_aliases():
+    """Verify that aliases resolve to valid files if present on disk."""
+    parent_path = resolve_group_checkpoint_path("parent", seed=42)
+    assert os.path.exists(parent_path)
+    assert "best_vrmse_mean.pt" in parent_path
+
+    h8_path = resolve_group_checkpoint_path("H8_saved_long_best", seed=42)
+    assert os.path.exists(h8_path)
+    assert "checkpoint_step_11_vrmse_mean_0.2186.pt" in h8_path
+
+
+def test_h8_semantic_validation_fail_closed(tmp_path):
+    """Verify that H8 model semantics fail closed on contract violations."""
+    ckpt_file = str(tmp_path / "mock_h8_bad.pt")
+    _create_mock_checkpoint(ckpt_file, seed=42)
+    
+    # Modify config to have horizon 4 instead of 8
+    data = torch.load(ckpt_file)
+    data["config"]["horizon"] = 4
+    torch.save(data, ckpt_file)
+
+    with pytest.raises(ValueError, match="H8 model semantic violation: expected horizon=8"):
+        load_and_validate_forecaster(
+            grp="H8_saved_long_best",
+            ckpt_path=ckpt_file,
+            seed=42,
+            eval_split_hash="split_valid_123",
+            eval_normalizer_hash="norm_valid_456",
+            manifest_path=None,
+            device=torch.device("cpu"),
+        )
+
+
+def test_metadata_contains_colorbar_normalization(tmp_path):
+    """Verify that metadata output records colorbar normalization specifications."""
+    nx, ny = 16, 32
+    input_field = np.zeros((nx, ny))
+    pred_field = np.ones((nx, ny)) * 0.5
+    gt_field = np.ones((nx, ny))
+
+    out_file = str(tmp_path / "panel_meta_test.png")
+    generate_panel_figure(
+        input_field=input_field,
+        pred_field=pred_field,
+        gt_field=gt_field,
+        var_name="u",
+        group="H8_saved_long_best",
+        seed=42,
+        horizon=30,
+        sample_index=0,
+        out_path=out_file,
+        meta_info={"test_key": "test_val"},
+    )
+
+    json_path = out_file.replace(".png", "_metadata.json")
+    assert os.path.exists(json_path)
+    with open(json_path, "r") as f:
+        meta = json.load(f)
+
+    assert meta["model"] == "H8 Saved Long-Best"
+    assert "colorbar_norm" in meta
+    assert meta["colorbar_norm"]["vmin"] <= meta["colorbar_norm"]["vmax"]
+    assert "error_colorbar_norm" in meta
+

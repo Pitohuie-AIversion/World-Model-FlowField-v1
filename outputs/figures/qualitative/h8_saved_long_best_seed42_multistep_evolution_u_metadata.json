@@ -1,0 +1,66 @@
+{
+  "figure_type": "multihorizon",
+  "figure_path": "outputs/figures/qualitative/h8_saved_long_best_seed42_multistep_evolution_u.png",
+  "model": "H8 Saved Long-Best",
+  "group": "H8_saved_long_best",
+  "seed": 42,
+  "sample_index": 0,
+  "horizons": [
+    1,
+    5,
+    10,
+    20,
+    30
+  ],
+  "variable": "u",
+  "error_type": "absolute_error",
+  "maes_by_horizon": {
+    "1": 0.01840348169207573,
+    "5": 0.026352534070611,
+    "10": 0.05076159909367561,
+    "20": 0.07036139070987701,
+    "30": 0.07456062734127045
+  },
+  "max_err_by_horizon": {
+    "1": 0.08914366364479065,
+    "5": 0.2089332640171051,
+    "10": 0.22716006636619568,
+    "20": 0.3825834095478058,
+    "30": 0.3785857558250427
+  },
+  "colorbar_norm": {
+    "cmap": "coolwarm",
+    "vmin": -0.751056432723999,
+    "vmax": 0.7104783654212952,
+    "shared_across": "All Prediction and Ground Truth subplots"
+  },
+  "error_colorbar_norm": {
+    "cmap": "inferno",
+    "vmin": 0.0,
+    "vmax": 0.3825834095478058,
+    "shared_across": "All Absolute Error subplots"
+  },
+  "timestamp": "2026-09-23T17:52:50.952119",
+  "split_name": "grouped",
+  "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+  "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+  "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+  "sim_idx": 1,
+  "start_t": 0,
+  "split_t": 4,
+  "end_t": 34,
+  "re": 10000.0,
+  "sc": 0.1,
+  "evaluation_git_commit": "0a8a4da137e3f73c4f696cc81f527c32a8ba8405",
+  "evaluation_git_dirty": true,
+  "domain_size": [
+    1.0,
+    2.0
+  ],
+  "spatial_axis_contract": "tensor(...,C,Nx,Ny):dim-2=x,dim-1=y",
+  "vorticity_operator": "compute_vorticity (spectral_grad_2d)",
+  "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+  "checkpoint_sha256": "ea038c7af0f3a0fa5d851f25dd1ea224371b8c44ab2a80b8314f5c286c224147",
+  "training_git_commit": "6593b65005843c3f3c2640cb262bfd56708e11ad",
+  "training_git_dirty": false
+}
