@@ -950,14 +950,41 @@ class TestH16ExtensionRunner:
                 fail_closed=True,
             )
 
-    def test_run_h16_extension_dry_run_subprocess(self):
-        """Verify run_h16_extension.py executes cleanly in dry-run mode via CLI."""
+    def test_run_h16_extension_dry_run_subprocess(self, tmp_path):
+        """Verify run_h16_extension.py executes cleanly in dry-run mode via CLI with mock parent."""
+        from src.utils.provenance import (
+            PHYSICS_PROTOCOL,
+            SPATIAL_AXIS_CONTRACT,
+            SHEAR_FLOW_DOMAIN_SIZE_XY,
+        )
+
+        mock_ckpt = tmp_path / "mock_h8_ep11.pt"
+        torch.save(
+            {
+                "model_type": "latent_transformer",
+                "seed": 42,
+                "horizon": 8,
+                "lambda_div": 0.01,
+                "lambda_vort": 0.05,
+                "physics_protocol": PHYSICS_PROTOCOL,
+                "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+                "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+                "prediction_mode": "direct",
+                "use_condition": True,
+                "training_git_dirty": False,
+                "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+                "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+            },
+            mock_ckpt,
+        )
+
         res = subprocess.run(
             [
                 sys.executable,
                 "scripts/run_h16_extension.py",
                 "--dry_run",
                 "--gpu_id", "1",
+                "--parent_checkpoint", str(mock_ckpt),
             ],
             cwd=str(PROJECT_ROOT),
             capture_output=True,
@@ -977,5 +1004,25 @@ class TestH16ExtensionRunner:
         assert "lambda_vort:            0.05" in stdout
         assert "GPU ID:                 1" in stdout
         assert "DRY RUN COMPLETED: H16 preflight checks verified successfully." in stdout
+
+    def test_run_h16_extension_default_checkpoint_if_exists(self):
+        """Verify run_h16_extension.py with default checkpoint if present on local filesystem."""
+        from scripts.run_h16_extension import DEFAULT_PARENT_CHECKPOINT
+        if not os.path.exists(DEFAULT_PARENT_CHECKPOINT):
+            pytest.skip("Default H8 parent checkpoint not found on current filesystem (e.g. in CI)")
+
+        res = subprocess.run(
+            [
+                sys.executable,
+                "scripts/run_h16_extension.py",
+                "--dry_run",
+                "--gpu_id", "1",
+            ],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode == 0, f"run_h16_extension.py with default parent failed:\n{res.stderr}"
+        assert "DRY RUN COMPLETED: H16 preflight checks verified successfully." in res.stdout
 
 

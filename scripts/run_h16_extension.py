@@ -69,22 +69,31 @@ H16_CONFIG = {
 
 def resolve_parent_checkpoint(custom_path: Optional[str] = None) -> Path:
     """Resolve and verify canonical H8 Saved Long-Best parent checkpoint."""
-    path_to_check = custom_path or DEFAULT_PARENT_CHECKPOINT
-    p = Path(path_to_check)
-    if not p.is_absolute():
-        p = PROJECT_ROOT / p
+    if custom_path:
+        p = Path(custom_path)
+        try:
+            if p.is_file():
+                return p
+        except (PermissionError, OSError):
+            pass
+        raise FileNotFoundError(f"Specified parent checkpoint not found: {custom_path}")
 
-    if not p.is_file():
-        # Check alternative common locations
-        fallback_candidates = [
-            PROJECT_ROOT / DEFAULT_PARENT_CHECKPOINT,
-            Path(f"/root/autodl-tmp/mzy_data/World-Model-FlowField-v1/{DEFAULT_PARENT_CHECKPOINT}"),
-        ]
-        for candidate in fallback_candidates:
+    candidates = [
+        PROJECT_ROOT / DEFAULT_PARENT_CHECKPOINT,
+        Path(DEFAULT_PARENT_CHECKPOINT),
+        Path(f"/root/autodl-tmp/mzy_data/World-Model-FlowField-v1/{DEFAULT_PARENT_CHECKPOINT}"),
+    ]
+    for candidate in candidates:
+        try:
             if candidate.is_file():
                 return candidate
-        raise FileNotFoundError(f"H16 parent checkpoint not found: {p}")
-    return p
+        except (PermissionError, OSError):
+            continue
+
+    raise FileNotFoundError(
+        f"H16 parent checkpoint not found. Checked default locations:\n"
+        + "\n".join(f"  - {c}" for c in candidates)
+    )
 
 
 def build_training_command(
