@@ -37,6 +37,7 @@ from src.utils.provenance import (
     create_checkpoint_provenance,
     resolve_checkpoint_provenance,
     validate_evaluation_provenance,
+    validate_formal_provenance_bundle,
 )
 
 
@@ -530,7 +531,7 @@ def test_provenance_manifest_integrity_tampering_fails_closed():
 def test_provenance_valid_bundle_passes():
     """Valid provenance bundle matching evaluation environment passes cleanly."""
     bundle = {
-        "training_git_commit": "b305fd4c66daff5b42d765377ea9d44f6f32ee6e",
+        "training_git_commit": "6593b65005843c3f3c2640cb262bfd56708e11ad",
         "seed": 42,
         "split_hash": "split_hash_exact_match_123456",
         "normalizer_hash": "norm_hash_exact_match_abcdef",
@@ -708,17 +709,47 @@ def test_validate_evaluation_provenance_rejects_short_hash_prefix():
 
 
 def test_formal_provenance_contract_rejects_unknown_or_dirty_git():
-    """Verify formal provenance contract rejects checkpoints with unknown (None) or dirty (True) git state."""
-    # When training_git_dirty is None (missing), formal validation must reject
-    prov_unknown = {"training_git_dirty": None}
-    assert prov_unknown.get("training_git_dirty") is not False
+    """Verify formal provenance contract rejects checkpoints with unknown (None), dirty (True), or invalid git commit."""
+    canonical_prov = {
+        "physics_protocol": PHYSICS_PROTOCOL,
+        "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+        "training_git_commit": "6593b65005843c3f3c2640cb262bfd56708e11ad",
+        "training_git_dirty": False,
+    }
 
-    # When training_git_dirty is True (dirty), formal validation must reject
-    prov_dirty = {"training_git_dirty": True}
-    assert prov_dirty.get("training_git_dirty") is not False
+    # Baseline: cleanly passes
+    is_valid, errors = validate_formal_provenance_bundle(canonical_prov, fail_closed=False)
+    assert is_valid is True
+    assert len(errors) == 0
 
-    # Only explicitly clean (False) is accepted
-    prov_clean = {"training_git_dirty": False}
-    assert prov_clean.get("training_git_dirty") is False
+    # Production test 1: training_git_dirty is None (missing) -> raises RuntimeError
+    prov_unknown = dict(canonical_prov, training_git_dirty=None)
+    with pytest.raises(RuntimeError, match="must be cleanly recorded as False"):
+        validate_formal_provenance_bundle(prov_unknown, fail_closed=True)
+
+    # Production test 2: training_git_dirty is True (dirty) -> raises RuntimeError
+    prov_dirty = dict(canonical_prov, training_git_dirty=True)
+    with pytest.raises(RuntimeError, match="must be cleanly recorded as False"):
+        validate_formal_provenance_bundle(prov_dirty, fail_closed=True)
+
+    # Production test 3: training_git_commit is UNKNOWN -> raises RuntimeError
+    prov_unknown_commit = dict(canonical_prov, training_git_commit="UNKNOWN")
+    with pytest.raises(RuntimeError, match="Training git commit is UNKNOWN or missing"):
+        validate_formal_provenance_bundle(prov_unknown_commit, fail_closed=True)
+
+    # Production test 4: training_git_commit does not exist in repo -> raises RuntimeError
+    prov_bad_commit = dict(canonical_prov, training_git_commit="b305fd4c66daff5b42d765377ea9d44f6f32ee6e")
+    with pytest.raises(RuntimeError, match="does not exist cryptographically in git history"):
+        validate_formal_provenance_bundle(prov_bad_commit, fail_closed=True)
+
+    # Production test 5: legacy attestation allows UNKNOWN commit on historical checkpoints
+    prov_legacy = dict(
+        canonical_prov,
+        training_git_commit="UNKNOWN",
+        legacy_attestation={"status": "historical_untracked", "note": "Verified via SHA256"},
+    )
+    is_valid_legacy, _ = validate_formal_provenance_bundle(prov_legacy, fail_closed=True)
+    assert is_valid_legacy is True
 
 

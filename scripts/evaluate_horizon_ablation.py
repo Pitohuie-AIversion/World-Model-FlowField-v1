@@ -44,11 +44,13 @@ from src.utils.physics_contract import (
 from src.utils.provenance import (
     get_git_commit,
     is_git_dirty,
+    git_commit_exists,
     compute_file_sha256 as compute_full_sha256,
     compute_split_hash_from_file,
     compute_normalizer_hash,
     resolve_checkpoint_provenance,
     validate_evaluation_provenance,
+    validate_formal_provenance_bundle,
 )
 
 
@@ -362,7 +364,7 @@ def run_evaluation(
     if val_loader:
         print(f"  Val samples: {len(val_loader.dataset)}")
 
-    def validate_and_record_ckpt(ckpt_path: str, label: str) -> Tuple[str, str]:
+    def validate_and_record_ckpt(ckpt_path: str, label: str) -> Tuple[str, str, Dict[str, Any]]:
         sha_16 = compute_file_sha256(ckpt_path, prefix_len=16)
         sha_full = compute_file_sha256(ckpt_path, prefix_len=None)
         ckpt_data = torch.load(ckpt_path, map_location="cpu", weights_only=False)
@@ -377,26 +379,32 @@ def run_evaluation(
             fail_closed=formal,
         )
 
-        if formal:
-            formal_errors = []
-            if prov.get("physics_protocol") != PHYSICS_PROTOCOL:
-                formal_errors.append(f"Protocol mismatch: expected {PHYSICS_PROTOCOL}, got {prov.get('physics_protocol')}")
-            if prov.get("spatial_axis_contract") != SPATIAL_AXIS_CONTRACT:
-                formal_errors.append(f"Axis mismatch: expected {SPATIAL_AXIS_CONTRACT}, got {prov.get('spatial_axis_contract')}")
-            if list(prov.get("physics_domain_size_xy") or []) != list(SHEAR_FLOW_DOMAIN_SIZE_XY):
-                formal_errors.append(f"Domain mismatch: expected {SHEAR_FLOW_DOMAIN_SIZE_XY}, got {prov.get('physics_domain_size_xy')}")
-            if prov.get("training_git_dirty") is not False:
-                formal_errors.append(
-                    f"Checkpoint training git state must be cleanly recorded as False, "
-                    f"got {prov.get('training_git_dirty')} (missing or dirty rejected in formal mode)"
-                )
-            if formal_errors:
-                raise RuntimeError(
-                    f"Formal validation failed for {label} ({ckpt_path}):\n"
-                    + "\n".join(f"  - {e}" for e in formal_errors)
-                )
+        commit = prov.get("training_git_commit")
+        commit_valid = git_commit_exists(commit)
+        legacy_attestation = prov.get("legacy_attestation")
 
-        return sha_16, sha_full
+        if formal:
+            validate_formal_provenance_bundle(prov, label=f"{label} ({ckpt_path})", fail_closed=True)
+            if legacy_attestation:
+                print(f"  [Formal] Note: {label} accepted via legacy attestation: {legacy_attestation.get('note', '')[:70]}...")
+
+        prov_bundle = {
+            "checkpoint_path": ckpt_path,
+            "sha256": sha_16,
+            "full_sha256": sha_full,
+            "training_git_commit": commit,
+            "training_git_commit_valid": commit_valid,
+            "training_git_dirty": prov.get("training_git_dirty"),
+            "seed": prov.get("seed"),
+            "split_hash": prov.get("split_hash"),
+            "normalizer_hash": prov.get("normalizer_hash"),
+            "physics_protocol": prov.get("physics_protocol"),
+            "spatial_axis_contract": prov.get("spatial_axis_contract"),
+            "physics_domain_size_xy": prov.get("physics_domain_size_xy"),
+            "legacy_attestation": legacy_attestation,
+        }
+
+        return sha_16, sha_full, prov_bundle
 
     # ────────────────────────────────────────────────
     # 3. Evaluate parent baseline
@@ -413,7 +421,7 @@ def run_evaluation(
     }}
 
     if os.path.exists(PARENT_CKPT):
-        parent_sha16, parent_sha_full = validate_and_record_ckpt(PARENT_CKPT, "parent")
+        parent_sha16, parent_sha_full, parent_prov = validate_and_record_ckpt(PARENT_CKPT, "parent")
         print(f"  Parent checkpoint SHA256: {parent_sha16}")
 
         forecaster, cfg = load_forecaster(PARENT_CKPT, device)
@@ -425,6 +433,7 @@ def run_evaluation(
         results["parent_test"]["__ckpt__"] = PARENT_CKPT
         results["parent_test"]["__sha256__"] = parent_sha16
         results["parent_test"]["__full_sha256__"] = parent_sha_full
+        results["parent_test"]["__provenance__"] = parent_prov
 
         # Validation set (for epoch-0 baseline comparison)
         if include_validation and val_loader:
@@ -450,7 +459,7 @@ def run_evaluation(
             continue
 
         print(f"\n  --- {label} ---")
-        sha16, sha_full = validate_and_record_ckpt(ckpt_path, label)
+        sha16, sha_full, prov_bundle = validate_and_record_ckpt(ckpt_path, label)
         forecaster, cfg = load_forecaster(ckpt_path, device)
         test_metrics = evaluate_at_horizons(forecaster, test_loader, device, EVAL_HORIZONS, normalizer)
         test_metrics["__ckpt__"] = ckpt_path
@@ -458,6 +467,7 @@ def run_evaluation(
         test_metrics["__full_sha256__"] = sha_full
         test_metrics["__selection__"] = "short-best (val VRMSE)"
         test_metrics["__training_horizon__"] = int(label.split("_")[0].replace("H", ""))
+        test_metrics["__provenance__"] = prov_bundle
         results[label] = test_metrics
 
         del forecaster
@@ -483,13 +493,14 @@ def run_evaluation(
                 continue
 
         print(f"\n  --- {label} ---")
-        sha16, sha_full = validate_and_record_ckpt(ckpt_path, label)
+        sha16, sha_full, prov_bundle = validate_and_record_ckpt(ckpt_path, label)
         forecaster, cfg = load_forecaster(ckpt_path, device)
         test_metrics = evaluate_at_horizons(forecaster, test_loader, device, EVAL_HORIZONS, normalizer)
         test_metrics["__ckpt__"] = ckpt_path
         test_metrics["__sha256__"] = sha16
         test_metrics["__full_sha256__"] = sha_full
         test_metrics["__selection__"] = "long-best (J_long)"
+        test_metrics["__provenance__"] = prov_bundle
         results[label] = test_metrics
 
         del forecaster

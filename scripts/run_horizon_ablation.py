@@ -128,6 +128,7 @@ def build_training_command(
         f"--model latent_transformer "
         f"--output_dir {output_dir} "
         f"--init_checkpoint {parent_checkpoint} "
+        f"--expected_init_horizon 2 "
         f"--horizon {cfg['horizon']} "
         f"--epochs {epochs} "
         f"--batch_size {cfg['batch_size']} "

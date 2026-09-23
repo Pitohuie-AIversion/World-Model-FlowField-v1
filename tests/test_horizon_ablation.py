@@ -623,7 +623,18 @@ class TestProvenanceHardeningAndDualTracker:
                 fail_closed=True,
             )
 
-        # Test 4: short 1-char hash prefix -> reject
+        # Test 4: training_git_dirty=None without legacy attestation -> reject
+        ckpt_no_dirty = dict(canonical_valid_ckpt)
+        del ckpt_no_dirty["training_git_dirty"]
+        with pytest.raises(ValueError, match="missing required field 'training_git_dirty'"):
+            validate_init_checkpoint_contract(
+                ckpt_no_dirty,
+                current_split_hash=canonical_valid_ckpt["split_hash"],
+                current_normalizer_hash=canonical_valid_ckpt["normalizer_hash"],
+                fail_closed=True,
+            )
+
+        # Test 5: short 1-char hash prefix -> reject
         with pytest.raises(ValueError, match="Split contract violation"):
             validate_init_checkpoint_contract(
                 canonical_valid_ckpt,
@@ -632,20 +643,112 @@ class TestProvenanceHardeningAndDualTracker:
                 fail_closed=True,
             )
 
-    def test_resolve_checkpoint_provenance_preserves_none_for_missing_git_dirty(self):
-        """Verify resolve_checkpoint_provenance keeps training_git_dirty=None when absent."""
-        from src.utils.provenance import resolve_checkpoint_provenance
+        # Test 6: expected_horizon=8 but checkpoint horizon is missing -> reject
+        ckpt_no_horizon = dict(canonical_valid_ckpt)
+        del ckpt_no_horizon["horizon"]
+        with pytest.raises(ValueError, match="missing required field 'horizon'"):
+            validate_init_checkpoint_contract(
+                ckpt_no_horizon,
+                current_split_hash=canonical_valid_ckpt["split_hash"],
+                current_normalizer_hash=canonical_valid_ckpt["normalizer_hash"],
+                expected_horizon=8,
+                fail_closed=True,
+            )
 
-        ckpt_no_dirty = {
-            "config": {
-                "seed": 42,
-                "split_hash": "split_abc",
-                "normalizer_hash": "norm_abc",
+        # Test 7: expected_horizon=8 but checkpoint horizon=4 -> reject
+        ckpt_h4 = dict(canonical_valid_ckpt, horizon=4)
+        with pytest.raises(ValueError, match="Horizon contract violation"):
+            validate_init_checkpoint_contract(
+                ckpt_h4,
+                current_split_hash=canonical_valid_ckpt["split_hash"],
+                current_normalizer_hash=canonical_valid_ckpt["normalizer_hash"],
+                expected_horizon=8,
+                fail_closed=True,
+            )
+
+        # Test 8: expected_horizon=8 and checkpoint horizon=8 -> accept
+        ckpt_h8 = dict(canonical_valid_ckpt, horizon=8)
+        is_valid_h8, _ = validate_init_checkpoint_contract(
+            ckpt_h8,
+            current_split_hash=canonical_valid_ckpt["split_hash"],
+            current_normalizer_hash=canonical_valid_ckpt["normalizer_hash"],
+            expected_horizon=8,
+            fail_closed=True,
+        )
+        assert is_valid_h8 is True
+
+    def test_hash_matches_prefix_length_15_rejected_16_accepted(self):
+        """Verify hash_matches boundary: 15 chars rejected, 16 chars accepted."""
+        from src.utils.provenance import hash_matches
+
+        h_full = "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d"
+        h_prefix15 = h_full[:15]
+        h_prefix16 = h_full[:16]
+
+        assert hash_matches(h_prefix15, h_full) is False
+        assert hash_matches(h_full, h_prefix15) is False
+        assert hash_matches(h_prefix16, h_full) is True
+        assert hash_matches(h_full, h_prefix16) is True
+
+    def test_git_commit_exists_cryptographic_verification(self):
+        """Verify git_commit_exists accurately checks repository object database."""
+        from src.utils.provenance import git_commit_exists
+
+        # Real existing commit in this repository
+        assert git_commit_exists("6593b65005843c3f3c2640cb262bfd56708e11ad") is True
+        # Non-existent commit
+        assert git_commit_exists("b305fd4c66daff5b42d765377ea9d44f6f32ee6e") is False
+        # UNKNOWN or empty
+        assert git_commit_exists("UNKNOWN") is False
+        assert git_commit_exists(None) is False
+        assert git_commit_exists("") is False
+
+    def test_resolve_checkpoint_provenance_manifest_fallback_when_only_dirty_missing(self, tmp_path):
+        """Verify resolve_checkpoint_provenance triggers manifest fallback when ONLY training_git_dirty is missing."""
+        from src.utils.provenance import resolve_checkpoint_provenance, compute_file_sha256
+
+        # Create dummy checkpoint file
+        ckpt_file = tmp_path / "dummy_model.pt"
+        ckpt_file.write_bytes(b"model weights content")
+        disk_sha = compute_file_sha256(str(ckpt_file))
+
+        # Checkpoint dict has split_hash, normalizer_hash, seed, but MISSING training_git_dirty
+        ckpt_data = {
+            "split_hash": "split_123",
+            "normalizer_hash": "norm_123",
+            "seed": 42,
+        }
+
+        # Case A: Manifest contains training_git_dirty: false -> fallback must supply False!
+        manifest_a = {
+            "groups": {
+                "group_0": {
+                    "checkpoint_path": str(ckpt_file),
+                    "checkpoint_sha256": disk_sha,
+                    "training_git_dirty": False,
+                }
             }
         }
-        prov = resolve_checkpoint_provenance("dummy.pt", ckpt_no_dirty, manifest_path=None)
-        # MUST remain None, NOT silently coerced to False!
-        assert prov["training_git_dirty"] is None
+        manifest_a_path = tmp_path / "manifest_a.json"
+        manifest_a_path.write_text(json.dumps(manifest_a))
+
+        prov_a = resolve_checkpoint_provenance(str(ckpt_file), ckpt_data, manifest_path=str(manifest_a_path))
+        assert prov_a["training_git_dirty"] is False, "Fallback must supply False when manifest records False"
+
+        # Case B: Manifest does NOT contain training_git_dirty -> fallback keeps None
+        manifest_b = {
+            "groups": {
+                "group_0": {
+                    "checkpoint_path": str(ckpt_file),
+                    "checkpoint_sha256": disk_sha,
+                }
+            }
+        }
+        manifest_b_path = tmp_path / "manifest_b.json"
+        manifest_b_path.write_text(json.dumps(manifest_b))
+
+        prov_b = resolve_checkpoint_provenance(str(ckpt_file), ckpt_data, manifest_path=str(manifest_b_path))
+        assert prov_b["training_git_dirty"] is None, "Must remain None when absent in both checkpoint and manifest"
 
     def test_unequal_microbatch_sample_exact_gradient_equivalence(self):
         """Verify sample-weighted gradient accumulation is mathematically identical to full batch.

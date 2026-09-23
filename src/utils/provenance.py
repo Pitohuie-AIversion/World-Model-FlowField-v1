@@ -55,6 +55,24 @@ def is_git_dirty(project_root: Optional[str] = None) -> bool:
     return False
 
 
+def git_commit_exists(commit_sha: Optional[str], project_root: Optional[str] = None) -> bool:
+    """Verify whether a git commit object exists cryptographically in the repository."""
+    if not commit_sha or commit_sha == "UNKNOWN":
+        return False
+    cwd = project_root or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        ret = subprocess.run(
+            ["git", "cat-file", "-e", f"{commit_sha}^{{commit}}"],
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5,
+        )
+        return ret.returncode == 0
+    except Exception:
+        return False
+
+
 def compute_file_sha256(file_path: str, chunk_size: int = 65536) -> str:
     """Compute deterministic SHA-256 fingerprint of a file on disk."""
     if not os.path.exists(file_path):
@@ -153,8 +171,21 @@ def resolve_checkpoint_provenance(
     spatial_axis_contract = ckpt_data.get("spatial_axis_contract") or ckpt_data.get("config", {}).get("spatial_axis_contract")
     physics_domain_size_xy = ckpt_data.get("physics_domain_size_xy") or ckpt_data.get("config", {}).get("physics_domain_size_xy")
 
-    # If missing split_hash, normalizer_hash, or seed in state dict, consult manifest
-    if (split_hash is None or normalizer_hash is None or seed is None) and manifest_path and os.path.exists(manifest_path):
+    # If missing any formal provenance attribute in state dict, consult manifest
+    needs_manifest = any([
+        commit in (None, "UNKNOWN"),
+        git_dirty is None,
+        seed is None,
+        split_hash is None,
+        normalizer_hash is None,
+        physics_protocol is None,
+        spatial_axis_contract is None,
+        physics_domain_size_xy is None,
+    ])
+    legacy_attestation = ckpt_data.get("legacy_attestation") or (
+        ckpt_data.get("config", {}).get("legacy_attestation") if isinstance(ckpt_data.get("config"), dict) else None
+    )
+    if needs_manifest and manifest_path and os.path.exists(manifest_path):
         try:
             with open(manifest_path, "r") as mf:
                 manifest = json.load(mf)
@@ -170,11 +201,13 @@ def resolve_checkpoint_provenance(
                             f"Manifest integrity mismatch for {ckpt_path}: "
                             f"file SHA256 is {ckpt_sha}, but manifest expected {manifest_expected_sha}"
                         )
-                    commit = commit or grp_info.get("training_git_commit")
-                    if git_dirty is None and "training_git_dirty" in grp_info:
-                        git_dirty = grp_info.get("training_git_dirty")
-                    elif git_dirty is None and "training_git_dirty" in manifest:
-                        git_dirty = manifest.get("training_git_dirty")
+                    if commit in (None, "UNKNOWN"):
+                        commit = grp_info.get("training_git_commit") or manifest.get("training_commit") or "UNKNOWN"
+                    if git_dirty is None:
+                        if "training_git_dirty" in grp_info:
+                            git_dirty = grp_info.get("training_git_dirty")
+                        elif "training_git_dirty" in manifest:
+                            git_dirty = manifest.get("training_git_dirty")
                     seed = seed if seed is not None else grp_info.get("seed")
                     split_type = split_type or grp_info.get("split_type", "grouped")
                     split_hash = split_hash or grp_info.get("split_hash")
@@ -183,6 +216,7 @@ def resolve_checkpoint_provenance(
                     physics_protocol = physics_protocol or grp_info.get("physics_protocol", PHYSICS_PROTOCOL)
                     spatial_axis_contract = spatial_axis_contract or grp_info.get("spatial_axis_contract", SPATIAL_AXIS_CONTRACT)
                     physics_domain_size_xy = physics_domain_size_xy or grp_info.get("physics_domain_size_xy", list(SHEAR_FLOW_DOMAIN_SIZE_XY))
+                    legacy_attestation = legacy_attestation or grp_info.get("legacy_attestation") or manifest.get("legacy_attestation")
                     break
         except ValueError:
             raise
@@ -200,6 +234,7 @@ def resolve_checkpoint_provenance(
         "physics_protocol": physics_protocol,
         "spatial_axis_contract": spatial_axis_contract,
         "physics_domain_size_xy": physics_domain_size_xy,
+        "legacy_attestation": legacy_attestation,
     }
 
 
@@ -253,6 +288,49 @@ def validate_evaluation_provenance(
     if errors and fail_closed:
         raise RuntimeError(
             "Evaluation failed-closed due to provenance / protocol identity contract violations:\n"
+            + "\n".join(f"  - {e}" for e in errors)
+        )
+
+    return len(errors) == 0, errors
+
+
+def validate_formal_provenance_bundle(
+    prov: Dict[str, Any],
+    label: str = "checkpoint",
+    fail_closed: bool = True,
+) -> Tuple[bool, List[str]]:
+    """Enforces publication-grade formal provenance checks.
+
+    Validates:
+    1. Physics protocol, spatial axis contract, and domain size bounds.
+    2. Explicit clean training git state (training_git_dirty is False).
+    3. Verifiable cryptographic git commit exists in repo (or documented legacy attestation).
+    """
+    errors = []
+    if prov.get("physics_protocol") != PHYSICS_PROTOCOL:
+        errors.append(f"Protocol mismatch: expected {PHYSICS_PROTOCOL}, got {prov.get('physics_protocol')}")
+    if prov.get("spatial_axis_contract") != SPATIAL_AXIS_CONTRACT:
+        errors.append(f"Axis mismatch: expected {SPATIAL_AXIS_CONTRACT}, got {prov.get('spatial_axis_contract')}")
+    if list(prov.get("physics_domain_size_xy") or []) != list(SHEAR_FLOW_DOMAIN_SIZE_XY):
+        errors.append(f"Domain mismatch: expected {SHEAR_FLOW_DOMAIN_SIZE_XY}, got {prov.get('physics_domain_size_xy')}")
+
+    legacy_attestation = prov.get("legacy_attestation")
+    if not legacy_attestation:
+        commit = prov.get("training_git_commit")
+        if not commit or commit == "UNKNOWN":
+            errors.append(f"Training git commit is UNKNOWN or missing for {label}")
+        elif not git_commit_exists(commit):
+            errors.append(f"Training git commit '{commit}' does not exist cryptographically in git history for {label}")
+
+        if prov.get("training_git_dirty") is not False:
+            errors.append(
+                f"Checkpoint training git state must be cleanly recorded as False, "
+                f"got {prov.get('training_git_dirty')} (missing or dirty rejected in formal mode)"
+            )
+
+    if errors and fail_closed:
+        raise RuntimeError(
+            f"Formal validation failed for {label}:\n"
             + "\n".join(f"  - {e}" for e in errors)
         )
 
@@ -410,7 +488,10 @@ def validate_init_checkpoint_contract(
     training_git_dirty = init_ckpt.get("training_git_dirty") if "training_git_dirty" in init_ckpt else init_ckpt.get("config", {}).get("training_git_dirty")
     if training_git_dirty is None:
         training_git_dirty = prov.get("training_git_dirty")
-    if training_git_dirty is True:
+    legacy_attestation = init_ckpt.get("legacy_attestation") or prov.get("legacy_attestation")
+    if training_git_dirty is None and not legacy_attestation:
+        errors.append("Checkpoint is missing required field 'training_git_dirty'")
+    elif training_git_dirty is True:
         errors.append("Checkpoint was trained on a dirty working tree (training_git_dirty=True)")
 
     if errors and fail_closed:

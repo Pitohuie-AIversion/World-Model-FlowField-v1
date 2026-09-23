@@ -163,6 +163,7 @@ def train_forecaster(
     init_checkpoint: Optional[str] = None,
     grad_accum_steps: int = 1,
     val_diagnostic_horizons: Optional[List[int]] = None,
+    expected_init_horizon: Optional[int] = None,
 ):
     if grad_accum_steps < 1:
         raise ValueError(f"grad_accum_steps must be >= 1, got {grad_accum_steps}")
@@ -340,7 +341,7 @@ def train_forecaster(
             current_split_hash=split_hash,
             current_normalizer_hash=normalizer_hash,
             expected_seed=seed,
-            expected_horizon=None,  # Horizon can expand in ablation
+            expected_horizon=expected_init_horizon,
             expected_lambda_div=lambda_div,
             expected_lambda_vort=lambda_vort,
             expected_protocol=PHYSICS_PROTOCOL,
@@ -739,6 +740,12 @@ if __name__ == "__main__":
         default=None,
         help="Auxiliary rollout horizons to track on validation set (e.g. 10 20 30).",
     )
+    parser.add_argument(
+        "--expected_init_horizon",
+        type=int,
+        default=None,
+        help="Expected prediction horizon of init_checkpoint for fail-closed lineage validation.",
+    )
     args = parser.parse_args()
 
     freeze_rep = False if args.joint else args.freeze_representation
@@ -775,4 +782,5 @@ if __name__ == "__main__":
         init_checkpoint=args.init_checkpoint,
         grad_accum_steps=args.grad_accum_steps,
         val_diagnostic_horizons=args.val_diagnostic_horizons,
+        expected_init_horizon=args.expected_init_horizon,
     )
