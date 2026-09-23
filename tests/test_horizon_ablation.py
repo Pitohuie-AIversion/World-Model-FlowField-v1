@@ -836,17 +836,13 @@ class TestH16ExtensionRunner:
 
         cmd = build_training_command(
             parent_path="/path/to/h8_ep11.pt",
-            gpu_id=1,
             epochs=12,
             lr=5e-5,
-            min_lr=1e-6,
             batch_size=1,
             grad_accum_steps=8,
-            effective_batch_size=8,
             horizon=16,
             expected_init_horizon=8,
             output_dir="/path/to/output",
-            log_file="/path/to/log.log",
         )
         assert "--init_checkpoint" in cmd
         assert "/path/to/h8_ep11.pt" in cmd
@@ -858,10 +854,10 @@ class TestH16ExtensionRunner:
         assert cmd[cmd.index("--batch_size") + 1] == "1"
         assert "--grad_accum_steps" in cmd
         assert cmd[cmd.index("--grad_accum_steps") + 1] == "8"
-        assert "--effective_batch_size" in cmd
-        assert cmd[cmd.index("--effective_batch_size") + 1] == "8"
         assert "--val_diagnostic_horizons" in cmd
-        assert cmd[cmd.index("--val_diagnostic_horizons") + 1] == "10,20,30"
+        assert "10" in cmd
+        assert "20" in cmd
+        assert "30" in cmd
 
     def test_h16_parent_semantic_contract_enforcement(self):
         """Verify H16 semantic contract enforcement matrix against valid/invalid parents."""

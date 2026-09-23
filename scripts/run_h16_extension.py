@@ -98,47 +98,43 @@ def resolve_parent_checkpoint(custom_path: Optional[str] = None) -> Path:
 
 def build_training_command(
     parent_path: str,
-    gpu_id: int = 0,
     epochs: int = 12,
     lr: float = 5e-5,
-    min_lr: float = 1e-6,
     batch_size: int = 1,
     grad_accum_steps: int = 8,
-    effective_batch_size: int = 8,
     horizon: int = 16,
     expected_init_horizon: int = 8,
     output_dir: Optional[str] = None,
-    log_file: Optional[str] = None,
     seed: int = 42,
     lambda_div: float = 0.01,
     lambda_vort: float = 0.05,
+    val_diagnostic_horizons: Optional[List[int]] = None,
+    use_amp: bool = True,
 ) -> List[str]:
     """Construct the formal training command for the H16 extension experiment."""
     out_dir = output_dir or str(PROJECT_ROOT / DEFAULT_OUTPUT_DIR)
-    diag_str = ",".join(str(h) for h in H16_CONFIG["val_diagnostics"])
+    diags = val_diagnostic_horizons or H16_CONFIG["val_diagnostics"]
 
     cmd = [
         sys.executable,
+        "-u",
         "scripts/train_forecaster.py",
+        "--model", "latent_transformer",
+        "--output_dir", str(out_dir),
         "--init_checkpoint", str(parent_path),
         "--expected_init_horizon", str(expected_init_horizon),
         "--horizon", str(horizon),
+        "--epochs", str(epochs),
         "--batch_size", str(batch_size),
         "--grad_accum_steps", str(grad_accum_steps),
-        "--effective_batch_size", str(effective_batch_size),
-        "--epochs", str(epochs),
         "--lr", str(lr),
-        "--min_lr", str(min_lr),
         "--lambda_div", str(lambda_div),
         "--lambda_vort", str(lambda_vort),
-        "--loss_space", "physical",
         "--seed", str(seed),
-        "--gpu_id", str(gpu_id),
-        "--val_diagnostic_horizons", diag_str,
-        "--output_dir", out_dir,
+        "--val_diagnostic_horizons", *[str(h) for h in diags],
     ]
-    if log_file:
-        cmd.extend(["--log_file", str(log_file)])
+    if use_amp:
+        cmd.append("--use_amp")
 
     return cmd
 
@@ -258,24 +254,20 @@ def main():
     # 4. Build training command
     cmd = build_training_command(
         parent_path=str(parent_path),
-        gpu_id=args.gpu_id,
         epochs=args.epochs,
         lr=args.lr,
-        min_lr=args.min_lr,
         batch_size=args.batch_size,
         grad_accum_steps=args.grad_accum_steps,
-        effective_batch_size=args.effective_batch_size,
         horizon=args.horizon,
         expected_init_horizon=args.expected_init_horizon,
         output_dir=out_dir,
-        log_file=log_file,
         seed=H16_CONFIG["seed"],
         lambda_div=H16_CONFIG["lambda_div"],
         lambda_vort=H16_CONFIG["lambda_vort"],
     )
 
     print("\n[Command]")
-    print(" ".join(cmd))
+    print(f"CUDA_VISIBLE_DEVICES={args.gpu_id} " + " ".join(cmd))
 
     if args.dry_run:
         print("\nDRY RUN COMPLETED: H16 preflight checks verified successfully.")
@@ -284,9 +276,12 @@ def main():
     # 5. Launch training
     print(f"\nLaunching H16 training on GPU {args.gpu_id}...")
     t0 = time.time()
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
     with open(log_file, "w") as lf:
         proc = subprocess.Popen(
             cmd,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
