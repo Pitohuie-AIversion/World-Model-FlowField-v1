@@ -20,9 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    "pytest",
-    "hydra-core",
-    "anyio",
+    "pytest>=7.0.0",
 ]
 
 [tool.pytest.ini_options]
@@ -31,3 +29,7 @@ pythonpath = ["."]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+filterwarnings = [
+    "ignore:The argument 'device' of Tensor.pin_memory\\(\\) is deprecated:DeprecationWarning",
+    "ignore:The argument 'device' of Tensor.is_pinned\\(\\) is deprecated:DeprecationWarning",
+]
