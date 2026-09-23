@@ -178,8 +178,8 @@ def compute_run_convergence_metrics(parsed_run: Dict[str, Any], k_window: int = 
         status = "still_converging"
         description = "Minimum reached at final epoch with negative descent slope; potential further convergence with more epochs."
     elif last_slope > 0.005 or best_to_final_gap >= 0.03:
-        status = "mild_overfitting"
-        description = "Validation VRMSE reached minimum earlier and displayed post-peak rise/fluctuation."
+        status = "post_minimum_fluctuation"
+        description = "Validation VRMSE reached minimum at an earlier epoch and displayed post-minimum fluctuation or slight rise."
     elif abs(last_slope) <= 0.005:
         status = "plateaued"
         description = "Validation VRMSE stabilized in flat plateau region across final epochs."
@@ -246,7 +246,7 @@ def analyze_all_logs(log_dir: str | Path) -> Dict[str, Any]:
         "runs_peaking_before_epoch_30": int(sum(1 for e in best_epochs if e < 30)),
         "fraction_peaking_before_epoch_30": float(np.mean([1 if e < 30 else 0 for e in best_epochs])),
         "mean_best_to_final_gap": float(np.mean(gaps)),
-        "all_gaps_positive": bool(all(g >= 0 for g in gaps)),
+        "all_minima_precede_final_epoch": bool(all(e < 30 for e in best_epochs)),
         "mean_last_5_slope": float(np.mean(slopes)),
     }
 
@@ -368,13 +368,13 @@ def plot_convergence_curves(analysis: Dict[str, Any], output_path: str | Path) -
     ax_diag.axvline(0, color="black", linestyle="--", alpha=0.5)
     ax_diag.set_xlabel("Last-5 Epoch Slope (Epochs 26–30)", fontsize=12, fontweight="bold")
     ax_diag.set_ylabel("Best-to-Final Gap (VRMSE_final - VRMSE_best)", fontsize=12, fontweight="bold")
-    ax_diag.set_title("(d) Convergence Diagnosis: All Gaps > 0 (No Premature Truncation)", fontsize=13, fontweight="bold", pad=10)
+    ax_diag.set_title("(d) Convergence Diagnosis: Post-Minimum Gap vs Last-5 Slope", fontsize=13, fontweight="bold", pad=10)
     ax_diag.grid(True, linestyle="--", alpha=0.5)
 
     # Highlight region
     ax_diag.annotate(
-        "Optimal validation minimum\nachieved prior to epoch 30;\nslow drift / saturation",
-        xy=(0.002, 0.04), xytext=(-0.04, 0.06),
+        "Validation minimum achieved\nprior to epoch 30;\nlate-epoch plateau / fluctuation",
+        xy=(0.002, 0.04), xytext=(-0.045, 0.06),
         arrowprops=dict(facecolor="black", shrink=0.05, width=1, headwidth=6),
         fontsize=10, bbox=dict(boxstyle="round,pad=0.3", fc="#ffffcc", ec="#999900")
     )
@@ -416,10 +416,32 @@ def export_convergence_json(analysis: Dict[str, Any], output_path: str | Path) -
     print(f"[Convergence Analysis] Saved summary JSON to {output_path}")
 
 
+def export_full_trajectories_json(analysis: Dict[str, Any], output_path: str | Path) -> None:
+    """Export complete epoch 1-30 trajectories for all runs for publication-grade archival."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "metadata": {
+            "description": "Full epoch-by-epoch training loss and validation VRMSE trajectories across Closure-R4 runs",
+            "total_runs": len(analysis["raw_trajectories"]),
+            "epochs_per_run": 30,
+            "seeds": [42, 43, 44],
+            "groups": ["E0_single_step", "E1_rollout_field", "E2_plus_L_div", "E3_plus_L_vort", "E4_full_physics"],
+        },
+        "trajectories": analysis["raw_trajectories"],
+    }
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    print(f"[Convergence Analysis] Saved full trajectories JSON to {output_path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Analyze Closure-R4 training convergence across all runs.")
     parser.add_argument("--log_dir", type=str, default="outputs", help="Directory containing train_closure_r4_*.log files")
     parser.add_argument("--output_json", type=str, default="outputs/metrics/training_convergence_summary.json", help="Path to save summary JSON")
+    parser.add_argument("--output_trajectories", type=str, default="outputs/metrics/training_convergence_trajectories.json", help="Path to save full trajectories JSON")
     parser.add_argument("--output_fig", type=str, default="outputs/figures/training_convergence_curves.png", help="Path to save plot")
     parser.add_argument("--no_plot", action="store_true", help="Skip figure generation")
     args = parser.parse_args()
@@ -437,11 +459,13 @@ def main() -> None:
     print(f"Total Runs Analyzed: {agg['total_runs']}")
     print(f"Mean Best Epoch:     {agg['mean_best_epoch']:.2f} (Range: Ep {agg['min_best_epoch']} – Ep {agg['max_best_epoch']})")
     print(f"Runs Peaking at Ep30: {agg['runs_peaking_at_epoch_30']}/{agg['total_runs']} ({agg['fraction_peaking_before_epoch_30']*100:.1f}% peaked before Ep 30)")
-    print(f"Mean Best-to-Final:  +{agg['mean_best_to_final_gap']:.4f} (All gaps >= 0: {agg['all_gaps_positive']})")
+    print(f"Mean Best-to-Final:  +{agg['mean_best_to_final_gap']:.4f} (All minima precede final epoch: {agg['all_minima_precede_final_epoch']})")
     print(f"Mean Last-5 Slope:   {agg['mean_last_5_slope']:+.5f}")
     print("=" * 80 + "\n")
 
     export_convergence_json(analysis, args.output_json)
+    if args.output_trajectories:
+        export_full_trajectories_json(analysis, args.output_trajectories)
 
     if not args.no_plot:
         plot_convergence_curves(analysis, args.output_fig)

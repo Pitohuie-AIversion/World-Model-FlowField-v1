@@ -12,6 +12,7 @@ from scripts.analyze_training_convergence import (
     compute_run_convergence_metrics,
     analyze_all_logs,
     export_convergence_json,
+    export_full_trajectories_json,
     plot_convergence_curves,
 )
 
@@ -89,6 +90,7 @@ Training completed. Best VRMSE: 0.3000
     assert metrics["best_val_vrmse"] == 0.3
     assert metrics["final_val_vrmse"] == 0.35
     assert pytest.approx(metrics["best_to_final_gap"], 1e-6) == 0.05
+    assert metrics["status"] == "post_minimum_fluctuation"
 
     # 2. Single-step log
     single_step_log = tmp_path / "train_closure_r4_ablation_E0_single_step.log"
@@ -120,7 +122,7 @@ def test_analyze_all_logs_and_export_mock(tmp_path):
     assert analysis["aggregate"]["total_runs"] == 2
     assert len(analysis["runs"]) == 2
 
-    # Test export JSON
+    # Test export summary JSON
     out_json = tmp_path / "summary.json"
     export_convergence_json(analysis, out_json)
     assert out_json.is_file()
@@ -129,11 +131,44 @@ def test_analyze_all_logs_and_export_mock(tmp_path):
     assert data["aggregate"]["total_runs"] == 2
     assert len(data["runs"]) == 2
 
+    # Test export full trajectories JSON
+    out_traj = tmp_path / "trajectories.json"
+    export_full_trajectories_json(analysis, out_traj)
+    assert out_traj.is_file()
+    with open(out_traj, "r", encoding="utf-8") as f:
+        traj_data = json.load(f)
+    assert traj_data["metadata"]["total_runs"] == 2
+    assert len(traj_data["trajectories"]) == 2
+
     # Test plot generation
     out_png = tmp_path / "curves.png"
     plot_convergence_curves(analysis, out_png)
     assert out_png.is_file()
     assert out_png.stat().st_size > 1000
+
+
+def test_archived_trajectories_integrity():
+    """Verify full numerical integrity of archived trajectories in CI without requiring raw logs."""
+    traj_path = Path("outputs/metrics/training_convergence_trajectories.json")
+    assert traj_path.is_file(), f"Archived trajectory file missing: {traj_path}"
+
+    with open(traj_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    trajectories = payload["trajectories"]
+    assert len(trajectories) == 13
+
+    for traj in trajectories:
+        assert traj["total_epochs"] == 30
+        assert len(traj["epochs"]) == 30
+        assert len(traj["train_losses"]) == 30
+        assert len(traj["val_vrmses"]) == 30
+
+        metrics = compute_run_convergence_metrics(traj)
+        assert 21 <= metrics["best_epoch"] <= 29
+        assert metrics["best_epoch"] < 30
+        assert metrics["best_to_final_gap"] >= 0
+        assert metrics["status"] in ["plateaued", "plateau_with_fluctuations", "post_minimum_fluctuation"]
 
 
 def test_analyze_all_logs_on_repo_logs():
@@ -151,5 +186,5 @@ def test_analyze_all_logs_on_repo_logs():
     assert agg["runs_peaking_at_epoch_30"] == 0
     assert agg["runs_peaking_before_epoch_30"] == 13
     assert agg["fraction_peaking_before_epoch_30"] == 1.0
-    assert agg["all_gaps_positive"] is True
+    assert agg["all_minima_precede_final_epoch"] is True
     assert agg["mean_best_to_final_gap"] > 0.02
