@@ -398,6 +398,19 @@ def train_forecaster(
         optimizer.zero_grad()
         accum_count = 0
 
+        # Precompute microbatch sample counts for exact sample-weighted gradient accumulation
+        num_batches = len(train_loader)
+        is_drop_last = getattr(train_loader, "drop_last", False)
+        sampler = getattr(train_loader, "sampler", None)
+        total_samples = len(sampler) if sampler is not None else len(train_loader.dataset)
+
+        if is_drop_last:
+            batch_sample_counts = [batch_size] * num_batches
+        else:
+            remainder = total_samples % batch_size
+            last_batch_size = remainder if remainder != 0 else batch_size
+            batch_sample_counts = [batch_size] * (num_batches - 1) + [last_batch_size] if num_batches > 0 else []
+
         for batch_idx, batch in enumerate(train_loader):
             q_hist = batch["history"].to(device)  # (B, L, 4, Ny, Nx)
             q_future = batch["future"].to(device)  # (B, H, 4, Ny, Nx)
@@ -455,9 +468,13 @@ def train_forecaster(
                     if lambda_vort > 0:
                         loss = loss + lambda_vort * vort_loss_fn(pred_phys, target_phys)
 
-                # Exact accumulation window handling (handles tail microbatches with drop_last=False)
-                chunk_len = min(grad_accum_steps, len(train_loader) - (batch_idx - accum_count))
-                scaled_loss = loss / chunk_len
+                # Exact sample-weighted accumulation window scaling
+                # Guarantees mathematical equivalence at the sample level for tail microbatches
+                window_start = (batch_idx // grad_accum_steps) * grad_accum_steps
+                window_end = min(window_start + grad_accum_steps, num_batches)
+                window_total_samples = sum(batch_sample_counts[window_start:window_end])
+                sample_weight = len(q_hist) / window_total_samples
+                scaled_loss = loss * sample_weight
 
             scaler.scale(scaled_loss).backward()
             accum_count += 1

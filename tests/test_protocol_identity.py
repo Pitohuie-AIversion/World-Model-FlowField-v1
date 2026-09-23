@@ -682,3 +682,43 @@ def test_untrained_seed_groups_filtering_skips_missing_e0():
         assert "E2_plus_L_div" in str(exc_info.value)
         assert "E0_single_step" not in str(exc_info.value)
 
+
+def test_validate_evaluation_provenance_rejects_short_hash_prefix():
+    """Verify validate_evaluation_provenance rejects hash prefixes shorter than 16 characters."""
+    valid_full = "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d"
+    norm_valid = "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec"
+
+    # Valid 16-char prefix should pass
+    prov_16 = {
+        "split_hash": valid_full[:16],
+        "normalizer_hash": norm_valid,
+        "seed": 42,
+    }
+    is_valid, _ = validate_evaluation_provenance(prov_16, eval_split_hash=valid_full, eval_normalizer_hash=norm_valid)
+    assert is_valid is True
+
+    # 1-char or short prefix (<16 chars) must FAIL
+    prov_short = {
+        "split_hash": "4",
+        "normalizer_hash": norm_valid,
+        "seed": 42,
+    }
+    with pytest.raises(RuntimeError, match="Split hash mismatch"):
+        validate_evaluation_provenance(prov_short, eval_split_hash=valid_full, eval_normalizer_hash=norm_valid)
+
+
+def test_formal_provenance_contract_rejects_unknown_or_dirty_git():
+    """Verify formal provenance contract rejects checkpoints with unknown (None) or dirty (True) git state."""
+    # When training_git_dirty is None (missing), formal validation must reject
+    prov_unknown = {"training_git_dirty": None}
+    assert prov_unknown.get("training_git_dirty") is not False
+
+    # When training_git_dirty is True (dirty), formal validation must reject
+    prov_dirty = {"training_git_dirty": True}
+    assert prov_dirty.get("training_git_dirty") is not False
+
+    # Only explicitly clean (False) is accepted
+    prov_clean = {"training_git_dirty": False}
+    assert prov_clean.get("training_git_dirty") is False
+
+

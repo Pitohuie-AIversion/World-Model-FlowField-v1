@@ -536,4 +536,172 @@ class TestProvenanceHardeningAndDualTracker:
         assert res.returncode == 0
         assert "--formal" in res.stdout
 
+    def test_hash_matches_prefix_length_guard(self):
+        """Verify hash_matches enforces exact match or min_prefix_len >= 16 chars."""
+        from src.utils.provenance import hash_matches
+
+        h_full = "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d"
+        h_prefix16 = h_full[:16]
+        h_prefix8 = h_full[:8]
+        h_prefix1 = h_full[:1]
+
+        # Exact match
+        assert hash_matches(h_full, h_full) is True
+        # Prefix match >= 16 chars
+        assert hash_matches(h_prefix16, h_full) is True
+        assert hash_matches(h_full, h_prefix16) is True
+        # Short prefix (< 16 chars) must be REJECTED to prevent trivial matching
+        assert hash_matches(h_prefix8, h_full) is False
+        assert hash_matches(h_prefix1, h_full) is False
+        assert hash_matches("4", h_full) is False
+        # None or empty
+        assert hash_matches(None, h_full) is False
+        assert hash_matches("", h_full) is False
+
+    def test_validate_init_checkpoint_contract_rejects_missing_required_fields(self):
+        """Verify validate_init_checkpoint_contract rejects checkpoints with missing required fields."""
+        from src.utils.provenance import validate_init_checkpoint_contract
+        from src.utils.physics_contract import SPATIAL_AXIS_CONTRACT
+
+        canonical_valid_ckpt = {
+            "model_type": "latent_transformer",
+            "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+            "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+            "seed": 42,
+            "horizon": 2,
+            "lambda_div": 0.01,
+            "lambda_vort": 0.05,
+            "physics_protocol": "Closure-R4",
+            "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
+            "physics_domain_size_xy": [1.0, 2.0],
+            "prediction_mode": "direct",
+            "use_condition": True,
+            "training_git_dirty": False,
+        }
+
+        # Baseline: valid checkpoint passes cleanly
+        is_valid, errors = validate_init_checkpoint_contract(
+            canonical_valid_ckpt,
+            current_split_hash="41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+            current_normalizer_hash="3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+            fail_closed=False,
+        )
+        assert is_valid is True
+        assert len(errors) == 0
+
+        # Test 1: missing seed -> reject
+        ckpt_no_seed = dict(canonical_valid_ckpt)
+        del ckpt_no_seed["seed"]
+        with pytest.raises(ValueError, match="missing required field 'seed'"):
+            validate_init_checkpoint_contract(
+                ckpt_no_seed,
+                current_split_hash=canonical_valid_ckpt["split_hash"],
+                current_normalizer_hash=canonical_valid_ckpt["normalizer_hash"],
+                expected_seed=42,
+                fail_closed=True,
+            )
+
+        # Test 2: missing physics_protocol -> reject
+        ckpt_no_proto = dict(canonical_valid_ckpt)
+        del ckpt_no_proto["physics_protocol"]
+        with pytest.raises(ValueError, match="missing required field 'physics_protocol'"):
+            validate_init_checkpoint_contract(
+                ckpt_no_proto,
+                current_split_hash=canonical_valid_ckpt["split_hash"],
+                current_normalizer_hash=canonical_valid_ckpt["normalizer_hash"],
+                expected_protocol="Closure-R4",
+                fail_closed=True,
+            )
+
+        # Test 3: training_git_dirty=True -> reject
+        ckpt_dirty = dict(canonical_valid_ckpt, training_git_dirty=True)
+        with pytest.raises(ValueError, match="dirty working tree"):
+            validate_init_checkpoint_contract(
+                ckpt_dirty,
+                current_split_hash=canonical_valid_ckpt["split_hash"],
+                current_normalizer_hash=canonical_valid_ckpt["normalizer_hash"],
+                fail_closed=True,
+            )
+
+        # Test 4: short 1-char hash prefix -> reject
+        with pytest.raises(ValueError, match="Split contract violation"):
+            validate_init_checkpoint_contract(
+                canonical_valid_ckpt,
+                current_split_hash="4",  # 1-char prefix must not match!
+                current_normalizer_hash=canonical_valid_ckpt["normalizer_hash"],
+                fail_closed=True,
+            )
+
+    def test_resolve_checkpoint_provenance_preserves_none_for_missing_git_dirty(self):
+        """Verify resolve_checkpoint_provenance keeps training_git_dirty=None when absent."""
+        from src.utils.provenance import resolve_checkpoint_provenance
+
+        ckpt_no_dirty = {
+            "config": {
+                "seed": 42,
+                "split_hash": "split_abc",
+                "normalizer_hash": "norm_abc",
+            }
+        }
+        prov = resolve_checkpoint_provenance("dummy.pt", ckpt_no_dirty, manifest_path=None)
+        # MUST remain None, NOT silently coerced to False!
+        assert prov["training_git_dirty"] is None
+
+    def test_unequal_microbatch_sample_exact_gradient_equivalence(self):
+        """Verify sample-weighted gradient accumulation is mathematically identical to full batch.
+
+        Given a tail window of 7 samples split into microbatches of [2, 2, 2, 1]:
+        1. Full-batch path: computes standard mean loss across all 7 samples.
+        2. Microbatch path: computes microbatch mean losses scaled by len(microbatch) / total_window_samples.
+        Both paths must yield IDENTICAL parameter gradients down to floating point precision.
+        """
+        torch.manual_seed(12345)
+
+        # Create two identical linear models
+        in_features, out_features = 8, 4
+        model_full = nn.Linear(in_features, out_features, bias=True)
+        model_accum = nn.Linear(in_features, out_features, bias=True)
+        model_accum.load_state_dict(model_full.state_dict())
+
+        # Generate 7 synthetic samples
+        total_samples = 7
+        X = torch.randn(total_samples, in_features)
+        Y = torch.randn(total_samples, out_features)
+
+        # Path 1: Full batch execution
+        model_full.zero_grad()
+        pred_full = model_full(X)
+        loss_full = nn.functional.mse_loss(pred_full, Y)  # Mean across all 7 samples
+        loss_full.backward()
+
+        # Path 2: Sample-exact microbatch accumulation (batches of size 2, 2, 2, 1)
+        model_accum.zero_grad()
+        microbatch_splits = [2, 2, 2, 1]
+        grad_accum_steps = 4
+        num_batches = len(microbatch_splits)
+        window_total_samples = sum(microbatch_splits)  # 7
+
+        start_idx = 0
+        for b_idx, b_size in enumerate(microbatch_splits):
+            end_idx = start_idx + b_size
+            x_b = X[start_idx:end_idx]
+            y_b = Y[start_idx:end_idx]
+            start_idx = end_idx
+
+            pred_b = model_accum(x_b)
+            loss_b = nn.functional.mse_loss(pred_b, y_b)  # Mean across microbatch
+
+            # Sample-exact scaling: len(q_hist) / window_total_samples
+            sample_weight = len(x_b) / window_total_samples
+            scaled_loss = loss_b * sample_weight
+            scaled_loss.backward()
+
+        # Compare gradients
+        assert torch.allclose(model_accum.weight.grad, model_full.weight.grad, atol=1e-6), (
+            f"Weight gradient mismatch:\nAccum: {model_accum.weight.grad}\nFull: {model_full.weight.grad}"
+        )
+        assert torch.allclose(model_accum.bias.grad, model_full.bias.grad, atol=1e-6), (
+            f"Bias gradient mismatch:\nAccum: {model_accum.bias.grad}\nFull: {model_full.bias.grad}"
+        )
+
 

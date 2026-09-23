@@ -97,6 +97,20 @@ def compute_normalizer_hash(normalizer: Any) -> str:
     return hashlib.sha256(buffer).hexdigest()
 
 
+def hash_matches(h1: Optional[str], h2: Optional[str], min_prefix_len: int = 16) -> bool:
+    """Check if two hashes match exactly or share a prefix of at least min_prefix_len hex chars.
+
+    Guards against too-short prefix matches (e.g. 'a' matching any hash starting with 'a').
+    """
+    if not h1 or not h2:
+        return False
+    if h1 == h2:
+        return True
+    if len(h1) >= min_prefix_len and len(h2) >= min_prefix_len:
+        return h1.startswith(h2) or h2.startswith(h1)
+    return False
+
+
 def create_checkpoint_provenance(
     seed: int,
     split_type: str,
@@ -127,7 +141,9 @@ def resolve_checkpoint_provenance(
 ) -> Dict[str, Any]:
     """Extract provenance bundle from checkpoint dict, with fallback to seed-42 manifest."""
     commit = ckpt_data.get("training_git_commit") or ckpt_data.get("config", {}).get("training_git_commit")
-    git_dirty = ckpt_data.get("training_git_dirty") or ckpt_data.get("config", {}).get("training_git_dirty", False)
+    git_dirty = ckpt_data.get("training_git_dirty")
+    if git_dirty is None and isinstance(ckpt_data.get("config"), dict):
+        git_dirty = ckpt_data["config"].get("training_git_dirty")
     seed = ckpt_data.get("seed") if "seed" in ckpt_data else ckpt_data.get("config", {}).get("seed")
     split_type = ckpt_data.get("split_type") or ckpt_data.get("config", {}).get("split_type")
     split_hash = ckpt_data.get("split_hash") or ckpt_data.get("config", {}).get("split_hash")
@@ -171,7 +187,7 @@ def resolve_checkpoint_provenance(
 
     return {
         "training_git_commit": commit or "UNKNOWN",
-        "training_git_dirty": git_dirty,
+        "training_git_dirty": git_dirty,  # Note: None if missing, do NOT default to False!
         "seed": seed,  # Note: DO NOT fallback to 42. If seed is missing, keep None to fail closed!
         "split_type": split_type,
         "split_hash": split_hash,
@@ -209,9 +225,7 @@ def validate_evaluation_provenance(
 
     if not ckpt_split_hash:
         errors.append("Checkpoint or manifest is missing required 'split_hash'")
-    elif ckpt_split_hash != eval_split_hash and not (
-        ckpt_split_hash.startswith(eval_split_hash) or eval_split_hash.startswith(ckpt_split_hash)
-    ):
+    elif not hash_matches(ckpt_split_hash, eval_split_hash, min_prefix_len=16):
         errors.append(
             f"Split hash mismatch: checkpoint/manifest has {ckpt_split_hash[:12]}..., "
             f"but evaluation environment has {eval_split_hash[:12]}..."
@@ -219,9 +233,7 @@ def validate_evaluation_provenance(
 
     if not ckpt_norm_hash:
         errors.append("Checkpoint or manifest is missing required 'normalizer_hash'")
-    elif ckpt_norm_hash != eval_normalizer_hash and not (
-        ckpt_norm_hash.startswith(eval_normalizer_hash) or eval_normalizer_hash.startswith(ckpt_norm_hash)
-    ):
+    elif not hash_matches(ckpt_norm_hash, eval_normalizer_hash, min_prefix_len=16):
         errors.append(
             f"Normalizer hash mismatch: checkpoint/manifest has {ckpt_norm_hash[:12]}..., "
             f"but evaluation environment has {eval_normalizer_hash[:12]}..."
@@ -298,68 +310,104 @@ def validate_init_checkpoint_contract(
             pass
 
     # 1. Model architecture
-    model_type = init_ckpt.get("model_type") or init_ckpt.get("config", {}).get("model_type")
-    if model_type and model_type != requested_model_type:
+    model_type = init_ckpt.get("model_type") or init_ckpt.get("config", {}).get("model_type") or prov.get("model_type")
+    if not model_type:
+        errors.append("Checkpoint is missing required field 'model_type'")
+    elif model_type != requested_model_type:
         errors.append(f"Model type mismatch: parent has '{model_type}', requested '{requested_model_type}'")
 
     # 2. Split hash
     split_hash = init_ckpt.get("split_hash") or init_ckpt.get("config", {}).get("split_hash") or prov.get("split_hash")
-    if current_split_hash and current_split_hash != "UNKNOWN_SPLIT" and split_hash and split_hash != "UNKNOWN_SPLIT":
-        if split_hash != current_split_hash and not (
-            split_hash.startswith(current_split_hash) or current_split_hash.startswith(split_hash)
-        ):
+    if current_split_hash and current_split_hash != "UNKNOWN_SPLIT":
+        if not split_hash or split_hash == "UNKNOWN_SPLIT":
+            errors.append("Checkpoint is missing required field 'split_hash'")
+        elif not hash_matches(split_hash, current_split_hash, min_prefix_len=16):
             errors.append(f"Split contract violation: parent has {split_hash[:12]}..., current has {current_split_hash[:12]}...")
 
     # 3. Normalizer hash
     normalizer_hash = init_ckpt.get("normalizer_hash") or init_ckpt.get("config", {}).get("normalizer_hash") or prov.get("normalizer_hash")
-    if current_normalizer_hash and current_normalizer_hash != "NONE" and normalizer_hash and normalizer_hash != "NONE":
-        if normalizer_hash != current_normalizer_hash and not (
-            normalizer_hash.startswith(current_normalizer_hash) or current_normalizer_hash.startswith(normalizer_hash)
-        ):
+    if current_normalizer_hash and current_normalizer_hash != "NONE":
+        if not normalizer_hash or normalizer_hash == "NONE":
+            errors.append("Checkpoint is missing required field 'normalizer_hash'")
+        elif not hash_matches(normalizer_hash, current_normalizer_hash, min_prefix_len=16):
             errors.append(f"Normalizer contract violation: parent has {normalizer_hash[:12]}..., current has {current_normalizer_hash[:12]}...")
 
     # 4. Seed
     seed = init_ckpt.get("seed") if "seed" in init_ckpt else init_ckpt.get("config", {}).get("seed")
     if seed is None:
         seed = prov.get("seed")
-    if expected_seed is not None and seed is not None and seed != expected_seed:
-        errors.append(f"Seed contract violation: parent checkpoint has seed={seed}, expected {expected_seed}")
+    if expected_seed is not None:
+        if seed is None:
+            errors.append("Checkpoint is missing required field 'seed'")
+        elif seed != expected_seed:
+            errors.append(f"Seed contract violation: parent checkpoint has seed={seed}, expected {expected_seed}")
 
     # 5. Horizon
     horizon = init_ckpt.get("horizon") if "horizon" in init_ckpt else init_ckpt.get("config", {}).get("horizon")
-    if expected_horizon is not None and horizon is not None and horizon != expected_horizon:
-        errors.append(f"Horizon contract violation: parent checkpoint has horizon={horizon}, expected {expected_horizon}")
+    if expected_horizon is not None:
+        if horizon is None:
+            errors.append("Checkpoint is missing required field 'horizon'")
+        elif horizon != expected_horizon:
+            errors.append(f"Horizon contract violation: parent checkpoint has horizon={horizon}, expected {expected_horizon}")
 
     # 6. Loss penalties (lambda_div and lambda_vort)
     lambda_div = init_ckpt.get("lambda_div") if "lambda_div" in init_ckpt else init_ckpt.get("config", {}).get("lambda_div")
-    if expected_lambda_div is not None and lambda_div is not None and abs(float(lambda_div) - float(expected_lambda_div)) > 1e-4:
-        errors.append(f"Loss parameter mismatch (lambda_div): parent has {lambda_div}, expected {expected_lambda_div}")
+    if expected_lambda_div is not None:
+        if lambda_div is None:
+            errors.append("Checkpoint is missing required field 'lambda_div'")
+        elif abs(float(lambda_div) - float(expected_lambda_div)) > 1e-4:
+            errors.append(f"Loss parameter mismatch (lambda_div): parent has {lambda_div}, expected {expected_lambda_div}")
 
     lambda_vort = init_ckpt.get("lambda_vort") if "lambda_vort" in init_ckpt else init_ckpt.get("config", {}).get("lambda_vort")
-    if expected_lambda_vort is not None and lambda_vort is not None and abs(float(lambda_vort) - float(expected_lambda_vort)) > 1e-4:
-        errors.append(f"Loss parameter mismatch (lambda_vort): parent has {lambda_vort}, expected {expected_lambda_vort}")
+    if expected_lambda_vort is not None:
+        if lambda_vort is None:
+            errors.append("Checkpoint is missing required field 'lambda_vort'")
+        elif abs(float(lambda_vort) - float(expected_lambda_vort)) > 1e-4:
+            errors.append(f"Loss parameter mismatch (lambda_vort): parent has {lambda_vort}, expected {expected_lambda_vort}")
 
     # 7. Protocol and Physics contracts
     physics_protocol = init_ckpt.get("physics_protocol") or init_ckpt.get("config", {}).get("physics_protocol") or prov.get("physics_protocol")
-    if expected_protocol is not None and physics_protocol and physics_protocol != expected_protocol:
-        errors.append(f"Physics protocol mismatch: parent has '{physics_protocol}', expected '{expected_protocol}'")
+    if expected_protocol is not None:
+        if not physics_protocol:
+            errors.append("Checkpoint is missing required field 'physics_protocol'")
+        elif physics_protocol != expected_protocol:
+            errors.append(f"Physics protocol mismatch: parent has '{physics_protocol}', expected '{expected_protocol}'")
 
     spatial_axis_contract = init_ckpt.get("spatial_axis_contract") or init_ckpt.get("config", {}).get("spatial_axis_contract") or prov.get("spatial_axis_contract")
-    if expected_axis_contract is not None and spatial_axis_contract and spatial_axis_contract != expected_axis_contract:
-        errors.append(f"Axis contract mismatch: parent has '{spatial_axis_contract}', expected '{expected_axis_contract}'")
+    if expected_axis_contract is not None:
+        if not spatial_axis_contract:
+            errors.append("Checkpoint is missing required field 'spatial_axis_contract'")
+        elif spatial_axis_contract != expected_axis_contract:
+            errors.append(f"Axis contract mismatch: parent has '{spatial_axis_contract}', expected '{expected_axis_contract}'")
 
     domain_size = init_ckpt.get("physics_domain_size_xy") or init_ckpt.get("config", {}).get("physics_domain_size_xy") or prov.get("physics_domain_size_xy")
-    if expected_domain_size is not None and domain_size and list(domain_size) != list(expected_domain_size):
-        errors.append(f"Domain size mismatch: parent has {domain_size}, expected {expected_domain_size}")
+    if expected_domain_size is not None:
+        if not domain_size:
+            errors.append("Checkpoint is missing required field 'physics_domain_size_xy'")
+        elif list(domain_size) != list(expected_domain_size):
+            errors.append(f"Domain size mismatch: parent has {domain_size}, expected {expected_domain_size}")
 
     # 8. Prediction mode and condition
     prediction_mode = init_ckpt.get("prediction_mode") or init_ckpt.get("config", {}).get("prediction_mode")
-    if expected_prediction_mode is not None and prediction_mode and prediction_mode != expected_prediction_mode:
-        errors.append(f"Prediction mode mismatch: parent has '{prediction_mode}', expected '{expected_prediction_mode}'")
+    if expected_prediction_mode is not None:
+        if not prediction_mode:
+            errors.append("Checkpoint is missing required field 'prediction_mode'")
+        elif prediction_mode != expected_prediction_mode:
+            errors.append(f"Prediction mode mismatch: parent has '{prediction_mode}', expected '{expected_prediction_mode}'")
 
     use_condition = init_ckpt.get("use_condition") if "use_condition" in init_ckpt else init_ckpt.get("config", {}).get("use_condition")
-    if expected_use_condition is not None and use_condition is not None and use_condition != expected_use_condition:
-        errors.append(f"Conditioning mismatch: parent has use_condition={use_condition}, expected {expected_use_condition}")
+    if expected_use_condition is not None:
+        if use_condition is None:
+            errors.append("Checkpoint is missing required field 'use_condition'")
+        elif use_condition != expected_use_condition:
+            errors.append(f"Conditioning mismatch: parent has use_condition={use_condition}, expected {expected_use_condition}")
+
+    # 9. Training git dirty check
+    training_git_dirty = init_ckpt.get("training_git_dirty") if "training_git_dirty" in init_ckpt else init_ckpt.get("config", {}).get("training_git_dirty")
+    if training_git_dirty is None:
+        training_git_dirty = prov.get("training_git_dirty")
+    if training_git_dirty is True:
+        errors.append("Checkpoint was trained on a dirty working tree (training_git_dirty=True)")
 
     if errors and fail_closed:
         raise ValueError(

@@ -385,8 +385,11 @@ def run_evaluation(
                 formal_errors.append(f"Axis mismatch: expected {SPATIAL_AXIS_CONTRACT}, got {prov.get('spatial_axis_contract')}")
             if list(prov.get("physics_domain_size_xy") or []) != list(SHEAR_FLOW_DOMAIN_SIZE_XY):
                 formal_errors.append(f"Domain mismatch: expected {SHEAR_FLOW_DOMAIN_SIZE_XY}, got {prov.get('physics_domain_size_xy')}")
-            if prov.get("training_git_dirty") is True:
-                formal_errors.append("Checkpoint was trained on a dirty working tree (training_git_dirty=True)")
+            if prov.get("training_git_dirty") is not False:
+                formal_errors.append(
+                    f"Checkpoint training git state must be cleanly recorded as False, "
+                    f"got {prov.get('training_git_dirty')} (missing or dirty rejected in formal mode)"
+                )
             if formal_errors:
                 raise RuntimeError(
                     f"Formal validation failed for {label} ({ckpt_path}):\n"
