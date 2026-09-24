@@ -1,0 +1,43 @@
+{
+  "figure_name": "comparison_high_err_u.png",
+  "sample_index": 36,
+  "sample_tag": "high_err",
+  "sample_description": "High Error Sample (Index 36, 85th percentile)",
+  "variable": "u",
+  "re": 10000.0,
+  "sc": 0.10000000149011612,
+  "evaluation_git_commit": "5ee85ea6d5bcc7989e304d1d4d884cf0d9ec1719",
+  "horizons": [
+    1,
+    10,
+    20,
+    30
+  ],
+  "colorbar_norms": {
+    "h1": {
+      "field_vmin": -0.5116516351699829,
+      "field_vmax": 0.509411096572876,
+      "error_vmax": 0.028300099074840546
+    },
+    "h10": {
+      "field_vmin": -0.5425310730934143,
+      "field_vmax": 0.5361733436584473,
+      "error_vmax": 0.03395615518093109
+    },
+    "h20": {
+      "field_vmin": -0.681904137134552,
+      "field_vmax": 0.5532410740852356,
+      "error_vmax": 0.18848344683647156
+    },
+    "h30": {
+      "field_vmin": -0.7595169544219971,
+      "field_vmax": 0.6806896924972534,
+      "error_vmax": 0.23312009871006012
+    }
+  },
+  "models_evaluated": {
+    "parent_h8_ep11": "Parent H8 Long-Best",
+    "h16_short_best_ep8": "H16 Short-Best (Ep8)",
+    "h16_long_best_ep12": "H16 Long-Best (Ep12)"
+  }
+}

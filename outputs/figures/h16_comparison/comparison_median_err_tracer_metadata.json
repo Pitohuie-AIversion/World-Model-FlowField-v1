@@ -1,0 +1,43 @@
+{
+  "figure_name": "comparison_median_err_tracer.png",
+  "sample_index": 23,
+  "sample_tag": "median_err",
+  "sample_description": "Median Error Sample (Index 23)",
+  "variable": "tracer",
+  "re": 10000.0,
+  "sc": 0.10000000149011612,
+  "evaluation_git_commit": "5ee85ea6d5bcc7989e304d1d4d884cf0d9ec1719",
+  "horizons": [
+    1,
+    10,
+    20,
+    30
+  ],
+  "colorbar_norms": {
+    "h1": {
+      "field_vmin": -0.16833123564720154,
+      "field_vmax": 0.1638122946023941,
+      "error_vmax": 0.033188533037900925
+    },
+    "h10": {
+      "field_vmin": -0.14581283926963806,
+      "field_vmax": 0.1430947631597519,
+      "error_vmax": 0.05397139489650726
+    },
+    "h20": {
+      "field_vmin": -0.12254254519939423,
+      "field_vmax": 0.1270170509815216,
+      "error_vmax": 0.1393381506204605
+    },
+    "h30": {
+      "field_vmin": -0.13186074793338776,
+      "field_vmax": 0.1274358630180359,
+      "error_vmax": 0.18571612238883972
+    }
+  },
+  "models_evaluated": {
+    "parent_h8_ep11": "Parent H8 Long-Best",
+    "h16_short_best_ep8": "H16 Short-Best (Ep8)",
+    "h16_long_best_ep12": "H16 Long-Best (Ep12)"
+  }
+}

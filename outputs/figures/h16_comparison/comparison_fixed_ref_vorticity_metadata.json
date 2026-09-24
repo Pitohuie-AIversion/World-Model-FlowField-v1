@@ -1,0 +1,43 @@
+{
+  "figure_name": "comparison_fixed_ref_vorticity.png",
+  "sample_index": 0,
+  "sample_tag": "fixed_ref",
+  "sample_description": "Fixed Reference Sample (Index 0)",
+  "variable": "vorticity",
+  "re": 10000.0,
+  "sc": 0.10000000149011612,
+  "evaluation_git_commit": "5ee85ea6d5bcc7989e304d1d4d884cf0d9ec1719",
+  "horizons": [
+    1,
+    10,
+    20,
+    30
+  ],
+  "colorbar_norms": {
+    "h1": {
+      "field_vmin": -26.637800216674805,
+      "field_vmax": 26.637800216674805,
+      "error_vmax": 7.077375888824463
+    },
+    "h10": {
+      "field_vmin": -21.647666931152344,
+      "field_vmax": 21.647666931152344,
+      "error_vmax": 9.519638061523438
+    },
+    "h20": {
+      "field_vmin": -18.976139068603516,
+      "field_vmax": 18.976139068603516,
+      "error_vmax": 9.389012336730957
+    },
+    "h30": {
+      "field_vmin": -17.542646408081055,
+      "field_vmax": 17.542646408081055,
+      "error_vmax": 9.917115211486816
+    }
+  },
+  "models_evaluated": {
+    "parent_h8_ep11": "Parent H8 Long-Best",
+    "h16_short_best_ep8": "H16 Short-Best (Ep8)",
+    "h16_long_best_ep12": "H16 Long-Best (Ep12)"
+  }
+}

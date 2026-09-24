@@ -1,0 +1,389 @@
+[
+  {
+    "figure_name": "comparison_fixed_ref_u.png",
+    "sample_index": 0,
+    "sample_tag": "fixed_ref",
+    "sample_description": "Fixed Reference Sample (Index 0)",
+    "variable": "u",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "5ee85ea6d5bcc7989e304d1d4d884cf0d9ec1719",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -0.5470303297042847,
+        "field_vmax": 0.5530421137809753,
+        "error_vmax": 0.10316768288612366
+      },
+      "h10": {
+        "field_vmin": -0.6769682168960571,
+        "field_vmax": 0.6722488403320312,
+        "error_vmax": 0.22632959485054016
+      },
+      "h20": {
+        "field_vmin": -0.6506984233856201,
+        "field_vmax": 0.6674163341522217,
+        "error_vmax": 0.2634531855583191
+      },
+      "h30": {
+        "field_vmin": -0.6490086317062378,
+        "field_vmax": 0.6410292387008667,
+        "error_vmax": 0.27819570899009705
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": "Parent H8 Long-Best",
+      "h16_short_best_ep8": "H16 Short-Best (Ep8)",
+      "h16_long_best_ep12": "H16 Long-Best (Ep12)"
+    }
+  },
+  {
+    "figure_name": "comparison_fixed_ref_vorticity.png",
+    "sample_index": 0,
+    "sample_tag": "fixed_ref",
+    "sample_description": "Fixed Reference Sample (Index 0)",
+    "variable": "vorticity",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "5ee85ea6d5bcc7989e304d1d4d884cf0d9ec1719",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -26.637800216674805,
+        "field_vmax": 26.637800216674805,
+        "error_vmax": 7.077375888824463
+      },
+      "h10": {
+        "field_vmin": -21.647666931152344,
+        "field_vmax": 21.647666931152344,
+        "error_vmax": 9.519638061523438
+      },
+      "h20": {
+        "field_vmin": -18.976139068603516,
+        "field_vmax": 18.976139068603516,
+        "error_vmax": 9.389012336730957
+      },
+      "h30": {
+        "field_vmin": -17.542646408081055,
+        "field_vmax": 17.542646408081055,
+        "error_vmax": 9.917115211486816
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": "Parent H8 Long-Best",
+      "h16_short_best_ep8": "H16 Short-Best (Ep8)",
+      "h16_long_best_ep12": "H16 Long-Best (Ep12)"
+    }
+  },
+  {
+    "figure_name": "comparison_fixed_ref_tracer.png",
+    "sample_index": 0,
+    "sample_tag": "fixed_ref",
+    "sample_description": "Fixed Reference Sample (Index 0)",
+    "variable": "tracer",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "5ee85ea6d5bcc7989e304d1d4d884cf0d9ec1719",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -0.5401034355163574,
+        "field_vmax": 0.5400846600532532,
+        "error_vmax": 0.11869118362665176
+      },
+      "h10": {
+        "field_vmin": -0.5478292107582092,
+        "field_vmax": 0.5691381692886353,
+        "error_vmax": 0.3778776526451111
+      },
+      "h20": {
+        "field_vmin": -0.5489614605903625,
+        "field_vmax": 0.5512605905532837,
+        "error_vmax": 0.41448983550071716
+      },
+      "h30": {
+        "field_vmin": -0.5157246589660645,
+        "field_vmax": 0.4898737668991089,
+        "error_vmax": 0.4836059510707855
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": "Parent H8 Long-Best",
+      "h16_short_best_ep8": "H16 Short-Best (Ep8)",
+      "h16_long_best_ep12": "H16 Long-Best (Ep12)"
+    }
+  },
+  {
+    "figure_name": "comparison_median_err_u.png",
+    "sample_index": 23,
+    "sample_tag": "median_err",
+    "sample_description": "Median Error Sample (Index 23)",
+    "variable": "u",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "5ee85ea6d5bcc7989e304d1d4d884cf0d9ec1719",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -0.7543206810951233,
+        "field_vmax": 0.7662721872329712,
+        "error_vmax": 0.0421038493514061
+      },
+      "h10": {
+        "field_vmin": -0.7506584525108337,
+        "field_vmax": 0.7604433298110962,
+        "error_vmax": 0.10160426795482635
+      },
+      "h20": {
+        "field_vmin": -0.76275634765625,
+        "field_vmax": 0.7542638778686523,
+        "error_vmax": 0.27914825081825256
+      },
+      "h30": {
+        "field_vmin": -0.784735918045044,
+        "field_vmax": 0.758213460445404,
+        "error_vmax": 0.4554864466190338
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": "Parent H8 Long-Best",
+      "h16_short_best_ep8": "H16 Short-Best (Ep8)",
+      "h16_long_best_ep12": "H16 Long-Best (Ep12)"
+    }
+  },
+  {
+    "figure_name": "comparison_median_err_vorticity.png",
+    "sample_index": 23,
+    "sample_tag": "median_err",
+    "sample_description": "Median Error Sample (Index 23)",
+    "variable": "vorticity",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "5ee85ea6d5bcc7989e304d1d4d884cf0d9ec1719",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -14.618250846862793,
+        "field_vmax": 14.618250846862793,
+        "error_vmax": 0.7277171611785889
+      },
+      "h10": {
+        "field_vmin": -14.169351577758789,
+        "field_vmax": 14.169351577758789,
+        "error_vmax": 1.859203815460205
+      },
+      "h20": {
+        "field_vmin": -13.871367454528809,
+        "field_vmax": 13.871367454528809,
+        "error_vmax": 3.367990255355835
+      },
+      "h30": {
+        "field_vmin": -13.909276008605957,
+        "field_vmax": 13.909276008605957,
+        "error_vmax": 5.015626907348633
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": "Parent H8 Long-Best",
+      "h16_short_best_ep8": "H16 Short-Best (Ep8)",
+      "h16_long_best_ep12": "H16 Long-Best (Ep12)"
+    }
+  },
+  {
+    "figure_name": "comparison_median_err_tracer.png",
+    "sample_index": 23,
+    "sample_tag": "median_err",
+    "sample_description": "Median Error Sample (Index 23)",
+    "variable": "tracer",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "5ee85ea6d5bcc7989e304d1d4d884cf0d9ec1719",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -0.16833123564720154,
+        "field_vmax": 0.1638122946023941,
+        "error_vmax": 0.033188533037900925
+      },
+      "h10": {
+        "field_vmin": -0.14581283926963806,
+        "field_vmax": 0.1430947631597519,
+        "error_vmax": 0.05397139489650726
+      },
+      "h20": {
+        "field_vmin": -0.12254254519939423,
+        "field_vmax": 0.1270170509815216,
+        "error_vmax": 0.1393381506204605
+      },
+      "h30": {
+        "field_vmin": -0.13186074793338776,
+        "field_vmax": 0.1274358630180359,
+        "error_vmax": 0.18571612238883972
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": "Parent H8 Long-Best",
+      "h16_short_best_ep8": "H16 Short-Best (Ep8)",
+      "h16_long_best_ep12": "H16 Long-Best (Ep12)"
+    }
+  },
+  {
+    "figure_name": "comparison_high_err_u.png",
+    "sample_index": 36,
+    "sample_tag": "high_err",
+    "sample_description": "High Error Sample (Index 36, 85th percentile)",
+    "variable": "u",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "5ee85ea6d5bcc7989e304d1d4d884cf0d9ec1719",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -0.5116516351699829,
+        "field_vmax": 0.509411096572876,
+        "error_vmax": 0.028300099074840546
+      },
+      "h10": {
+        "field_vmin": -0.5425310730934143,
+        "field_vmax": 0.5361733436584473,
+        "error_vmax": 0.03395615518093109
+      },
+      "h20": {
+        "field_vmin": -0.681904137134552,
+        "field_vmax": 0.5532410740852356,
+        "error_vmax": 0.18848344683647156
+      },
+      "h30": {
+        "field_vmin": -0.7595169544219971,
+        "field_vmax": 0.6806896924972534,
+        "error_vmax": 0.23312009871006012
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": "Parent H8 Long-Best",
+      "h16_short_best_ep8": "H16 Short-Best (Ep8)",
+      "h16_long_best_ep12": "H16 Long-Best (Ep12)"
+    }
+  },
+  {
+    "figure_name": "comparison_high_err_vorticity.png",
+    "sample_index": 36,
+    "sample_tag": "high_err",
+    "sample_description": "High Error Sample (Index 36, 85th percentile)",
+    "variable": "vorticity",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "5ee85ea6d5bcc7989e304d1d4d884cf0d9ec1719",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -5.361495494842529,
+        "field_vmax": 5.361495494842529,
+        "error_vmax": 0.5110296607017517
+      },
+      "h10": {
+        "field_vmin": -5.452371597290039,
+        "field_vmax": 5.452371597290039,
+        "error_vmax": 0.6023296117782593
+      },
+      "h20": {
+        "field_vmin": -6.266080856323242,
+        "field_vmax": 6.266080856323242,
+        "error_vmax": 2.0843682289123535
+      },
+      "h30": {
+        "field_vmin": -7.2135844230651855,
+        "field_vmax": 7.2135844230651855,
+        "error_vmax": 3.295079469680786
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": "Parent H8 Long-Best",
+      "h16_short_best_ep8": "H16 Short-Best (Ep8)",
+      "h16_long_best_ep12": "H16 Long-Best (Ep12)"
+    }
+  },
+  {
+    "figure_name": "comparison_high_err_tracer.png",
+    "sample_index": 36,
+    "sample_tag": "high_err",
+    "sample_description": "High Error Sample (Index 36, 85th percentile)",
+    "variable": "tracer",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "5ee85ea6d5bcc7989e304d1d4d884cf0d9ec1719",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -0.4861178696155548,
+        "field_vmax": 0.4899961054325104,
+        "error_vmax": 0.03998969495296478
+      },
+      "h10": {
+        "field_vmin": -0.4784558415412903,
+        "field_vmax": 0.49057379364967346,
+        "error_vmax": 0.09502419829368591
+      },
+      "h20": {
+        "field_vmin": -0.5150759220123291,
+        "field_vmax": 0.47259998321533203,
+        "error_vmax": 0.2920680642127991
+      },
+      "h30": {
+        "field_vmin": -0.5287782549858093,
+        "field_vmax": 0.49220216274261475,
+        "error_vmax": 0.3517325520515442
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": "Parent H8 Long-Best",
+      "h16_short_best_ep8": "H16 Short-Best (Ep8)",
+      "h16_long_best_ep12": "H16 Long-Best (Ep12)"
+    }
+  }
+]
