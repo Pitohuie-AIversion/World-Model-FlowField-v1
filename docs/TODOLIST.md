@@ -3,7 +3,7 @@
 > **项目名称**：World-Model-FlowField-v1  
 > **基准数据集**：The Well `shear_flow` (2D 不可压缩剪切流 + 被动示踪标量)  
 > **计算环境**：NVIDIA vGPU-32GB × 2 (CUDA 13.0, PyTorch 2.10.0+cu128)  
-> **工程测试基线**：全套自动化测试套件通过（240 项用例收集/回归测试全部绿灯通过，含协议契约与实验身份治理测试）
+> **工程测试基线**：全套自动化测试套件通过（247 项用例收集/回归测试全部绿灯通过，含协议契约、实验身份治理、编译兼容性与时序对齐测试）
 
 ---
 
@@ -133,8 +133,9 @@
 - [x] **任务 1：课程式长时程多步自回归展开 ($H=4, 8, 16$) 与推前训练机制**：
   - 完成 `CurriculumRolloutScheduler`（倍增/线性/固定阶段调度）；
   - 完成 `HistoryBuffer` 与 `LatentForecaster` 的截断梯度推前预热机制（`stop-gradient pushforward`）；
+  - 严格规范推前训练时间契约：`future` 模式监督 $q_{\text{future}}[K:K+H]$；`history` 模式底层支持扩展上下文切片，标准 4 步数据入口实施 fail-closed 安全隔离；
   - 完成 Horizon-R1（$H=2, 4, 8$）与 Horizon-R2（$H=16$ 双卡 DDP）长程推演训练与物理大盘评测；
-  - 通过 11 项专用回归测试套件（`tests/test_curriculum_pushforward.py`）；
+  - 通过 16 项专用回归测试套件（`tests/test_curriculum_pushforward.py`）；
   - *代码位置*：[src/training/curriculum.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/training/curriculum.py), [scripts/train_forecaster.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/train_forecaster.py), [scripts/run_horizon_ablation.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/run_horizon_ablation.py), [scripts/run_h16_extension.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/run_h16_extension.py)
 - [ ] **任务 2：潜流形生成式扩散世界模型 (Latent Diffusion Flow Model)**
 - [ ] **任务 3：宽参数域泛化与极端工况外推适应性**
