@@ -69,6 +69,22 @@ BENCHMARK_TARGETS = {
         "expected_lambda_vort": 0.05,
         "selection_criterion": "diagnostic_long_best_step_11",
     },
+    "h12_short_best": {
+        "title": "H12 Short-Best",
+        "path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H12/latent_transformer/best_vrmse_mean.pt",
+        "expected_horizon": 12,
+        "expected_lambda_div": 0.01,
+        "expected_lambda_vort": 0.05,
+        "selection_criterion": "best_vrmse_mean",
+    },
+    "h12_long_best": {
+        "title": "H12 Long-Best",
+        "path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H12/latent_transformer/best_long_vrmse.pt",
+        "expected_horizon": 12,
+        "expected_lambda_div": 0.01,
+        "expected_lambda_vort": 0.05,
+        "selection_criterion": "best_long_vrmse_j_long",
+    },
     "h16_short_best_ep8": {
         "title": "H16 Short-Best (Ep 8)",
         "path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_vrmse_mean.pt",
@@ -87,6 +103,7 @@ BENCHMARK_TARGETS = {
     },
 }
 
+DEFAULT_TARGETS = ["parent_h8_ep11", "h16_short_best_ep8", "h16_long_best_ep12"]
 EVAL_HORIZONS = [1, 5, 10, 16, 20, 30]
 DEFAULT_OUTPUT_METRICS = "outputs/metrics/h16_benchmark_evaluation.json"
 
@@ -314,6 +331,12 @@ def main():
     parser.add_argument("--formal", action="store_true", help="Enforce fail-closed provenance validation (clean git tree)")
     parser.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--batch_size", type=int, default=2)
+    parser.add_argument(
+        "--targets",
+        type=str,
+        default=",".join(DEFAULT_TARGETS),
+        help=f"Comma-separated list of target keys to evaluate. Available: {list(BENCHMARK_TARGETS.keys())}",
+    )
     args = parser.parse_args()
 
     # 1. Formal preflight provenance: record state at script startup BEFORE opening any output files
@@ -374,9 +397,16 @@ def main():
         "sample_independence_note": "45 sliding windows evaluated across 5 source trajectories; not 45 independent simulations",
     }
 
-    # 3. Run evaluation across the 3 target models
+    # 3. Run evaluation across specified target models
+    target_keys = [k.strip() for k in args.targets.split(",") if k.strip()]
     benchmark_results = {}
-    for target_key, target_info in BENCHMARK_TARGETS.items():
+    for target_key in target_keys:
+        if target_key not in BENCHMARK_TARGETS:
+            raise KeyError(
+                f"Target key '{target_key}' not in BENCHMARK_TARGETS. "
+                f"Available: {list(BENCHMARK_TARGETS.keys())}"
+            )
+        target_info = BENCHMARK_TARGETS[target_key]
         ckpt_path = target_info["path"]
         print(f"\n--- Evaluating: {target_info['title']} ({ckpt_path}) ---")
         if not os.path.isfile(ckpt_path):
