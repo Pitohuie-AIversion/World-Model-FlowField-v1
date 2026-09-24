@@ -141,6 +141,9 @@ outputs/*
 !outputs/figures/README.md
 !outputs/logs/README.md
 !outputs/tables/*.tex
+!outputs/videos/
+!outputs/videos/*.json
+!outputs/videos/*.md
 
 # ------------------------------------------------------------------------------
 # 10. 生成的可视化图像与多媒体 (Generated Visualizations & Media)

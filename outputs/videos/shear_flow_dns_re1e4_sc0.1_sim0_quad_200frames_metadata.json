@@ -1,0 +1,35 @@
+{
+  "video_path": "outputs/videos/shear_flow_dns_re1e4_sc0.1_sim0_quad_200frames.mp4",
+  "gif_path": "outputs/videos/shear_flow_dns_re1e4_sc0.1_sim0_quad_200frames.gif",
+  "dataset_path": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+  "dataset_sha256": "71ff80e7e59d22167359aa4f9dc02af0e272ed0059336a043e40805e89ac71e1",
+  "simulation_index": 0,
+  "reynolds": 10000.0,
+  "schmidt": 0.10000000149011612,
+  "layout": "quad",
+  "panels": [
+    "vorticity",
+    "u",
+    "tracer",
+    "speed"
+  ],
+  "total_frames": 200,
+  "fps": 20,
+  "duration_seconds": 10.0,
+  "resolution": {
+    "width": 2400,
+    "height": 1350
+  },
+  "file_size_bytes": 2008316,
+  "video_codec": "H.264 / yuv420p",
+  "domain_size": [
+    1.0,
+    2.0
+  ],
+  "spatial_grid": [
+    256,
+    512
+  ],
+  "timestamp": "2026-09-24T11:08:46.041584",
+  "git_commit": "9954768add8ef6a4419d9e7be0e4c41414f420a2"
+}

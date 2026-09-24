@@ -51,3 +51,6 @@ logs/*
 !figures/README.md
 !logs/README.md
 !tables/*.tex
+!videos/
+!videos/*.json
+!videos/*.md
