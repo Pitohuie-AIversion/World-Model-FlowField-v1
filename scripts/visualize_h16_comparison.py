@@ -57,6 +57,7 @@ from src.utils.physics_contract import (
     PHYSICS_PROTOCOL,
     SPATIAL_AXIS_CONTRACT,
     SHEAR_FLOW_DOMAIN_SIZE_XY,
+    zero_mean_pressure_gauge,
 )
 from src.utils.provenance import (
     compute_file_sha256,
@@ -68,9 +69,36 @@ from src.utils.provenance import (
 from src.utils.reproducibility import seed_everything
 
 TARGET_SAMPLES = [
-    {"index": 0, "tag": "fixed_ref", "desc": "Fixed Reference Sample (Index 0)"},
-    {"index": 23, "tag": "median_err", "desc": "Median Error Sample (Index 23)"},
-    {"index": 36, "tag": "high_err", "desc": "High Error Sample (Index 36, 85th percentile)"},
+    {
+        "index": 0,
+        "tag": "fixed_ref",
+        "desc": "Fixed Reference Sample (Index 0)",
+        "selection_basis": "Fixed anchor window index 0 for longitudinal benchmark consistency",
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "sim_idx": 1,
+        "start_t": 0,
+        "end_t": 34,
+    },
+    {
+        "index": 23,
+        "tag": "median_err",
+        "desc": "Median Error Sample (Index 23)",
+        "selection_basis": "Median window when 45 test windows are sorted by Parent H8 J_long VRMSE error (rank 23/45)",
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "sim_idx": 5,
+        "start_t": 100,
+        "end_t": 134,
+    },
+    {
+        "index": 36,
+        "tag": "high_err",
+        "desc": "High Error Sample (Index 36, 85th percentile)",
+        "selection_basis": "High-error window when 45 test windows are sorted by Parent H8 J_long VRMSE error (rank 39/45, ~85th percentile)",
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "sim_idx": 16,
+        "start_t": 0,
+        "end_t": 34,
+    },
 ]
 
 TARGET_VARS = ["u", "vorticity", "tracer"]
@@ -106,20 +134,24 @@ def generate_comparison_grid(
     var_name: str,
     gt_trajectory: torch.Tensor,
     predictions: Dict[str, torch.Tensor],
+    models_meta: Dict[str, dict],
     out_dir: Path,
     re_val: float,
     sc_val: float,
     git_commit: str,
+    git_dirty: bool,
+    split_hash: str,
+    norm_hash: str,
 ) -> Tuple[str, dict]:
-    """Generates 4x7 comparative grid figure with shared colorbars."""
+    """Generates 4x7 comparative grid figure with row-shared colorbars."""
     n_rows = len(HORIZONS)
     n_cols = 7  # GT, H8 Pred, H8 Err, H16-S Pred, H16-S Err, H16-L Pred, H16-L Err
 
     fig, axes = plt.subplots(
         n_rows,
         n_cols,
-        figsize=(24, 13.5),
-        gridspec_kw={"wspace": 0.08, "hspace": 0.22},
+        figsize=(24, 14),
+        gridspec_kw={"wspace": 0.08, "hspace": 0.25},
     )
 
     models_order = ["parent_h8_ep11", "h16_short_best_ep8", "h16_long_best_ep12"]
@@ -211,7 +243,15 @@ def generate_comparison_grid(
         cbar_err.ax.tick_params(labelsize=8)
 
     sample_title = f"{sample_info['desc']} | Var: {var_name.upper()} | Re={re_val:.0f}, Sc={sc_val:.2f}"
-    fig.suptitle(sample_title, fontsize=15, fontweight="bold", y=0.98)
+    fig.suptitle(sample_title, fontsize=15, fontweight="bold", y=0.985)
+    fig.text(
+        0.5,
+        0.955,
+        "Row-shared colorbars (per-horizon independent scaling: field 0.5%-99.5%, error 99.5%) | Do not compare color intensities across rows",
+        ha="center",
+        fontsize=10,
+        color="#555555",
+    )
 
     # File output
     filename = f"comparison_{sample_info['tag']}_{var_name}.png"
@@ -224,13 +264,22 @@ def generate_comparison_grid(
         "sample_index": sample_info["index"],
         "sample_tag": sample_info["tag"],
         "sample_description": sample_info["desc"],
+        "sample_selection_basis": sample_info.get("selection_basis"),
+        "source_file": sample_info.get("source_file"),
+        "simulation_index": sample_info.get("sim_idx"),
+        "start_t": sample_info.get("start_t"),
+        "end_t": sample_info.get("end_t"),
         "variable": var_name,
         "re": re_val,
         "sc": sc_val,
         "evaluation_git_commit": git_commit,
+        "evaluation_git_dirty": git_dirty,
+        "split_hash": split_hash,
+        "normalizer_hash": norm_hash,
         "horizons": HORIZONS,
+        "colorbar_scaling_policy": "同一时间步共享色条；不同时间步独立缩放；显示范围采用 0.5%–99.5%（场）与 99.5%（误差）百分位截断。不可直接跨时间步（行）比较颜色深浅。",
         "colorbar_norms": norm_metadata,
-        "models_evaluated": model_labels,
+        "models_evaluated": models_meta,
     }
     meta_path = out_dir / f"comparison_{sample_info['tag']}_{var_name}_metadata.json"
     with open(meta_path, "w") as f:
@@ -242,22 +291,23 @@ def generate_comparison_grid(
 def main():
     parser = argparse.ArgumentParser(description="Generate publication-grade qualitative comparisons across H8 and H16")
     parser.add_argument("--data_dir", type=str, default="/root/autodl-tmp/datasets/shear_flow")
-    parser.add_argument("--out_dir", type=str, default="outputs/figures/h16_comparison")
+    parser.add_argument("--out_dir", type=str, default="outputs/figures/h16_comparison_v2")
     parser.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--formal", action="store_true", help="Fail closed on dirty git state")
     args = parser.parse_args()
 
+    # Capture git state at startup BEFORE creating any output directories or files
     git_commit = get_git_commit(PROJECT_ROOT)
     git_dirty = is_git_dirty(PROJECT_ROOT)
     if args.formal and git_dirty:
-        raise RuntimeError("Formal visualization failed-closed: working tree is dirty.")
+        raise RuntimeError("Formal visualization failed-closed: working tree is dirty at startup.")
 
     seed_everything(42)
     device = torch.device(args.device)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Generating qualitative comparisons on {device} (Git Commit: {git_commit})...")
+    print(f"Generating qualitative comparisons on {device} (Git Commit: {git_commit}, Dirty: {git_dirty})...")
 
     # 1. Dataset & Normalizer
     split_file = "outputs/splits/grouped_split.json"
@@ -285,6 +335,7 @@ def main():
 
     # 2. Load all 3 models with strict contract checks
     models = {}
+    models_meta = {}
     for m_key, m_info in BENCHMARK_TARGETS.items():
         ckpt_path = m_info["path"]
         print(f"Loading and validating: {m_info['title']} ({ckpt_path})")
@@ -300,6 +351,13 @@ def main():
             formal=args.formal,
         )
         models[m_key] = model
+        models_meta[m_key] = {
+            "title": m_info["title"],
+            "checkpoint_path": ckpt_path,
+            "full_sha256": compute_file_sha256(ckpt_path),
+            "expected_horizon": m_info["expected_horizon"],
+            "selection_criterion": m_info["selection_criterion"],
+        }
 
     # 3. Cache trajectories for target samples
     target_indices = {s["index"]: s for s in TARGET_SAMPLES}
@@ -316,16 +374,15 @@ def main():
                 re = batch["re"].to(device)
                 sc = batch["sc"].to(device)
 
-                # Denormalize ground truth
+                # Denormalize ground truth and apply robust zero-mean pressure gauge
                 t_phys = normalizer.denormalize(q_fut[0, :max(HORIZONS)]).clone()
-                # Zero-mean gauge pressure
-                t_phys[2:3] -= t_phys[2:3].mean(dim=(-2, -1), keepdim=True)
+                t_phys = zero_mean_pressure_gauge(t_phys)
 
                 preds = {}
                 for m_key, m in models.items():
                     pred_traj = m.forward_rollout(q_hist, re, sc, horizon=max(HORIZONS))
                     p_phys = normalizer.denormalize(pred_traj[0, :max(HORIZONS)]).clone()
-                    p_phys[2:3] -= p_phys[2:3].mean(dim=(-2, -1), keepdim=True)
+                    p_phys = zero_mean_pressure_gauge(p_phys)
                     preds[m_key] = p_phys
 
                 sample_trajectories[idx] = {
@@ -351,10 +408,14 @@ def main():
                 var_name=var,
                 gt_trajectory=s_data["gt"],
                 predictions=s_data["preds"],
+                models_meta=models_meta,
                 out_dir=out_dir,
                 re_val=s_data["re"],
                 sc_val=s_data["sc"],
                 git_commit=git_commit,
+                git_dirty=git_dirty,
+                split_hash=split_hash,
+                norm_hash=norm_hash,
             )
             print(f"  Saved: {fig_path}")
             manifest.append(meta)

@@ -15,6 +15,8 @@ import os
 import pytest
 import torch
 
+from typing import Optional, Tuple
+
 from scripts.evaluate_h16_benchmark import (
     validate_benchmark_checkpoint,
     validate_metric_finiteness,
@@ -29,23 +31,28 @@ from src.utils.physics_contract import (
 def _create_dummy_checkpoint_data(
     seed: int = 42,
     horizon: int = 16,
+    lambda_div: float = 0.01,
+    lambda_vort: float = 0.05,
     split_hash: str = "41fbe6ebe7edd460",
     normalizer_hash: str = "3a0fe52689657618",
     training_git_commit: str = "0a8a4da137e3f73c4f696cc81f527c32a8ba8405",
-    training_git_dirty: bool = False,
+    training_git_dirty: Optional[bool] = False,
     physics_protocol: str = PHYSICS_PROTOCOL,
     spatial_axis_contract: str = SPATIAL_AXIS_CONTRACT,
+    physics_domain_size_xy: Tuple[float, float] = SHEAR_FLOW_DOMAIN_SIZE_XY,
 ) -> dict:
     """Creates a mock checkpoint dictionary matching production schema."""
     cfg = {
         "model_type": "latent_transformer",
         "horizon": horizon,
         "seed": seed,
+        "lambda_div": lambda_div,
+        "lambda_vort": lambda_vort,
         "split_hash": split_hash,
         "normalizer_hash": normalizer_hash,
         "physics_protocol": physics_protocol,
         "spatial_axis_contract": spatial_axis_contract,
-        "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
+        "physics_domain_size_xy": list(physics_domain_size_xy),
         "training_git_commit": training_git_commit,
         "training_git_dirty": training_git_dirty,
     }
@@ -59,6 +66,7 @@ def _create_dummy_checkpoint_data(
         "training_git_dirty": training_git_dirty,
         "physics_protocol": physics_protocol,
         "spatial_axis_contract": spatial_axis_contract,
+        "physics_domain_size_xy": list(physics_domain_size_xy),
         "config": cfg,
     }
 
@@ -69,7 +77,12 @@ def test_validate_benchmark_checkpoint_valid(tmp_path):
     data = _create_dummy_checkpoint_data(seed=42, horizon=16)
     torch.save(data, ckpt_file)
 
-    target_info = {"expected_horizon": 16, "title": "H16 Long-Best"}
+    target_info = {
+        "expected_horizon": 16,
+        "expected_lambda_div": 0.01,
+        "expected_lambda_vort": 0.05,
+        "title": "H16 Long-Best",
+    }
     prov = validate_benchmark_checkpoint(
         ckpt_path=ckpt_file,
         ckpt_data=data,
@@ -145,6 +158,26 @@ def test_validate_benchmark_checkpoint_horizon_mismatch(tmp_path):
         )
 
 
+def test_validate_benchmark_checkpoint_loss_mismatch(tmp_path):
+    """Mismatch in physical loss coefficients (lambda_div or lambda_vort) must raise ValueError."""
+    ckpt_file = str(tmp_path / "loss_mismatch.pt")
+    data = _create_dummy_checkpoint_data(lambda_div=0.0)
+    torch.save(data, ckpt_file)
+
+    target_info = {"expected_horizon": 16, "expected_lambda_div": 0.01, "expected_lambda_vort": 0.05}
+    with pytest.raises(ValueError, match="Loss configuration mismatch for h16_target: lambda_div"):
+        validate_benchmark_checkpoint(
+            ckpt_path=ckpt_file,
+            ckpt_data=data,
+            cfg=data["config"],
+            target_key="h16_target",
+            target_info=target_info,
+            eval_split_hash="41fbe6ebe7edd460",
+            eval_normalizer_hash="3a0fe52689657618",
+            formal=False,
+        )
+
+
 def test_validate_benchmark_checkpoint_dirty_in_formal(tmp_path):
     """Under formal mode, training_git_dirty=True must fail closed."""
     ckpt_file = str(tmp_path / "dirty_ckpt.pt")
@@ -152,7 +185,7 @@ def test_validate_benchmark_checkpoint_dirty_in_formal(tmp_path):
     torch.save(data, ckpt_file)
 
     target_info = {"expected_horizon": 16}
-    with pytest.raises(RuntimeError, match="Formal evaluation failed-closed.*dirty working tree"):
+    with pytest.raises(RuntimeError, match="Formal validation failed.*dirty"):
         validate_benchmark_checkpoint(
             ckpt_path=ckpt_file,
             ckpt_data=data,
@@ -165,14 +198,56 @@ def test_validate_benchmark_checkpoint_dirty_in_formal(tmp_path):
         )
 
 
-def test_validate_benchmark_checkpoint_unknown_commit_in_formal(tmp_path):
-    """Under formal mode, unknown training git commit must fail closed."""
-    ckpt_file = str(tmp_path / "unknown_commit.pt")
-    data = _create_dummy_checkpoint_data(training_git_commit="UNKNOWN")
+def test_validate_benchmark_checkpoint_dirty_none_in_formal(tmp_path):
+    """Under formal mode, training_git_dirty=None (missing state) must fail closed."""
+    ckpt_file = str(tmp_path / "dirty_none_ckpt.pt")
+    data = _create_dummy_checkpoint_data(training_git_dirty=None)
+    data["training_git_dirty"] = None
+    data["config"]["training_git_dirty"] = None
     torch.save(data, ckpt_file)
 
     target_info = {"expected_horizon": 16}
-    with pytest.raises(RuntimeError, match="Formal evaluation failed-closed.*unknown training git commit"):
+    with pytest.raises(RuntimeError, match="Formal validation failed.*dirty"):
+        validate_benchmark_checkpoint(
+            ckpt_path=ckpt_file,
+            ckpt_data=data,
+            cfg=data["config"],
+            target_key="h16_target",
+            target_info=target_info,
+            eval_split_hash="41fbe6ebe7edd460",
+            eval_normalizer_hash="3a0fe52689657618",
+            formal=True,
+        )
+
+
+def test_validate_benchmark_checkpoint_invalid_commit_in_formal(tmp_path):
+    """Under formal mode, non-existent cryptographic git commit must fail closed."""
+    ckpt_file = str(tmp_path / "invalid_commit.pt")
+    data = _create_dummy_checkpoint_data(training_git_commit="deadbeefcafebabe0123456789abcdef01234567")
+    torch.save(data, ckpt_file)
+
+    target_info = {"expected_horizon": 16}
+    with pytest.raises(RuntimeError, match=r"(?s)Formal validation failed.*git commit"):
+        validate_benchmark_checkpoint(
+            ckpt_path=ckpt_file,
+            ckpt_data=data,
+            cfg=data["config"],
+            target_key="h16_target",
+            target_info=target_info,
+            eval_split_hash="41fbe6ebe7edd460",
+            eval_normalizer_hash="3a0fe52689657618",
+            formal=True,
+        )
+
+
+def test_validate_benchmark_checkpoint_wrong_domain_size(tmp_path):
+    """Mismatch in domain size bounds must fail closed."""
+    ckpt_file = str(tmp_path / "wrong_domain.pt")
+    data = _create_dummy_checkpoint_data(physics_domain_size_xy=(2.0, 2.0))
+    torch.save(data, ckpt_file)
+
+    target_info = {"expected_horizon": 16}
+    with pytest.raises(RuntimeError, match=r"(?s)Formal validation failed.*Domain mismatch"):
         validate_benchmark_checkpoint(
             ckpt_path=ckpt_file,
             ckpt_data=data,
