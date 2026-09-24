@@ -27,6 +27,16 @@ outputs/figures/
 │   ├── rollout_benchmark_curves.png
 │   ├── failure_cases_analysis.png
 │   └── flow_state_real.png
+├── h16_comparison/                # H16 多模型超长时序展开定性对比
+│   ├── comparison_fixed_ref_*.png (+ metadata.json)
+│   ├── comparison_median_err_*.png (+ metadata.json)
+│   ├── comparison_high_err_*.png (+ metadata.json)
+│   └── comparison_figures_index.json
+├── h16_comparison_v2/             # H16 正式版定性对比（含双卡 DDP 与严格溯源）
+│   ├── comparison_fixed_ref_*.png (+ metadata.json)
+│   ├── comparison_median_err_*.png (+ metadata.json)
+│   ├── comparison_high_err_*.png (+ metadata.json)
+│   └── comparison_figures_index.json
 ├── qualitative/                   # 定性流场空间分布与涡量场可视化
 │   ├── horizon_r1/                # Horizon-R1 选型定性评估 (包含 H8 长程最佳模型对比)
 │   │   ├── compare_parent_vs_h8_seed42_h30_u.png (+ metadata.json)
@@ -61,4 +71,8 @@ outputs/figures/
   ```bash
   # H8 长程模型评估三联组图 (自动生成 PNG 与 metadata JSON)
   python scripts/generate_qualitative_figures.py --preset h8_long_eval
+  ```
+- **H16 多模型超长程对比图生成**：
+  ```bash
+  python scripts/visualize_h16_comparison.py
   ```

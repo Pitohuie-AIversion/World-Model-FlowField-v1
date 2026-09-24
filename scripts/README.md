@@ -1,6 +1,6 @@
 # 流水线脚本库全景拓扑与调用指南 (Scripts Architecture & Workflow)
 
-本目录包含流场世界模型（World-Model-FlowField-v1）完整科研闭环的 27 个核心脚本。涵盖数据工程、潜空间表征、动力学推演训练、物理消融实验、多种子评测统计、动力学机理诊断及论文出版图表渲染。
+本目录包含流场世界模型（World-Model-FlowField-v1）完整科研闭环的 29 个核心脚本。涵盖数据工程、潜空间表征、动力学推演训练、物理消融实验、多种子评测统计、动力学机理诊断、超长程定性比对及论文出版动态视频渲染。
 
 ---
 
@@ -19,7 +19,7 @@
                                 │ (冻结/提供解码器雅可比穿透)
                                 ▼
 [ 3. 时空动力学世界模型推演 (Stage C/D/H) ]
-  ├── train_forecaster.py (单次单卡/单模型训练入口)
+  ├── train_forecaster.py (单次单卡/单模型训练入口，支持编译加速与推前训练)
   ├── run_physics_ablation.py (Closure-R4 物理损失 E0-E4 双卡调度)
   ├── run_horizon_ablation.py (Horizon-R1 跨度 H2/H4/H8 消融调度)
   └── run_h16_extension.py (Horizon-R2 极端长跨度 H16 双卡 DDP 加速)
@@ -28,6 +28,7 @@
 [ 4. 评测与统计聚合 (Evaluation & Multi-Seed) ]
   ├── evaluate_physics_ablation.py ──► aggregate_multi_seed.py
   ├── evaluate_horizon_ablation.py ──► (遴选 H8 Saved Long-Best 模型)
+  ├── evaluate_h16_benchmark.py (H16 极限展开基准物理评测)
   └── evaluate_rollout.py (长程自回归基准对比)
                                 │
                                 ▼
@@ -37,10 +38,12 @@
   └── analyze_failure_cases.py (长程推演失败案例与误差分位数诊断)
                                 │
                                 ▼
-[ 6. 论文正文图表与 LaTeX 表格渲染 (Paper Artifacts) ]
+[ 6. 论文正文图表、多媒体视频与渲染 (Paper Artifacts & Media) ]
   ├── generate_paper_figures.py (论文核心图 Figure A & B)
   ├── generate_paper_tables.py (论文 Table 1 - 4 LaTeX 源码)
   ├── generate_qualitative_figures.py (流场定性比对与多时间步演化三联图)
+  ├── visualize_h16_comparison.py (H16 多模型定性对比面板与 provenance 校验)
+  ├── generate_shear_flow_video.py (200 帧完整时序 2x2 联动视频与 GIF 动画)
   ├── plot_physics_ablation.py (物理损失消融曲线绘制)
   └── plot_rollout_comparison.py (长程滚动基准对比图)
 ```
@@ -96,13 +99,15 @@
 | [analyze_spectral_dissipation.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/analyze_spectral_dissipation.py) | 计算二维能谱、拟能级联与方向各向异性耗散比 | 输出 `directional_spectral_analysis.json` 与能谱比曲线 |
 | [analyze_failure_cases.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/analyze_failure_cases.py) | 识别与分析最差推演轨迹与发散机制 | 输出 `failure_cases_analysis.json` 与故障诊断图 |
 
-### 2.6 论文正文图表与 LaTeX 表格渲染 (Paper Artifacts & Tables)
+### 2.6 论文正文图表、多媒体视频与定性渲染 (Paper Artifacts, Media & Qualitative)
 
 | 脚本文件 | 功能说明 | 核心输入 / 输出 |
 | :--- | :--- | :--- |
 | [generate_paper_figures.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/generate_paper_figures.py) | 绘制论文核心高质量图表 (Figure A & B) | 输出 `outputs/figures/manuscript/figure_*.png` |
 | [generate_paper_tables.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/generate_paper_tables.py) | 自动提取指标生成学术论文 LaTeX 表格 (Table 1 - 4) | 输出 `outputs/tables/table_*.tex` |
 | [generate_qualitative_figures.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/generate_qualitative_figures.py) | 生成流场空间分布、基线对比与多步演化定性图 | 输出 `outputs/figures/qualitative/` 与对应 metadata |
+| [visualize_h16_comparison.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/visualize_h16_comparison.py) | 严苛验证 Provenance 并生成 H16 多模型超长程演化定性对比面板 | 输出 `outputs/figures/h16_comparison/` 与元数据索引 |
+| [generate_shear_flow_video.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/generate_shear_flow_video.py) | 渲染 200 帧完整剪切流生命周期时序四联动态视频与预览 GIF | 输出 `outputs/videos/*.mp4` 与 `*.gif` |
 | [plot_physics_ablation.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/plot_physics_ablation.py) | 绘制单种子与多种子物理消融多指标对比曲线 | 输出 `outputs/figures/closure_r4/` 曲线图 |
 | [plot_rollout_comparison.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/plot_rollout_comparison.py) | 绘制长程自回归滚动推演对比基线误差曲线 | 输出 `outputs/figures/benchmark/rollout_benchmark_curves.png` |
 
@@ -146,9 +151,26 @@ python scripts/analyze_spectral_dissipation.py
 python scripts/generate_paper_tables.py
 ```
 
-### 3.4 高性能编译加速训练 (PyTorch 2.x torch.compile)
+### 3.4 高性能编译与推前机制训练 (PyTorch 2.x compile & Pushforward)
 ```bash
-# 开启内核融合加速 (TorchInductor 自动融合注意力与解码层，零显存碎片)
-python scripts/train_forecaster.py --model latent_transformer --horizon 4 --compile
+# 开启内核融合加速并配置推前训练
+python scripts/train_forecaster.py \
+  --model latent_transformer \
+  --horizon 4 \
+  --compile \
+  --pushforward_steps 2
+```
+
+### 3.5 渲染 200 帧生命周期全景动态视频与 H16 定性比对
+```bash
+# 渲染 200 帧 2x2 四联全景视频 (20 FPS, 10.0 秒)
+python scripts/generate_shear_flow_video.py \
+  --hdf5_path /root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5 \
+  --sim_idx 0 \
+  --layout quad \
+  --output_video outputs/videos/shear_flow_dns_re1e4_sc0.1_sim0_quad_200frames.mp4
+
+# 生成 H16 对比图表并严格校验样本溯源契约
+python scripts/visualize_h16_comparison.py
 ```
 

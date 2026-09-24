@@ -3,7 +3,7 @@
 > **项目名称**：World-Model-FlowField-v1  
 > **基准数据集**：The Well `shear_flow` (2D 不可压缩剪切流 + 被动示踪标量)  
 > **计算环境**：NVIDIA vGPU-32GB × 2 (CUDA 13.0, PyTorch 2.10.0+cu128)  
-> **工程测试基线**：全套自动化测试套件通过（56/56 tests passed，含协议契约与实验身份治理测试）
+> **工程测试基线**：全套自动化测试套件通过（240 项用例收集/回归测试全部绿灯通过，含协议契约与实验身份治理测试）
 
 ---
 
@@ -18,10 +18,10 @@
 | **Stage 4.1** | 潜空间自由滚动机制 | `HistoryBuffer` 纯潜空间自回归推演、30 步滚动评测矩阵构建 | <font color="#2ea44f">● 已完成 (DONE)</font> |
 | **Stage 4.2** | 双卡 DDP 短程自由滚动长训练 | 引入多步滚动监督 ($H=2$) 抑制自回归自激发散、双卡分布式训练 30 Epochs | <font color="#2ea44f">● 已完成 (DONE)</font> |
 | **Stage 4.3** | 自由滚动收敛复评 | 载入单步底座与滚动长训双模型展开 30 步评测，确认单步误差暴降 80.5% | <font color="#2ea44f">● 已完成 (DONE)</font> |
-| **Stage 5** | 物理守恒损失消融实验 (E0 - E4) | 实验流水线就绪（旧四组实验为 Historical 归档；Closure-R2 E0-E4 全量重跑待调度） | <font color="#d29922">● 流水线 PASS / 跑批 PENDING</font> |
+| **Stage 5** | 物理守恒损失消融实验 (E0 - E4) | Closure-R4 物理损失 E0-E4 在三组种子（Seeds 42, 43, 44）上完成全量双卡训练、跨种子评测与配对检验闭环 | <font color="#2ea44f">● 已完成 (DONE)</font> |
 | **Stage 6** | 周期 FFT 导数与独立物理评价系统 | 二维周期谱导数与拉普拉斯算子、全量物理衍生量、8 联排出版级 Rollout 看板导出 | <font color="#2ea44f">● 已完成 (DONE)</font> |
-| **V1 全链验收** | 汇总主模型与基线、失败案例审计、架构规范与 V1 验收 | 实验身份契约全面冻结（P1-1~P1-5 闭环，Normalizer Hash 校验，Fail-Closed 阻断），待执行最终全量重跑 | <font color="#d29922">● 进行中 (IN PROGRESS)</font> |
-| **10 月路线图** | 课程式长推演、潜流形扩散、宽域泛化与三维预研 | 50~100 步课程式自回归、Latent Diffusion 湍流随机分岔、Re 宽域外推与 3D 周期谱导数 | <font color="#8c959f">○ 待进行 (PENDING)</font> |
+| **V1 全链验收** | 汇总主模型与基线、失败案例审计、架构规范与 V1 验收 | 实验身份契约全面冻结（P1-1~P1-5 闭环，Normalizer Hash 校验，Fail-Closed 阻断），Closure-R4 三种子消融与基线大盘汇总完成 | <font color="#2ea44f">● 已完成 (DONE)</font> |
+| **10 月路线图** | 课程式长推演、潜流形扩散、宽域泛化与三维预研 | 课程式多步自回归展开（H=4, 8, 16）与 Pushforward 预热机制已落地通过回归测试；潜流形扩散与三维预研待调度 | <font color="#d29922">● 部分就绪 (IN PROGRESS)</font> |
 
 ---
 
@@ -98,10 +98,10 @@
   - E2: Divergence-free penalty ($H=2, +L_{\text{div}}$)；
   - E3: Vorticity-consistent penalty ($H=2, +L_\omega$)；
   - E4: Full physics coupling ($H=2, +L_{\text{div}} + L_\omega$)；
-- [x] **实验身份治理与防静默降级**：
-  - 评估脚本严格禁止默认静默 fallback 至 Closure-R1 权重；
-  - 仅支持显式 `--allow_legacy_checkpoints` 且在输出中强制标记 `"protocol": "Closure-R1-legacy"`；
-  - *代码位置*：[scripts/evaluate_physics_ablation.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/evaluate_physics_ablation.py)
+- [x] **Closure-R4 三种子（Seeds 42, 43, 44）全量重跑与配对检验**：
+  - 双卡调度完成 15 组全量消融长训；
+  - 产出出版级三种子统计检验汇总报告 [outputs/metrics/closure_r4_physics_ablation_tri_seed_summary.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/closure_r4_physics_ablation_tri_seed_summary.json) 与论文第 5 节成果；
+  - *代码位置*：[scripts/run_physics_ablation.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/run_physics_ablation.py), [scripts/evaluate_physics_ablation.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/evaluate_physics_ablation.py), [scripts/aggregate_multi_seed.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/aggregate_multi_seed.py)
 
 ---
 
@@ -109,6 +109,7 @@
 - [x] **周期快速傅里叶变换导数与微分算子库**：
   - 二维周期谱梯度、散度、涡量、拉普拉斯算子（解析解相对误差达机器极限 $1.40 \times 10^{-12}$）；
   - 动能、拟能与能谱分析；
+  - 增加可微 Leray 谱投影算子 (`leray_projection_2d`)；
   - *代码位置*：[src/utils/fft_derivatives.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/utils/fft_derivatives.py)
 - [x] **出版级 8 联排 Rollout 物理曲线看板生成器**：
   - [scripts/plot_rollout_comparison.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/plot_rollout_comparison.py)
@@ -122,13 +123,19 @@
   - *代码位置*：[scripts/analyze_failure_cases.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/analyze_failure_cases.py)
 - [x] **系统架构说明与技术规范文档编写**：
   - [docs/ARCHITECTURE.md](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/ARCHITECTURE.md)
-- [x] **V1 阶段全链验收报告**：
+- [x] **V1 阶段全链验收报告与正式论文成果**：
   - [docs/V1_ACCEPTANCE_REPORT.md](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/V1_ACCEPTANCE_REPORT.md)
+  - [docs/MANUSCRIPT_RESULTS.md](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/MANUSCRIPT_RESULTS.md)
 
 ---
 
 ### 10 月份下一轮研发任务路线图 (October Roadmap)
-- [ ] **任务 1：课程式长时程多步自回归展开 ($H=4, 8$)**
+- [x] **任务 1：课程式长时程多步自回归展开 ($H=4, 8, 16$) 与推前训练机制**：
+  - 完成 `CurriculumRolloutScheduler`（倍增/线性/固定阶段调度）；
+  - 完成 `HistoryBuffer` 与 `LatentForecaster` 的截断梯度推前预热机制（`stop-gradient pushforward`）；
+  - 完成 Horizon-R1（$H=2, 4, 8$）与 Horizon-R2（$H=16$ 双卡 DDP）长程推演训练与物理大盘评测；
+  - 通过 11 项专用回归测试套件（`tests/test_curriculum_pushforward.py`）；
+  - *代码位置*：[src/training/curriculum.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/training/curriculum.py), [scripts/train_forecaster.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/train_forecaster.py), [scripts/run_horizon_ablation.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/run_horizon_ablation.py), [scripts/run_h16_extension.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/run_h16_extension.py)
 - [ ] **任务 2：潜流形生成式扩散世界模型 (Latent Diffusion Flow Model)**
 - [ ] **任务 3：宽参数域泛化与极端工况外推适应性**
 - [ ] **任务 4：三维不可压缩流场与复杂几何架构预研**

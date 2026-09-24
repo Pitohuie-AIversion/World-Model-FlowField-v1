@@ -11,8 +11,8 @@
 
 在 The Well 剪切流数据集（Dedalus 谱方法求解器生成）中：
 - 物理区域定义为：$x \in [0.0, 1.0]$（长度 $L_x = 1.0$），$y \in [-1.0, 1.0]$（长度 $L_y = 2.0$）；
-- 离散空间分辨率定义为：`spatial_resolution = [Ny, Nx] = [128, 256]`，即纵向 $y$ 轴 128 点，横向 $x$ 轴 256 点；
-- 早期工程实现中由于 PyTorch 维度习惯（常混淆为 `(H, W)` 对应 `(x, y)` 还是 `(y, x)`），在计算谱导数 $\frac{\partial}{\partial x}, \frac{\partial}{\partial y}$ 时容易将 $k_x$ 与 $k_y$ 波动数向量错位绑定到倒数第一/倒数第二轴上，导致计算出来的散度与真实偏导错位。
+- 离散空间分辨率定义为：`spatial_resolution = [Nx, Ny] = [128, 256]`，即横向 $x$ 轴 128 点，纵向 $y$ 轴 256 点；
+- 早期工程实现中由于混淆了网格轴序与域尺寸绑定，在计算谱导数 $\frac{\partial}{\partial x}, \frac{\partial}{\partial y}$ 时曾发生 $k_x$ 与 $k_y$ 波动数向量与尺度因子错位，导致计算出的无散场散度异常增大。
 
 ## 2. 架构决策 (Decision)
 
@@ -20,23 +20,23 @@
 
 1. **张量空间布局定序**：
    - 全局张量格式严格固定为：
-     - 单帧流场：`(B, C, Ny, Nx)` 其中 `Ny = 128`, `Nx = 256`；
-     - 时序流场：`(B, T, C, Ny, Nx)`；
+     - 单帧流场：`(B, C, Nx, Ny)` 其中 `Nx = 128`, `Ny = 256`；
+     - 时序流场：`(B, T, C, Nx, Ny)`；
    - 负索引映射约定：
-     - `dim=-2` 对应 $y$ 轴（竖直高度方向，点数 $N_y=128$，域尺寸 $L_y=2.0$）；
-     - `dim=-1` 对应 $x$ 轴（水平对流方向，点数 $N_x=256$，域尺寸 $L_x=1.0$）。
+     - `dim=-2` 对应 $x$ 轴（水平对流方向，点数 $N_x=128$，域尺寸 $L_x=1.0$）；
+     - `dim=-1` 对应 $y$ 轴（竖直高度方向，点数 $N_y=256$，域尺寸 $L_y=2.0$）。
 
 2. **二维实数快速傅里叶谱导数算子 (2D rFFT)**：
    - 在 `src/utils/fft_derivatives.py` 中实现高精度连续谱导数：
      ```python
-     # dim=-1 (x-axis) 使用 torch.fft.rfftfreq(Nx) * (2*pi / Lx)
-     # dim=-2 (y-axis) 使用 torch.fft.fftfreq(Ny) * (2*pi / Ly)
+     # dim=-2 (x-axis) 使用 torch.fft.fftfreq(nx, d=lx / nx)
+     # dim=-1 (y-axis) 使用 torch.fft.rfftfreq(ny, d=ly / ny)
      # 散度算子: div = d(u)/dx + d(v)/dy
      # 涡量算子: vort = d(v)/dx - d(u)/dy
      ```
    - 物理常数与域尺寸集中定义在 `src/utils/physics_contract.py`：
      - `SHEAR_FLOW_DOMAIN_SIZE_XY = (1.0, 2.0)`
-     - `SPATIAL_AXIS_CONTRACT = "dim-2=y(Ny=128,Ly=2.0), dim-1=x(Nx=256,Lx=1.0)"`
+     - `SPATIAL_AXIS_CONTRACT = "tensor(...,C,Nx,Ny):dim-2=x,dim-1=y"`
 
 3. **双重契约卫兵与断言防护**：
    - 在数据集加载、自编码器前向、损失计算及评测汇总中，统一调用 `validate_ablation_checkpoint_semantics()` 强校验契约标识，防止轴向错位配置隐式扩散。
