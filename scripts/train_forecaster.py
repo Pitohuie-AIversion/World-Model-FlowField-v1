@@ -29,6 +29,7 @@ from src.models.direct_transformer import DirectSTTransformer
 from src.models.encoder import Encoder2D
 from src.models.history_buffer import HistoryBuffer
 from src.models.latent_transformer import LatentSTTransformer
+from src.training import CurriculumConfig, CurriculumRolloutScheduler
 from src.utils.checkpoint import BestCheckpointTracker, load_checkpoint, save_checkpoint, strip_compiled_prefix
 from src.utils.reproducibility import seed_everything
 from src.utils.physics_contract import (
@@ -96,6 +97,8 @@ class LatentForecasterWrapper(nn.Module):
         re: torch.Tensor,
         sc: torch.Tensor,
         horizon: int,
+        pushforward_steps: int = 0,
+        noise_std: float = 0.0,
     ) -> torch.Tensor:
         """Roll out H steps entirely in latent space, then decode."""
         if self.freeze_representation:
@@ -110,8 +113,11 @@ class LatentForecasterWrapper(nn.Module):
         def step_fn(hist_z, _cond=None):
             return self.transformer(hist_z, re=re, sc=sc)
 
+        if pushforward_steps > 0:
+            buf.pushforward(step_fn, steps=pushforward_steps, noise_std=noise_std)
+
         # Rollout purely in latent space
-        z_rollout = buf.rollout(step_fn, steps=horizon)
+        z_rollout = buf.rollout(step_fn, steps=horizon, noise_std=noise_std)
         # Decode entire rollout trajectory
         q_rollout = self.decoder(z_rollout)
         return q_rollout
@@ -122,12 +128,21 @@ class LatentForecasterWrapper(nn.Module):
         re: Optional[torch.Tensor] = None,
         sc: Optional[torch.Tensor] = None,
         horizon: int = 1,
+        pushforward_steps: int = 0,
+        noise_std: float = 0.0,
     ) -> torch.Tensor:
         """Unified forward interface."""
-        if horizon == 1:
+        if horizon == 1 and pushforward_steps == 0:
             return self.forward_single_step(q_hist, re, sc)
         else:
-            return self.forward_rollout(q_hist, re, sc, horizon=horizon)
+            return self.forward_rollout(
+                q_hist,
+                re=re,
+                sc=sc,
+                horizon=horizon,
+                pushforward_steps=pushforward_steps,
+                noise_std=noise_std,
+            )
 
 
 def _init_distributed_context(
@@ -338,32 +353,42 @@ def _forward_model_prediction(
     sc: Optional[torch.Tensor],
     horizon: int,
     is_distributed: bool,
+    pushforward_steps: int = 0,
+    noise_std: float = 0.0,
 ) -> torch.Tensor:
     """Compute model forecast prediction for a given horizon."""
     if model_type == "latent_transformer":
         if is_distributed:
-            return model(q_hist, re, sc, horizon=horizon)
-        if horizon == 1:
+            return model(q_hist, re, sc, horizon=horizon, pushforward_steps=pushforward_steps, noise_std=noise_std)
+        if horizon == 1 and pushforward_steps == 0 and hasattr(model, "forward_single_step"):
             return model.forward_single_step(q_hist, re, sc)
-        return model.forward_rollout(q_hist, re, sc, horizon=horizon)
+        if hasattr(model, "forward_rollout"):
+            return model.forward_rollout(
+                q_hist, re, sc, horizon=horizon, pushforward_steps=pushforward_steps, noise_std=noise_std
+            )
+        return model(
+            q_hist, re=re, sc=sc, horizon=horizon, pushforward_steps=pushforward_steps, noise_std=noise_std
+        )
 
     if model_type in ("direct_transformer", "pde_transformer"):
-        if horizon == 1:
+        if horizon == 1 and pushforward_steps == 0:
             return model(q_hist, re=re, sc=sc)
         buf = HistoryBuffer(history_length=q_hist.shape[1])
         buf.reset(q_hist)
-        return buf.rollout(lambda hist, _c: model(hist, re=re, sc=sc), steps=horizon)
+        step_fn = lambda hist, _c: model(hist, re=re, sc=sc)
+        if pushforward_steps > 0:
+            buf.pushforward(step_fn, steps=pushforward_steps, noise_std=noise_std)
+        return buf.rollout(step_fn, steps=horizon, noise_std=noise_std)
 
     if model_type == "fno":
-        if horizon == 1:
+        if horizon == 1 and pushforward_steps == 0:
             return model(q_hist)
-        pred_list = []
-        hist_window = q_hist
-        for _ in range(horizon):
-            step_pred = model(hist_window)
-            pred_list.append(step_pred)
-            hist_window = torch.cat([hist_window[:, 1:], step_pred], dim=1)
-        return torch.cat(pred_list, dim=1)
+        buf = HistoryBuffer(history_length=q_hist.shape[1])
+        buf.reset(q_hist)
+        step_fn = lambda hist, _c: model(hist)
+        if pushforward_steps > 0:
+            buf.pushforward(step_fn, steps=pushforward_steps, noise_std=noise_std)
+        return buf.rollout(step_fn, steps=horizon, noise_std=noise_std)
 
     raise ValueError(f"Unknown model_type: {model_type}")
 
@@ -426,6 +451,9 @@ def _train_epoch(
     is_distributed: bool,
     train_sampler: Optional[Any],
     epoch: int,
+    pushforward_steps: int = 0,
+    pushforward_noise_std: float = 0.0,
+    pushforward_mode: str = "future",
 ) -> float:
     """Execute one training epoch with exact sample-weighted gradient accumulation."""
     if is_distributed and train_sampler is not None:
@@ -439,8 +467,13 @@ def _train_epoch(
     num_batches = len(train_loader)
     is_drop_last = getattr(train_loader, "drop_last", False)
     sampler = getattr(train_loader, "sampler", None)
-    total_samples = len(sampler) if sampler is not None else len(train_loader.dataset)
-    batch_size = train_loader.batch_size or 1
+    if sampler is not None:
+        total_samples = len(sampler)
+    elif hasattr(train_loader, "dataset"):
+        total_samples = len(train_loader.dataset)
+    else:
+        total_samples = len(train_loader)
+    batch_size = getattr(train_loader, "batch_size", 1) or 1
 
     if is_drop_last:
         batch_sample_counts = [batch_size] * num_batches
@@ -455,6 +488,14 @@ def _train_epoch(
         re = batch["re"].to(device) if use_condition else None
         sc = batch["sc"].to(device) if use_condition else None
 
+        avail_future = q_future.shape[1]
+        if pushforward_mode == "future" and pushforward_steps > 0:
+            eff_push = min(pushforward_steps, max(0, avail_future - horizon))
+            target_future = q_future[:, eff_push : eff_push + horizon]
+        else:
+            eff_push = pushforward_steps if pushforward_mode == "history" else 0
+            target_future = q_future[:, :horizon]
+
         with torch.amp.autocast('cuda', enabled=use_amp):
             pred = _forward_model_prediction(
                 model=model,
@@ -464,10 +505,12 @@ def _train_epoch(
                 sc=sc,
                 horizon=horizon,
                 is_distributed=is_distributed,
+                pushforward_steps=eff_push,
+                noise_std=pushforward_noise_std,
             )
             loss = _compute_batch_loss(
                 pred=pred,
-                q_future=q_future,
+                q_future=target_future,
                 normalizer=normalizer,
                 field_loss_space=field_loss_space,
                 lambda_div=lambda_div,
@@ -499,7 +542,7 @@ def _train_epoch(
         loss_tensor = torch.tensor([train_loss, float(total_samples)], device=device)
         dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
         return loss_tensor[0].item() / max(loss_tensor[1].item(), 1.0)
-    return train_loss / len(train_loader.dataset)
+    return train_loss / max(total_samples, 1)
 
 
 def _validate_epoch(
@@ -656,6 +699,13 @@ def train_forecaster(
     val_diagnostic_horizons: Optional[List[int]] = None,
     expected_init_horizon: Optional[int] = None,
     compile_model: bool = False,
+    curriculum_rollout: bool = False,
+    curriculum_start_horizon: int = 2,
+    curriculum_step_epochs: int = 3,
+    curriculum_schedule: str = "doubling",
+    pushforward_steps: int = 0,
+    pushforward_noise_std: float = 0.0,
+    pushforward_mode: str = "future",
 ):
     if grad_accum_steps < 1:
         raise ValueError(f"grad_accum_steps must be >= 1, got {grad_accum_steps}")
@@ -663,6 +713,27 @@ def train_forecaster(
     is_distributed, local_rank, global_rank, world_size, device = _init_distributed_context(device_str, seed)
     if global_rank == 0:
         os.makedirs(output_dir, exist_ok=True)
+
+    effective_start_horizon = (
+        min(curriculum_start_horizon, horizon) if not curriculum_rollout else curriculum_start_horizon
+    )
+    curriculum_config = CurriculumConfig(
+        enabled=curriculum_rollout,
+        start_horizon=effective_start_horizon,
+        target_horizon=horizon,
+        step_epochs=curriculum_step_epochs,
+        schedule=curriculum_schedule,
+        pushforward_steps=pushforward_steps,
+        pushforward_noise_std=pushforward_noise_std,
+        pushforward_mode=pushforward_mode,
+    )
+    scheduler = CurriculumRolloutScheduler(curriculum_config)
+
+    effective_train_horizon = horizon
+    if curriculum_rollout:
+        effective_train_horizon = max(effective_train_horizon, curriculum_config.target_horizon)
+    if pushforward_steps > 0 and pushforward_mode == "future":
+        effective_train_horizon += pushforward_steps
 
     split_file = _resolve_split_file(split_type, split_file)
     effective_valid_horizon = max([horizon] + val_diagnostic_horizons) if val_diagnostic_horizons else horizon
@@ -672,7 +743,7 @@ def train_forecaster(
         split_file=split_file,
         data_root=data_dir,
         history_length=4,
-        horizon=horizon,
+        horizon=effective_train_horizon,
         valid_horizon=effective_valid_horizon,
         train_stride=train_stride,
         valid_stride=valid_stride,
@@ -744,6 +815,10 @@ def train_forecaster(
         )
 
     for epoch in range(1, epochs + 1):
+        epoch_horizon = scheduler.get_horizon(epoch)
+        epoch_pushforward = scheduler.get_pushforward_steps(epoch)
+        epoch_noise = scheduler.get_noise_std(epoch)
+
         train_loss = _train_epoch(
             model=model,
             model_type=model_type,
@@ -754,7 +829,7 @@ def train_forecaster(
             rollout_loss_fn=rollout_loss_fn,
             div_loss_fn=div_loss_fn,
             vort_loss_fn=vort_loss_fn,
-            horizon=horizon,
+            horizon=epoch_horizon,
             grad_accum_steps=grad_accum_steps,
             field_loss_space=field_loss_space,
             lambda_div=lambda_div,
@@ -765,6 +840,9 @@ def train_forecaster(
             is_distributed=is_distributed,
             train_sampler=train_sampler,
             epoch=epoch,
+            pushforward_steps=epoch_pushforward,
+            pushforward_noise_std=epoch_noise,
+            pushforward_mode=curriculum_config.pushforward_mode,
         )
 
         if global_rank == 0:
@@ -790,9 +868,11 @@ def train_forecaster(
             diag_suffix = f" | Diag [{', '.join(diag_strs)}]" if diag_strs else ""
             vram_gb = torch.cuda.max_memory_allocated(device=device) / (1024**3) if torch.cuda.is_available() else 0.0
 
+            curric_info = f" (Train H: {epoch_horizon}, Push: {epoch_pushforward})" if (curriculum_rollout or pushforward_steps > 0) else ""
+
             if horizon > 1:
                 print(
-                    f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {train_loss:.4e} | "
+                    f"Epoch [{epoch:02d}/{epochs:02d}]{curric_info} | Train Loss: {train_loss:.4e} | "
                     f"Val Rollout Mean VRMSE: {val_metrics['rollout_mean_vrmse']:.4f} | "
                     f"Step 1 VRMSE: {val_metrics['vrmse_mean']:.4f} "
                     f"(u: {val_metrics['vrmse_u']:.4f}, v: {val_metrics['vrmse_v']:.4f}, "
@@ -801,7 +881,7 @@ def train_forecaster(
                 )
             else:
                 print(
-                    f"Epoch [{epoch:02d}/{epochs:02d}] | Train Loss: {train_loss:.4e} | "
+                    f"Epoch [{epoch:02d}/{epochs:02d}]{curric_info} | Train Loss: {train_loss:.4e} | "
                     f"Val VRMSE Mean: {val_metrics['vrmse_mean']:.4f} "
                     f"(u: {val_metrics['vrmse_u']:.4f}, v: {val_metrics['vrmse_v']:.4f}, "
                     f"p: {val_metrics['vrmse_p']:.4f}, s: {val_metrics['vrmse_s']:.4f})"
@@ -828,6 +908,8 @@ def train_forecaster(
                 "effective_batch_size": batch_size * grad_accum_steps * (world_size if is_distributed else 1),
                 "world_size": world_size,
                 "val_diagnostic_horizons": val_diagnostic_horizons,
+                "curriculum_rollout": curriculum_rollout,
+                "curriculum_config": curriculum_config.to_dict(),
             }
             config_dict = {
                 **metadata_dict,
@@ -949,6 +1031,50 @@ if __name__ == "__main__":
         default=False,
         help="Enable PyTorch 2.x torch.compile(dynamic=True) for model kernel fusion acceleration.",
     )
+    parser.add_argument(
+        "--curriculum_rollout",
+        action="store_true",
+        default=False,
+        help="Enable curriculum multi-step training horizon progression.",
+    )
+    parser.add_argument(
+        "--curriculum_start_horizon",
+        type=int,
+        default=2,
+        help="Initial training horizon at epoch 1 (default: 2).",
+    )
+    parser.add_argument(
+        "--curriculum_step_epochs",
+        type=int,
+        default=3,
+        help="Epoch interval to advance horizon (default: 3).",
+    )
+    parser.add_argument(
+        "--curriculum_schedule",
+        type=str,
+        default="doubling",
+        choices=["doubling", "linear", "fixed"],
+        help="Curriculum schedule progression: doubling (2->4->8->16) or linear.",
+    )
+    parser.add_argument(
+        "--pushforward_steps",
+        type=int,
+        default=0,
+        help="Number of stop-gradient pushforward warmup steps (default: 0).",
+    )
+    parser.add_argument(
+        "--pushforward_noise_std",
+        type=float,
+        default=0.0,
+        help="Standard deviation of Gaussian noise added during pushforward rollout (default: 0.0).",
+    )
+    parser.add_argument(
+        "--pushforward_mode",
+        type=str,
+        default="future",
+        choices=["future", "history"],
+        help="Pushforward mode: future or history (default: future).",
+    )
     args = parser.parse_args()
 
     freeze_rep = False if args.joint else args.freeze_representation
@@ -987,4 +1113,11 @@ if __name__ == "__main__":
         val_diagnostic_horizons=args.val_diagnostic_horizons,
         expected_init_horizon=args.expected_init_horizon,
         compile_model=args.compile,
+        curriculum_rollout=args.curriculum_rollout,
+        curriculum_start_horizon=args.curriculum_start_horizon,
+        curriculum_step_epochs=args.curriculum_step_epochs,
+        curriculum_schedule=args.curriculum_schedule,
+        pushforward_steps=args.pushforward_steps,
+        pushforward_noise_std=args.pushforward_noise_std,
+        pushforward_mode=args.pushforward_mode,
     )

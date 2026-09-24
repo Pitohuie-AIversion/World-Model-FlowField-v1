@@ -61,11 +61,40 @@ class HistoryBuffer:
         self._buffer = torch.cat([self._buffer[:, 1:], next_state], dim=1)
         return self._buffer
 
+    @torch.no_grad()
+    def pushforward(
+        self,
+        step_fn: Callable[[torch.Tensor, Optional[torch.Tensor]], torch.Tensor],
+        steps: int,
+        condition: Optional[torch.Tensor] = None,
+        noise_std: float = 0.0,
+    ) -> "HistoryBuffer":
+        """Execute stop-gradient warmup steps to push buffer into model prediction distribution.
+
+        Args:
+            step_fn: Function mapping (history_tensor, condition) -> next_predicted_state.
+            steps: Number of pushforward warmup steps to advance.
+            condition: Optional physical condition embedding tensor.
+            noise_std: Standard deviation of Gaussian perturbation injected into predictions.
+
+        Returns:
+            self: The updated HistoryBuffer instance.
+        """
+        for _ in range(steps):
+            pred_next = step_fn(self.current, condition)
+            if pred_next.ndim == self.current.ndim - 1:
+                pred_next = pred_next.unsqueeze(1)
+            if noise_std > 0.0:
+                pred_next = pred_next + torch.randn_like(pred_next) * noise_std
+            self.push(pred_next)
+        return self
+
     def rollout(
         self,
         step_fn: Callable[[torch.Tensor, Optional[torch.Tensor]], torch.Tensor],
         steps: int,
         condition: Optional[torch.Tensor] = None,
+        noise_std: float = 0.0,
     ) -> torch.Tensor:
         """Autoregressively roll out for H steps without reading future ground truth.
 
@@ -74,6 +103,7 @@ class HistoryBuffer:
                      or (B, *dims).
             steps: Number of future steps H to roll out.
             condition: Optional physical condition embedding tensor.
+            noise_std: Optional Gaussian noise scale added during rollout (default: 0.0).
 
         Returns:
             trajectory: Predicted future states of shape (B, steps, *dims).
@@ -83,7 +113,10 @@ class HistoryBuffer:
             pred_next = step_fn(self.current, condition)
             if pred_next.ndim == self.current.ndim - 1:
                 pred_next = pred_next.unsqueeze(1)
+            if noise_std > 0.0:
+                pred_next = pred_next + torch.randn_like(pred_next) * noise_std
             predictions.append(pred_next)
             self.push(pred_next)
 
         return torch.cat(predictions, dim=1)
+

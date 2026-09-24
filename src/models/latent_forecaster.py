@@ -61,8 +61,22 @@ class LatentForecaster(nn.Module):
         re: Optional[torch.Tensor] = None,
         sc: Optional[torch.Tensor] = None,
         horizon: int = 30,
+        pushforward_steps: int = 0,
+        noise_std: float = 0.0,
     ) -> torch.Tensor:
-        """Roll out H steps entirely in latent space, then decode."""
+        """Roll out H steps entirely in latent space, then decode.
+
+        Args:
+            q_hist: History physical fields of shape (B, L, C, Ny, Nx).
+            re: Optional Reynolds number tensor (B,).
+            sc: Optional Schmidt number tensor (B,).
+            horizon: Prediction horizon H (default: 30).
+            pushforward_steps: Number of warmup rollout steps executed without gradients (default: 0).
+            noise_std: Standard deviation of Gaussian perturbation injected during rollout (default: 0.0).
+
+        Returns:
+            q_rollout: Predicted physical fields of shape (B, horizon, C, Ny, Nx).
+        """
         if self.freeze_representation:
             with torch.no_grad():
                 z_hist = self.encoder(q_hist)
@@ -75,7 +89,10 @@ class LatentForecaster(nn.Module):
         def step_fn(hist_z, _cond=None):
             return self.transformer(hist_z, re=re, sc=sc)
 
-        z_rollout = buf.rollout(step_fn, steps=horizon)  # (B, H, C_z, H_z, W_z)
+        if pushforward_steps > 0:
+            buf.pushforward(step_fn, steps=pushforward_steps, noise_std=noise_std)
+
+        z_rollout = buf.rollout(step_fn, steps=horizon, noise_std=noise_std)  # (B, H, C_z, H_z, W_z)
         q_rollout = self.decoder(z_rollout)
         return q_rollout
 
@@ -85,6 +102,8 @@ class LatentForecaster(nn.Module):
         re: Optional[torch.Tensor] = None,
         sc: Optional[torch.Tensor] = None,
         horizon: int = 1,
+        pushforward_steps: int = 0,
+        noise_std: float = 0.0,
     ) -> torch.Tensor:
         """Unified forward interface matching baseline models.
 
@@ -93,12 +112,22 @@ class LatentForecaster(nn.Module):
             re: Optional Reynolds number tensor (B,).
             sc: Optional Schmidt number tensor (B,).
             horizon: Prediction horizon H (default: 1).
+            pushforward_steps: Number of warmup rollout steps without gradients (default: 0).
+            noise_std: Standard deviation of Gaussian noise injected (default: 0.0).
 
         Returns:
             Predicted physical fields of shape (B, H, C, Ny, Nx).
         """
-        if horizon == 1:
+        if horizon == 1 and pushforward_steps == 0:
             return self.forward_single_step(q_hist, re=re, sc=sc)
         else:
-            return self.forward_rollout(q_hist, re=re, sc=sc, horizon=horizon)
+            return self.forward_rollout(
+                q_hist,
+                re=re,
+                sc=sc,
+                horizon=horizon,
+                pushforward_steps=pushforward_steps,
+                noise_std=noise_std,
+            )
+
 
