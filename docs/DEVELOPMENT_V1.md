@@ -5,8 +5,12 @@
 > 当前状态：V1 开发规范（审查修订版）  
 > 
 > 📚 **核心文档导航**：
+> - [正式论文实验章节与三 Seed 出版级结果](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/MANUSCRIPT_RESULTS.md)
+> - [Closure-R4 空间轴序契约与物理资产治理](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/CLOSURE_R4_SPATIAL_AXIS_FIX.md)
+> - [系统架构说明与技术规范](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/ARCHITECTURE.md)
 > - [项目工程 TodoList 与研发进度看板](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/TODOLIST.md)
 > - [基准评测报告与物理指标分析](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/BENCHMARK_RESULTS.md)
+> - [V1 阶段全链验收报告与 10 月任务规划](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/V1_ACCEPTANCE_REPORT.md)
 > - [The Well 数据集与物理协议说明](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/DATASET.md)
 > - [数据实测审计报告](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/DATA_AUDIT.md)
 
@@ -395,7 +399,7 @@ V1 不使用 INR、任意坐标查询、超分辨率解码和力积分。
 
 训练顺序先解决长期动力学，再加入物理约束。
 
-### 9.1 场值损失
+### 9.1 场值损失与优化空间契约
 
 \[
 L_{\mathrm{field}}
@@ -403,7 +407,12 @@ L_{\mathrm{field}}
 L_u+L_v+L_p+L_s
 \]
 
-每项使用 **均方误差（MSE）**，在 **反归一化后的物理空间** 计算。
+每项使用 **均方误差（MSE）**。
+
+> **优化空间与通道权重契约（Protocol P1-1）**：
+> - **默认空间（Normalized Feature Space）**：在不可压缩剪切流中，各物理场方差悬殊（例如 $\mathrm{Var}(u) \sim 0.5$ 而 $\mathrm{Var}(p) \sim 10^{-4}$）。在反归一化物理空间直接求和会导致压力与示踪剂梯度被速度场淹没。因此，`train_forecaster.py` 默认在标准化特征空间优化（相当于以通道方差倒数 $1/\sigma_c^2$ 加权的马氏物理距离），亦可通过 `--field_loss_space physical` 切换为未加权物理空间。
+> - **物理微分损失空间（Physical Space）**：与场值损失不同，速度散度损失 $L_{\mathrm{div}}$ 与涡量损失 $L_\omega$ 具备严格的流体力学守恒量纲，**必须且始终在反归一化后的真实物理空间计算**。
+> - **压力零均值规范（Pressure Gauge Policy, P1-2）**：Decoder 在潜空间输出原始未约束场（`project_pressure=False`）。在反归一化至真实物理空间后，统一施加零空间均值投影 $\int p \, \mathrm{d}\Omega = 0$，消除压力标度不定性。
 
 数据归一化方式：**per-channel per-dataset mean/std 标准化**。在训练集上计算每个通道的全局均值和标准差，写入配置文件，验证集和测试集使用相同统计量。归一化和反归一化必须通过单元测试验证一致性。
 
