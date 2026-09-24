@@ -498,18 +498,35 @@ def _train_epoch(
         sc = batch["sc"].to(device) if use_condition else None
 
         avail_future = q_future.shape[1]
+        avail_hist = q_hist.shape[1]
+
         if pushforward_mode == "future" and pushforward_steps > 0:
             eff_push = min(pushforward_steps, max(0, avail_future - horizon))
             target_future = q_future[:, eff_push : eff_push + horizon]
-        else:
-            eff_push = pushforward_steps if pushforward_mode == "history" else 0
+            hist_input = q_hist[:, -4:] if avail_hist >= 4 else q_hist
+        elif pushforward_mode == "history" and pushforward_steps > 0:
+            required_hist = 4 + pushforward_steps
+            if avail_hist < required_hist:
+                raise ValueError(
+                    f"pushforward_mode='history' requires history sequence length >= "
+                    f"history_length + pushforward_steps (expected >= 4 + {pushforward_steps} = {required_hist}, "
+                    f"got {avail_hist}). Lacking extended historical context causes temporal misalignment "
+                    f"between predictions and targets. Either supply extended history or use pushforward_mode='future'."
+                )
+            eff_push = pushforward_steps
             target_future = q_future[:, :horizon]
+            start_idx = avail_hist - 4 - eff_push
+            hist_input = q_hist[:, start_idx : start_idx + 4]
+        else:
+            eff_push = 0
+            target_future = q_future[:, :horizon]
+            hist_input = q_hist[:, -4:] if avail_hist >= 4 else q_hist
 
         with torch.amp.autocast('cuda', enabled=use_amp):
             pred = _forward_model_prediction(
                 model=model,
                 model_type=model_type,
-                q_hist=q_hist,
+                q_hist=hist_input,
                 re=re,
                 sc=sc,
                 horizon=horizon,
@@ -750,6 +767,14 @@ def train_forecaster(
         pushforward_mode=pushforward_mode,
     )
     scheduler = CurriculumRolloutScheduler(curriculum_config)
+
+    if pushforward_steps > 0 and pushforward_mode == "history":
+        raise NotImplementedError(
+            "pushforward_mode='history' with pushforward_steps > 0 is currently disabled "
+            "for standard training because the dataset loader provides fixed history_length=4 "
+            "without the extended historical context (history_length + pushforward_steps) "
+            "required to preserve temporal alignment at t_0. Use pushforward_mode='future' instead."
+        )
 
     effective_train_horizon = horizon
     if curriculum_rollout:

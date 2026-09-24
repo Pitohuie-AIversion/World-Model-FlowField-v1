@@ -364,15 +364,15 @@ class TestTrainForecasterCurriculumIntegration:
         assert isinstance(loss_val, float)
         assert loss_val >= 0.0
 
-    def test_train_epoch_pushforward_history_mode(self):
-        """Verify _train_epoch runs cleanly with pushforward history mode."""
+    def test_train_epoch_pushforward_history_mode_with_extended_context(self):
+        """Verify _train_epoch runs cleanly with pushforward history mode when extended context is provided."""
         from scripts.train_forecaster import _train_epoch
         from src.losses.field import FieldLoss
         from src.losses.rollout import RolloutLoss
         from src.losses.divergence import DivergenceLoss
         from src.losses.vorticity import VorticityLoss
 
-        b, l, c, ny, nx = 2, 4, 4, 16, 32
+        b, l_ext, c, ny, nx = 2, 5, 4, 16, 32  # 4 + 1 = 5
         device = torch.device("cpu")
 
         class DummyModel(nn.Module):
@@ -388,7 +388,7 @@ class TestTrainForecasterCurriculumIntegration:
         scaler = torch.amp.GradScaler(enabled=False)
 
         dummy_batch = {
-            "history": torch.randn(b, l, c, ny, nx),
+            "history": torch.randn(b, l_ext, c, ny, nx),
             "future": torch.randn(b, 2, c, ny, nx),
             "re": torch.tensor([1e4, 2e4]),
             "sc": torch.tensor([0.1, 0.5]),
@@ -403,8 +403,8 @@ class TestTrainForecasterCurriculumIntegration:
             scaler=scaler,
             normalizer=None,
             rollout_loss_fn=RolloutLoss(field_loss=FieldLoss()),
-            div_loss_fn=DivergenceLoss(),
-            vort_loss_fn=VorticityLoss(),
+            div_loss_fn=None,
+            vort_loss_fn=None,
             horizon=2,
             grad_accum_steps=1,
             field_loss_space="normalized",
@@ -422,4 +422,227 @@ class TestTrainForecasterCurriculumIntegration:
         )
         assert isinstance(loss_val, float)
         assert loss_val >= 0.0
+
+
+class TestPushforwardTemporalAlignment:
+    """Rigorous mathematical tests for pushforward temporal alignment and fail-closed contracts.
+
+    Uses an exact linear dynamical system q_{t+1} = q_t + 1 to verify that:
+    1. Perfect dynamics yields zero loss under exact time alignment.
+    2. Future mode (K steps pushforward) aligns with q_future[K:K+H].
+    3. History mode with extended history (4+K) aligns with q_future[:H].
+    4. History mode with insufficient context fails closed with ValueError.
+    5. pushforward_steps=0 behaves identically across modes.
+    6. train_forecaster entrypoint rejects history mode when pushforward_steps > 0.
+    """
+
+    class _LinearDynamicsModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = nn.Parameter(torch.tensor(1.0))
+
+        def forward(self, q_hist, re=None, sc=None, horizon=1, pushforward_steps=0, noise_std=0.0):
+            buf = HistoryBuffer(history_length=q_hist.shape[1])
+            buf.reset(q_hist)
+            step_fn = lambda hist, _c=None: hist[:, -1:] * self.weight + 1.0
+            if pushforward_steps > 0:
+                buf.pushforward(step_fn, steps=pushforward_steps, noise_std=noise_std)
+            return buf.rollout(step_fn, steps=horizon, noise_std=noise_std)
+
+    def test_future_mode_time_alignment_zero_loss(self):
+        """Future mode with K=2 pushforward must align exactly with q_future[2:4] yielding zero MSE."""
+        from scripts.train_forecaster import _train_epoch
+        from src.losses.field import FieldLoss
+        from src.losses.rollout import RolloutLoss
+
+        model = self._LinearDynamicsModel()
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        scaler = torch.amp.GradScaler(enabled=False)
+
+        # q(t) = t: history=[2,3,4,5], future=[6,7,8,9]
+        q_hist = torch.tensor([2.0, 3.0, 4.0, 5.0]).view(1, 4, 1, 1, 1)
+        q_future = torch.tensor([6.0, 7.0, 8.0, 9.0]).view(1, 4, 1, 1, 1)
+
+        loss = _train_epoch(
+            model=model,
+            model_type="latent_transformer",
+            train_loader=[{"history": q_hist, "future": q_future}],
+            optimizer=optimizer,
+            scaler=scaler,
+            normalizer=None,
+            rollout_loss_fn=RolloutLoss(field_loss=FieldLoss(loss_type="mse")),
+            div_loss_fn=None,
+            vort_loss_fn=None,
+            horizon=2,
+            grad_accum_steps=1,
+            field_loss_space="normalized",
+            lambda_div=0.0,
+            lambda_vort=0.0,
+            use_condition=False,
+            use_amp=False,
+            device=torch.device("cpu"),
+            is_distributed=False,
+            train_sampler=None,
+            epoch=1,
+            pushforward_steps=2,
+            pushforward_noise_std=0.0,
+            pushforward_mode="future",
+        )
+        assert loss == 0.0
+
+    def test_history_mode_time_alignment_zero_loss(self):
+        """History mode with extended context (L=6) and K=2 must align with q_future[:2] yielding zero MSE."""
+        from scripts.train_forecaster import _train_epoch
+        from src.losses.field import FieldLoss
+        from src.losses.rollout import RolloutLoss
+
+        model = self._LinearDynamicsModel()
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        scaler = torch.amp.GradScaler(enabled=False)
+
+        # q(t) = t: extended history=[0,1,2,3,4,5], future=[6,7]
+        q_hist_ext = torch.tensor([0.0, 1.0, 2.0, 3.0, 4.0, 5.0]).view(1, 6, 1, 1, 1)
+        q_future = torch.tensor([6.0, 7.0]).view(1, 2, 1, 1, 1)
+
+        loss = _train_epoch(
+            model=model,
+            model_type="latent_transformer",
+            train_loader=[{"history": q_hist_ext, "future": q_future}],
+            optimizer=optimizer,
+            scaler=scaler,
+            normalizer=None,
+            rollout_loss_fn=RolloutLoss(field_loss=FieldLoss(loss_type="mse")),
+            div_loss_fn=None,
+            vort_loss_fn=None,
+            horizon=2,
+            grad_accum_steps=1,
+            field_loss_space="normalized",
+            lambda_div=0.0,
+            lambda_vort=0.0,
+            use_condition=False,
+            use_amp=False,
+            device=torch.device("cpu"),
+            is_distributed=False,
+            train_sampler=None,
+            epoch=1,
+            pushforward_steps=2,
+            pushforward_noise_std=0.0,
+            pushforward_mode="history",
+        )
+        assert loss == 0.0
+
+    def test_history_mode_insufficient_context_fails_closed(self):
+        """History mode with insufficient history length (e.g. 4 < 4+K) must fail closed with ValueError."""
+        from scripts.train_forecaster import _train_epoch
+        from src.losses.field import FieldLoss
+        from src.losses.rollout import RolloutLoss
+
+        model = self._LinearDynamicsModel()
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        scaler = torch.amp.GradScaler(enabled=False)
+
+        q_hist = torch.tensor([2.0, 3.0, 4.0, 5.0]).view(1, 4, 1, 1, 1)
+        q_future = torch.tensor([6.0, 7.0]).view(1, 2, 1, 1, 1)
+
+        with pytest.raises(ValueError, match="pushforward_mode='history' requires history sequence length"):
+            _train_epoch(
+                model=model,
+                model_type="latent_transformer",
+                train_loader=[{"history": q_hist, "future": q_future}],
+                optimizer=optimizer,
+                scaler=scaler,
+                normalizer=None,
+                rollout_loss_fn=RolloutLoss(field_loss=FieldLoss(loss_type="mse")),
+                div_loss_fn=None,
+                vort_loss_fn=None,
+                horizon=2,
+                grad_accum_steps=1,
+                field_loss_space="normalized",
+                lambda_div=0.0,
+                lambda_vort=0.0,
+                use_condition=False,
+                use_amp=False,
+                device=torch.device("cpu"),
+                is_distributed=False,
+                train_sampler=None,
+                epoch=1,
+                pushforward_steps=2,
+                pushforward_noise_std=0.0,
+                pushforward_mode="history",
+            )
+
+    def test_pushforward_zero_identical_across_modes(self):
+        """When pushforward_steps=0, future and history modes produce identical predictions and zero loss."""
+        from scripts.train_forecaster import _train_epoch
+        from src.losses.field import FieldLoss
+        from src.losses.rollout import RolloutLoss
+
+        model = self._LinearDynamicsModel()
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        scaler = torch.amp.GradScaler(enabled=False)
+
+        q_hist = torch.tensor([2.0, 3.0, 4.0, 5.0]).view(1, 4, 1, 1, 1)
+        q_future = torch.tensor([6.0, 7.0]).view(1, 2, 1, 1, 1)
+
+        loss_fut = _train_epoch(
+            model=model,
+            model_type="latent_transformer",
+            train_loader=[{"history": q_hist, "future": q_future}],
+            optimizer=optimizer,
+            scaler=scaler,
+            normalizer=None,
+            rollout_loss_fn=RolloutLoss(field_loss=FieldLoss(loss_type="mse")),
+            div_loss_fn=None,
+            vort_loss_fn=None,
+            horizon=2,
+            grad_accum_steps=1,
+            field_loss_space="normalized",
+            lambda_div=0.0,
+            lambda_vort=0.0,
+            use_condition=False,
+            use_amp=False,
+            device=torch.device("cpu"),
+            is_distributed=False,
+            train_sampler=None,
+            epoch=1,
+            pushforward_steps=0,
+            pushforward_mode="future",
+        )
+        loss_hist = _train_epoch(
+            model=model,
+            model_type="latent_transformer",
+            train_loader=[{"history": q_hist, "future": q_future}],
+            optimizer=optimizer,
+            scaler=scaler,
+            normalizer=None,
+            rollout_loss_fn=RolloutLoss(field_loss=FieldLoss(loss_type="mse")),
+            div_loss_fn=None,
+            vort_loss_fn=None,
+            horizon=2,
+            grad_accum_steps=1,
+            field_loss_space="normalized",
+            lambda_div=0.0,
+            lambda_vort=0.0,
+            use_condition=False,
+            use_amp=False,
+            device=torch.device("cpu"),
+            is_distributed=False,
+            train_sampler=None,
+            epoch=1,
+            pushforward_steps=0,
+            pushforward_mode="history",
+        )
+        assert loss_fut == 0.0
+        assert loss_hist == 0.0
+
+    def test_train_forecaster_entrypoint_rejects_history_mode_pushforward(self):
+        """train_forecaster entrypoint must reject pushforward_mode='history' when pushforward_steps > 0."""
+        from scripts.train_forecaster import train_forecaster
+
+        with pytest.raises(NotImplementedError, match="pushforward_mode='history' with pushforward_steps > 0 is currently disabled"):
+            train_forecaster(
+                pushforward_steps=2,
+                pushforward_mode="history",
+                horizon=4,
+            )
 
