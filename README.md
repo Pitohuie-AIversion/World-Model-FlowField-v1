@@ -5,10 +5,13 @@
 > 当前状态：V1 开发规范（审查修订版）  
 > 
 > 📚 **核心文档导航**：
-> - [V1 阶段全链验收报告与 10 月任务规划](docs/V1_ACCEPTANCE_REPORT.md)
+> - [正式论文实验章节与三 Seed 出版级结果](docs/MANUSCRIPT_RESULTS.md)
+> - [Closure-R4 空间轴序契约与物理资产治理](docs/CLOSURE_R4_SPATIAL_AXIS_FIX.md)
 > - [系统架构说明与技术规范](docs/ARCHITECTURE.md)
+> - [流水线脚本库全景拓扑与调用指南](scripts/README.md)
 > - [项目工程 TodoList 与研发进度看板](docs/TODOLIST.md)
 > - [基准评测报告与物理指标分析](docs/BENCHMARK_RESULTS.md)
+> - [V1 阶段全链验收报告与 10 月任务规划](docs/V1_ACCEPTANCE_REPORT.md)
 > - [The Well 数据集与物理协议说明](docs/DATASET.md)
 > - [数据实测审计报告](docs/DATA_AUDIT.md)
 
