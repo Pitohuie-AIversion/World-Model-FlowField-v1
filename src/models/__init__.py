@@ -21,6 +21,11 @@ from src.models.latent_transformer import (
 )
 from src.models.latent_forecaster import LatentForecaster
 from src.models.direct_transformer import DirectSTTransformer
+from src.models.positional_embedding import (
+    build_2d_sincos_position_embedding,
+    get_2d_sincos_position_embedding,
+    clear_pos_embed_cache,
+)
 
 __all__ = [
     "Encoder2D",
@@ -37,4 +42,7 @@ __all__ = [
     "TemporalAttention",
     "LatentForecaster",
     "DirectSTTransformer",
+    "build_2d_sincos_position_embedding",
+    "get_2d_sincos_position_embedding",
+    "clear_pos_embed_cache",
 ]

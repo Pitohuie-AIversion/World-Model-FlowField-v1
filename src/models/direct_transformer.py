@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 from src.models.latent_transformer import FactorizedSTBlock
 from src.models.conditioning import AdaLN, PhysicalConditionEmbedding
+from src.models.positional_embedding import get_2d_sincos_position_embedding
 
 
 class DirectSTTransformer(nn.Module):
@@ -23,6 +24,7 @@ class DirectSTTransformer(nn.Module):
         num_heads: Attention heads (default: 8).
         history_length: Historical sequence length L (default: 4).
         prediction_mode: 'direct' or 'residual'. Default 'direct'.
+        use_spatial_pos: Whether to inject 2D Sinusoidal Positional Embedding.
     """
 
     def __init__(
@@ -35,6 +37,7 @@ class DirectSTTransformer(nn.Module):
         num_heads: int = 8,
         history_length: int = 4,
         prediction_mode: str = "direct",
+        use_spatial_pos: bool = True,
     ):
         super().__init__()
         assert prediction_mode in ("direct", "residual")
@@ -43,6 +46,7 @@ class DirectSTTransformer(nn.Module):
         self.embed_dim = embed_dim
         self.history_length = history_length
         self.prediction_mode = prediction_mode
+        self.use_spatial_pos = use_spatial_pos
 
         py, px = patch_size
         self.patch_embed = nn.Conv2d(in_channels, embed_dim, kernel_size=(py, px), stride=(py, px))
@@ -87,6 +91,11 @@ class DirectSTTransformer(nn.Module):
         h = self.patch_embed(q_hist.view(b * l, c, ny, nx))
         h = h.flatten(2).transpose(1, 2)  # (B * L, n_spatial, D)
         x = h.view(b, l, n_spatial, self.embed_dim) + self.temp_pos_embed[:, :l]
+        if self.use_spatial_pos:
+            spatial_pos = get_2d_sincos_position_embedding(
+                self.embed_dim, n_y, n_x, device=x.device, dtype=x.dtype
+            )
+            x = x + spatial_pos
 
         # Condition
         cond = None

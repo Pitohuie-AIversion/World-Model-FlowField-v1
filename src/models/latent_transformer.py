@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from src.models.conditioning import AdaLN, PhysicalConditionEmbedding
+from src.models.positional_embedding import get_2d_sincos_position_embedding
 
 
 class SpatialAttention(nn.Module):
@@ -129,6 +130,7 @@ class LatentSTTransformer(nn.Module):
         num_heads: int = 8,
         history_length: int = 4,
         prediction_mode: str = "direct",
+        use_spatial_pos: bool = True,
     ):
         super().__init__()
         assert prediction_mode in ("direct", "residual")
@@ -136,6 +138,7 @@ class LatentSTTransformer(nn.Module):
         self.embed_dim = embed_dim
         self.history_length = history_length
         self.prediction_mode = prediction_mode
+        self.use_spatial_pos = use_spatial_pos
 
         # Input patch/channel projection
         self.in_proj = nn.Linear(latent_channels, embed_dim)
@@ -176,6 +179,11 @@ class LatentSTTransformer(nn.Module):
         # (B, L, C_z, H_z, W_z) -> (B, L, N, C_z)
         x = z_hist.permute(0, 1, 3, 4, 2).reshape(b, l, n_spatial, c_z)
         x = self.in_proj(x) + self.temp_pos_embed[:, :l]
+        if self.use_spatial_pos:
+            spatial_pos = get_2d_sincos_position_embedding(
+                self.embed_dim, h_z, w_z, device=x.device, dtype=x.dtype
+            )
+            x = x + spatial_pos
 
         # Condition embedding
         cond = None

@@ -222,3 +222,118 @@ def compute_laplacian_2d(
     return laplacian.to(dtype=orig_dtype)
 
 
+def project_divergence_free_2d(
+    u: torch.Tensor,
+    v: torch.Tensor,
+    domain_size: Tuple[float, float] = (1.0, 2.0),
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Project a 2D velocity field (u, v) onto the divergence-free manifold via Leray-Helmholtz spectral projection.
+
+    Decomposes velocity field u = u_sol + grad(phi) where div(u_sol) = 0 and curl(grad(phi)) = 0.
+    In Fourier space:
+        k_dot_u = kx * u_hat + ky * v_hat
+        u_hat_sol = u_hat - (kx * k_dot_u) / (kx^2 + ky^2)  for |k| > 0
+        v_hat_sol = v_hat - (ky * k_dot_u) / (kx^2 + ky^2)  for |k| > 0
+    At k = 0, preserves background mean flow since constant fields naturally have zero divergence.
+    Preserves vorticity exactly: curl(u_sol) == curl(u).
+    Differentiable and idempotent: P(P(u)) == P(u).
+
+    Args:
+        u: Horizontal velocity component along x, shape (..., Nx, Ny).
+        v: Vertical velocity component along y, shape (..., Nx, Ny).
+        domain_size: (Lx, Ly) physical extent of domain. Defaults to (1.0, 2.0).
+
+    Returns:
+        u_sol: Divergence-free horizontal velocity component, same shape and dtype as u.
+        v_sol: Divergence-free vertical velocity component, same shape and dtype as v.
+    """
+    assert u.shape == v.shape, f"u and v must have identical shapes, got {u.shape} vs {v.shape}"
+    nx, ny = u.shape[-2], u.shape[-1]
+    lx, ly = domain_size
+
+    device = u.device
+    orig_dtype = u.dtype
+    calc_dtype = torch.float64 if orig_dtype == torch.float64 else torch.float32
+    u_calc = u.to(dtype=calc_dtype)
+    v_calc = v.to(dtype=calc_dtype)
+
+    kx_base, ky_base = get_wavenumbers(nx, ny, lx, ly, device, calc_dtype)
+    kx = kx_base.clone()
+    ky = ky_base.clone()
+
+    # Zero out Nyquist frequency derivatives for discrete consistency with spectral_grad_2d
+    if nx % 2 == 0:
+        kx[nx // 2, :] = 0.0
+    if ny % 2 == 0:
+        ky[:, ny // 2] = 0.0
+
+    if u.ndim > 2:
+        kx = kx.view(*([1] * (u.ndim - 2)), nx, 1)
+        ky = ky.view(*([1] * (u.ndim - 2)), 1, ny // 2 + 1)
+
+    k_sq = kx**2 + ky**2
+    # Safe divisor for zero wavenumber k=(0,0) and zeroed Nyquist frequencies
+    k_sq_safe = torch.where(k_sq == 0.0, torch.ones_like(k_sq), k_sq)
+
+    # 2D RFFT forward transform
+    u_hat = torch.fft.rfft2(u_calc, dim=(-2, -1))
+    v_hat = torch.fft.rfft2(v_calc, dim=(-2, -1))
+
+    # Dot product in wavenumber space: k . u_hat
+    k_dot_u = kx * u_hat + ky * v_hat
+
+    # Subtract irrotational component (gradient of pressure/potential)
+    grad_phi_x = (kx * k_dot_u) / k_sq_safe
+    grad_phi_y = (ky * k_dot_u) / k_sq_safe
+
+    # For k = 0, gradient of potential is zero (mean velocity preserved)
+    grad_phi_x = torch.where(k_sq == 0.0, torch.zeros_like(grad_phi_x), grad_phi_x)
+    grad_phi_y = torch.where(k_sq == 0.0, torch.zeros_like(grad_phi_y), grad_phi_y)
+
+    u_hat_sol = u_hat - grad_phi_x
+    v_hat_sol = v_hat - grad_phi_y
+
+    u_sol = torch.fft.irfft2(u_hat_sol, s=(nx, ny), dim=(-2, -1))
+    v_sol = torch.fft.irfft2(v_hat_sol, s=(nx, ny), dim=(-2, -1))
+
+    return u_sol.to(dtype=orig_dtype), v_sol.to(dtype=orig_dtype)
+
+
+def project_incompressible_state(
+    q: torch.Tensor,
+    domain_size: Tuple[float, float] = (1.0, 2.0),
+) -> torch.Tensor:
+    """Project 4-channel physical flow state [u, v, p, c] onto incompressible manifold.
+
+    Channels:
+        - 0: u -> Leray divergence-free projection
+        - 1: v -> Leray divergence-free projection
+        - 2: p -> Zero spatial mean pressure gauge
+        - 3+: c -> Preserved unchanged (passive tracer)
+
+    Args:
+        q: Physical field state tensor, shape (..., C, Nx, Ny) with C >= 2.
+        domain_size: (Lx, Ly) physical extent of domain.
+
+    Returns:
+        q_proj: Projected state tensor with exact solenoidal velocity and zero-mean pressure.
+    """
+    assert q.shape[-3] >= 2, f"State tensor must have at least 2 channels for [u, v], got shape {q.shape}"
+    u = q[..., 0, :, :]
+    v = q[..., 1, :, :]
+    u_sol, v_sol = project_divergence_free_2d(u, v, domain_size=domain_size)
+
+    proj_list = [u_sol.unsqueeze(-3), v_sol.unsqueeze(-3)]
+
+    if q.shape[-3] >= 3:
+        p = q[..., 2, :, :]
+        p_gauge = project_zero_mean_pressure(p)
+        proj_list.append(p_gauge.unsqueeze(-3))
+
+    if q.shape[-3] >= 4:
+        c = q[..., 3:, :, :]
+        proj_list.append(c)
+
+    return torch.cat(proj_list, dim=-3)
+
+
