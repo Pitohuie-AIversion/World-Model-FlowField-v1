@@ -1,0 +1,632 @@
+[
+  {
+    "figure_name": "comparison_fixed_ref_u.png",
+    "sample_index": 0,
+    "sample_tag": "fixed_ref",
+    "sample_description": "Fixed Reference Sample (Index 0)",
+    "sample_selection_basis": "Fixed anchor window index 0 for longitudinal benchmark consistency",
+    "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+    "simulation_index": 1,
+    "start_t": 0,
+    "end_t": 34,
+    "variable": "u",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "fbac2fd93aab0b09d1193be6b66a3f4f6286accd",
+    "evaluation_git_dirty": false,
+    "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+    "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_scaling_policy": "\u540c\u4e00\u65f6\u95f4\u6b65\u5171\u4eab\u8272\u6761\uff1b\u4e0d\u540c\u65f6\u95f4\u6b65\u72ec\u7acb\u7f29\u653e\uff1b\u663e\u793a\u8303\u56f4\u91c7\u7528 0.5%\u201399.5%\uff08\u573a\uff09\u4e0e 99.5%\uff08\u8bef\u5dee\uff09\u767e\u5206\u4f4d\u622a\u65ad\u3002\u4e0d\u53ef\u76f4\u63a5\u8de8\u65f6\u95f4\u6b65\uff08\u884c\uff09\u6bd4\u8f83\u989c\u8272\u6df1\u6d45\u3002",
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -0.5470964312553406,
+        "field_vmax": 0.5530790090560913,
+        "error_vmax": 0.10313288867473602
+      },
+      "h10": {
+        "field_vmin": -0.6769717335700989,
+        "field_vmax": 0.6722139120101929,
+        "error_vmax": 0.22623467445373535
+      },
+      "h20": {
+        "field_vmin": -0.6505427360534668,
+        "field_vmax": 0.6674163341522217,
+        "error_vmax": 0.2633991241455078
+      },
+      "h30": {
+        "field_vmin": -0.6491169333457947,
+        "field_vmax": 0.6410292387008667,
+        "error_vmax": 0.27790403366088867
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": {
+        "title": "Parent H8 Saved Long-Best (Ep 11)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+        "full_sha256": "ea038c7af0f3a0fa5d851f25dd1ea224371b8c44ab2a80b8314f5c286c224147",
+        "expected_horizon": 8,
+        "selection_criterion": "diagnostic_long_best_step_11"
+      },
+      "h16_short_best_ep8": {
+        "title": "H16 Short-Best (Ep 8)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_vrmse_mean.pt",
+        "full_sha256": "2a88ecc1453204cbcb0065fc671e09f478257e1bb6b1d0ae52d46e7c2057fbf4",
+        "expected_horizon": 16,
+        "selection_criterion": "best_vrmse_mean"
+      },
+      "h16_long_best_ep12": {
+        "title": "H16 Long-Best (Ep 12)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_long_vrmse.pt",
+        "full_sha256": "959615be88dcd9e3328f6cc8063ce2ed3136e29d0e678e5d9df91ea45ded2c1e",
+        "expected_horizon": 16,
+        "selection_criterion": "best_long_vrmse_j_long"
+      }
+    }
+  },
+  {
+    "figure_name": "comparison_fixed_ref_vorticity.png",
+    "sample_index": 0,
+    "sample_tag": "fixed_ref",
+    "sample_description": "Fixed Reference Sample (Index 0)",
+    "sample_selection_basis": "Fixed anchor window index 0 for longitudinal benchmark consistency",
+    "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+    "simulation_index": 1,
+    "start_t": 0,
+    "end_t": 34,
+    "variable": "vorticity",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "fbac2fd93aab0b09d1193be6b66a3f4f6286accd",
+    "evaluation_git_dirty": false,
+    "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+    "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_scaling_policy": "\u540c\u4e00\u65f6\u95f4\u6b65\u5171\u4eab\u8272\u6761\uff1b\u4e0d\u540c\u65f6\u95f4\u6b65\u72ec\u7acb\u7f29\u653e\uff1b\u663e\u793a\u8303\u56f4\u91c7\u7528 0.5%\u201399.5%\uff08\u573a\uff09\u4e0e 99.5%\uff08\u8bef\u5dee\uff09\u767e\u5206\u4f4d\u622a\u65ad\u3002\u4e0d\u53ef\u76f4\u63a5\u8de8\u65f6\u95f4\u6b65\uff08\u884c\uff09\u6bd4\u8f83\u989c\u8272\u6df1\u6d45\u3002",
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -26.63853645324707,
+        "field_vmax": 26.63853645324707,
+        "error_vmax": 7.0725860595703125
+      },
+      "h10": {
+        "field_vmin": -21.652936935424805,
+        "field_vmax": 21.652936935424805,
+        "error_vmax": 9.521836280822754
+      },
+      "h20": {
+        "field_vmin": -18.974525451660156,
+        "field_vmax": 18.974525451660156,
+        "error_vmax": 9.38720989227295
+      },
+      "h30": {
+        "field_vmin": -17.55271339416504,
+        "field_vmax": 17.55271339416504,
+        "error_vmax": 9.912826538085938
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": {
+        "title": "Parent H8 Saved Long-Best (Ep 11)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+        "full_sha256": "ea038c7af0f3a0fa5d851f25dd1ea224371b8c44ab2a80b8314f5c286c224147",
+        "expected_horizon": 8,
+        "selection_criterion": "diagnostic_long_best_step_11"
+      },
+      "h16_short_best_ep8": {
+        "title": "H16 Short-Best (Ep 8)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_vrmse_mean.pt",
+        "full_sha256": "2a88ecc1453204cbcb0065fc671e09f478257e1bb6b1d0ae52d46e7c2057fbf4",
+        "expected_horizon": 16,
+        "selection_criterion": "best_vrmse_mean"
+      },
+      "h16_long_best_ep12": {
+        "title": "H16 Long-Best (Ep 12)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_long_vrmse.pt",
+        "full_sha256": "959615be88dcd9e3328f6cc8063ce2ed3136e29d0e678e5d9df91ea45ded2c1e",
+        "expected_horizon": 16,
+        "selection_criterion": "best_long_vrmse_j_long"
+      }
+    }
+  },
+  {
+    "figure_name": "comparison_fixed_ref_tracer.png",
+    "sample_index": 0,
+    "sample_tag": "fixed_ref",
+    "sample_description": "Fixed Reference Sample (Index 0)",
+    "sample_selection_basis": "Fixed anchor window index 0 for longitudinal benchmark consistency",
+    "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+    "simulation_index": 1,
+    "start_t": 0,
+    "end_t": 34,
+    "variable": "tracer",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "fbac2fd93aab0b09d1193be6b66a3f4f6286accd",
+    "evaluation_git_dirty": false,
+    "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+    "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_scaling_policy": "\u540c\u4e00\u65f6\u95f4\u6b65\u5171\u4eab\u8272\u6761\uff1b\u4e0d\u540c\u65f6\u95f4\u6b65\u72ec\u7acb\u7f29\u653e\uff1b\u663e\u793a\u8303\u56f4\u91c7\u7528 0.5%\u201399.5%\uff08\u573a\uff09\u4e0e 99.5%\uff08\u8bef\u5dee\uff09\u767e\u5206\u4f4d\u622a\u65ad\u3002\u4e0d\u53ef\u76f4\u63a5\u8de8\u65f6\u95f4\u6b65\uff08\u884c\uff09\u6bd4\u8f83\u989c\u8272\u6df1\u6d45\u3002",
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -0.5400516390800476,
+        "field_vmax": 0.5400917530059814,
+        "error_vmax": 0.11868225038051605
+      },
+      "h10": {
+        "field_vmin": -0.5477657914161682,
+        "field_vmax": 0.5690968036651611,
+        "error_vmax": 0.3777930438518524
+      },
+      "h20": {
+        "field_vmin": -0.5487575531005859,
+        "field_vmax": 0.5512087345123291,
+        "error_vmax": 0.41454172134399414
+      },
+      "h30": {
+        "field_vmin": -0.5159536600112915,
+        "field_vmax": 0.4898737668991089,
+        "error_vmax": 0.48345524072647095
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": {
+        "title": "Parent H8 Saved Long-Best (Ep 11)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+        "full_sha256": "ea038c7af0f3a0fa5d851f25dd1ea224371b8c44ab2a80b8314f5c286c224147",
+        "expected_horizon": 8,
+        "selection_criterion": "diagnostic_long_best_step_11"
+      },
+      "h16_short_best_ep8": {
+        "title": "H16 Short-Best (Ep 8)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_vrmse_mean.pt",
+        "full_sha256": "2a88ecc1453204cbcb0065fc671e09f478257e1bb6b1d0ae52d46e7c2057fbf4",
+        "expected_horizon": 16,
+        "selection_criterion": "best_vrmse_mean"
+      },
+      "h16_long_best_ep12": {
+        "title": "H16 Long-Best (Ep 12)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_long_vrmse.pt",
+        "full_sha256": "959615be88dcd9e3328f6cc8063ce2ed3136e29d0e678e5d9df91ea45ded2c1e",
+        "expected_horizon": 16,
+        "selection_criterion": "best_long_vrmse_j_long"
+      }
+    }
+  },
+  {
+    "figure_name": "comparison_median_err_u.png",
+    "sample_index": 23,
+    "sample_tag": "median_err",
+    "sample_description": "Median Error Sample (Index 23)",
+    "sample_selection_basis": "Median window when 45 test windows are sorted by Parent H8 J_long VRMSE error (rank 23/45)",
+    "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+    "simulation_index": 5,
+    "start_t": 100,
+    "end_t": 134,
+    "variable": "u",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "fbac2fd93aab0b09d1193be6b66a3f4f6286accd",
+    "evaluation_git_dirty": false,
+    "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+    "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_scaling_policy": "\u540c\u4e00\u65f6\u95f4\u6b65\u5171\u4eab\u8272\u6761\uff1b\u4e0d\u540c\u65f6\u95f4\u6b65\u72ec\u7acb\u7f29\u653e\uff1b\u663e\u793a\u8303\u56f4\u91c7\u7528 0.5%\u201399.5%\uff08\u573a\uff09\u4e0e 99.5%\uff08\u8bef\u5dee\uff09\u767e\u5206\u4f4d\u622a\u65ad\u3002\u4e0d\u53ef\u76f4\u63a5\u8de8\u65f6\u95f4\u6b65\uff08\u884c\uff09\u6bd4\u8f83\u989c\u8272\u6df1\u6d45\u3002",
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -0.7544509172439575,
+        "field_vmax": 0.7662585377693176,
+        "error_vmax": 0.042174071073532104
+      },
+      "h10": {
+        "field_vmin": -0.750823974609375,
+        "field_vmax": 0.76042640209198,
+        "error_vmax": 0.10175201296806335
+      },
+      "h20": {
+        "field_vmin": -0.7629052996635437,
+        "field_vmax": 0.7542796730995178,
+        "error_vmax": 0.2791774272918701
+      },
+      "h30": {
+        "field_vmin": -0.784913182258606,
+        "field_vmax": 0.7582175731658936,
+        "error_vmax": 0.4555436372756958
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": {
+        "title": "Parent H8 Saved Long-Best (Ep 11)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+        "full_sha256": "ea038c7af0f3a0fa5d851f25dd1ea224371b8c44ab2a80b8314f5c286c224147",
+        "expected_horizon": 8,
+        "selection_criterion": "diagnostic_long_best_step_11"
+      },
+      "h16_short_best_ep8": {
+        "title": "H16 Short-Best (Ep 8)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_vrmse_mean.pt",
+        "full_sha256": "2a88ecc1453204cbcb0065fc671e09f478257e1bb6b1d0ae52d46e7c2057fbf4",
+        "expected_horizon": 16,
+        "selection_criterion": "best_vrmse_mean"
+      },
+      "h16_long_best_ep12": {
+        "title": "H16 Long-Best (Ep 12)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_long_vrmse.pt",
+        "full_sha256": "959615be88dcd9e3328f6cc8063ce2ed3136e29d0e678e5d9df91ea45ded2c1e",
+        "expected_horizon": 16,
+        "selection_criterion": "best_long_vrmse_j_long"
+      }
+    }
+  },
+  {
+    "figure_name": "comparison_median_err_vorticity.png",
+    "sample_index": 23,
+    "sample_tag": "median_err",
+    "sample_description": "Median Error Sample (Index 23)",
+    "sample_selection_basis": "Median window when 45 test windows are sorted by Parent H8 J_long VRMSE error (rank 23/45)",
+    "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+    "simulation_index": 5,
+    "start_t": 100,
+    "end_t": 134,
+    "variable": "vorticity",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "fbac2fd93aab0b09d1193be6b66a3f4f6286accd",
+    "evaluation_git_dirty": false,
+    "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+    "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_scaling_policy": "\u540c\u4e00\u65f6\u95f4\u6b65\u5171\u4eab\u8272\u6761\uff1b\u4e0d\u540c\u65f6\u95f4\u6b65\u72ec\u7acb\u7f29\u653e\uff1b\u663e\u793a\u8303\u56f4\u91c7\u7528 0.5%\u201399.5%\uff08\u573a\uff09\u4e0e 99.5%\uff08\u8bef\u5dee\uff09\u767e\u5206\u4f4d\u622a\u65ad\u3002\u4e0d\u53ef\u76f4\u63a5\u8de8\u65f6\u95f4\u6b65\uff08\u884c\uff09\u6bd4\u8f83\u989c\u8272\u6df1\u6d45\u3002",
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -14.617779731750488,
+        "field_vmax": 14.617779731750488,
+        "error_vmax": 0.7245947122573853
+      },
+      "h10": {
+        "field_vmin": -14.164925575256348,
+        "field_vmax": 14.164925575256348,
+        "error_vmax": 1.8598740100860596
+      },
+      "h20": {
+        "field_vmin": -13.86867618560791,
+        "field_vmax": 13.86867618560791,
+        "error_vmax": 3.363309860229492
+      },
+      "h30": {
+        "field_vmin": -13.912399291992188,
+        "field_vmax": 13.912399291992188,
+        "error_vmax": 5.005526065826416
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": {
+        "title": "Parent H8 Saved Long-Best (Ep 11)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+        "full_sha256": "ea038c7af0f3a0fa5d851f25dd1ea224371b8c44ab2a80b8314f5c286c224147",
+        "expected_horizon": 8,
+        "selection_criterion": "diagnostic_long_best_step_11"
+      },
+      "h16_short_best_ep8": {
+        "title": "H16 Short-Best (Ep 8)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_vrmse_mean.pt",
+        "full_sha256": "2a88ecc1453204cbcb0065fc671e09f478257e1bb6b1d0ae52d46e7c2057fbf4",
+        "expected_horizon": 16,
+        "selection_criterion": "best_vrmse_mean"
+      },
+      "h16_long_best_ep12": {
+        "title": "H16 Long-Best (Ep 12)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_long_vrmse.pt",
+        "full_sha256": "959615be88dcd9e3328f6cc8063ce2ed3136e29d0e678e5d9df91ea45ded2c1e",
+        "expected_horizon": 16,
+        "selection_criterion": "best_long_vrmse_j_long"
+      }
+    }
+  },
+  {
+    "figure_name": "comparison_median_err_tracer.png",
+    "sample_index": 23,
+    "sample_tag": "median_err",
+    "sample_description": "Median Error Sample (Index 23)",
+    "sample_selection_basis": "Median window when 45 test windows are sorted by Parent H8 J_long VRMSE error (rank 23/45)",
+    "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+    "simulation_index": 5,
+    "start_t": 100,
+    "end_t": 134,
+    "variable": "tracer",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "fbac2fd93aab0b09d1193be6b66a3f4f6286accd",
+    "evaluation_git_dirty": false,
+    "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+    "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_scaling_policy": "\u540c\u4e00\u65f6\u95f4\u6b65\u5171\u4eab\u8272\u6761\uff1b\u4e0d\u540c\u65f6\u95f4\u6b65\u72ec\u7acb\u7f29\u653e\uff1b\u663e\u793a\u8303\u56f4\u91c7\u7528 0.5%\u201399.5%\uff08\u573a\uff09\u4e0e 99.5%\uff08\u8bef\u5dee\uff09\u767e\u5206\u4f4d\u622a\u65ad\u3002\u4e0d\u53ef\u76f4\u63a5\u8de8\u65f6\u95f4\u6b65\uff08\u884c\uff09\u6bd4\u8f83\u989c\u8272\u6df1\u6d45\u3002",
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -0.16832594573497772,
+        "field_vmax": 0.1638331562280655,
+        "error_vmax": 0.0332140251994133
+      },
+      "h10": {
+        "field_vmin": -0.14580005407333374,
+        "field_vmax": 0.14313417673110962,
+        "error_vmax": 0.05397406965494156
+      },
+      "h20": {
+        "field_vmin": -0.12253779917955399,
+        "field_vmax": 0.1270008385181427,
+        "error_vmax": 0.13934862613677979
+      },
+      "h30": {
+        "field_vmin": -0.1317930966615677,
+        "field_vmax": 0.1274556964635849,
+        "error_vmax": 0.18573381006717682
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": {
+        "title": "Parent H8 Saved Long-Best (Ep 11)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+        "full_sha256": "ea038c7af0f3a0fa5d851f25dd1ea224371b8c44ab2a80b8314f5c286c224147",
+        "expected_horizon": 8,
+        "selection_criterion": "diagnostic_long_best_step_11"
+      },
+      "h16_short_best_ep8": {
+        "title": "H16 Short-Best (Ep 8)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_vrmse_mean.pt",
+        "full_sha256": "2a88ecc1453204cbcb0065fc671e09f478257e1bb6b1d0ae52d46e7c2057fbf4",
+        "expected_horizon": 16,
+        "selection_criterion": "best_vrmse_mean"
+      },
+      "h16_long_best_ep12": {
+        "title": "H16 Long-Best (Ep 12)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_long_vrmse.pt",
+        "full_sha256": "959615be88dcd9e3328f6cc8063ce2ed3136e29d0e678e5d9df91ea45ded2c1e",
+        "expected_horizon": 16,
+        "selection_criterion": "best_long_vrmse_j_long"
+      }
+    }
+  },
+  {
+    "figure_name": "comparison_high_err_u.png",
+    "sample_index": 36,
+    "sample_tag": "high_err",
+    "sample_description": "High Error Sample (Index 36, 85th percentile)",
+    "sample_selection_basis": "High-error window when 45 test windows are sorted by Parent H8 J_long VRMSE error (rank 39/45, ~85th percentile)",
+    "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+    "simulation_index": 16,
+    "start_t": 0,
+    "end_t": 34,
+    "variable": "u",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "fbac2fd93aab0b09d1193be6b66a3f4f6286accd",
+    "evaluation_git_dirty": false,
+    "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+    "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_scaling_policy": "\u540c\u4e00\u65f6\u95f4\u6b65\u5171\u4eab\u8272\u6761\uff1b\u4e0d\u540c\u65f6\u95f4\u6b65\u72ec\u7acb\u7f29\u653e\uff1b\u663e\u793a\u8303\u56f4\u91c7\u7528 0.5%\u201399.5%\uff08\u573a\uff09\u4e0e 99.5%\uff08\u8bef\u5dee\uff09\u767e\u5206\u4f4d\u622a\u65ad\u3002\u4e0d\u53ef\u76f4\u63a5\u8de8\u65f6\u95f4\u6b65\uff08\u884c\uff09\u6bd4\u8f83\u989c\u8272\u6df1\u6d45\u3002",
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -0.5117211937904358,
+        "field_vmax": 0.5093902349472046,
+        "error_vmax": 0.028298024088144302
+      },
+      "h10": {
+        "field_vmin": -0.5426527857780457,
+        "field_vmax": 0.5362087488174438,
+        "error_vmax": 0.03394025191664696
+      },
+      "h20": {
+        "field_vmin": -0.6820693612098694,
+        "field_vmax": 0.5532271265983582,
+        "error_vmax": 0.18866941332817078
+      },
+      "h30": {
+        "field_vmin": -0.7596423029899597,
+        "field_vmax": 0.6805971264839172,
+        "error_vmax": 0.2332429140806198
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": {
+        "title": "Parent H8 Saved Long-Best (Ep 11)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+        "full_sha256": "ea038c7af0f3a0fa5d851f25dd1ea224371b8c44ab2a80b8314f5c286c224147",
+        "expected_horizon": 8,
+        "selection_criterion": "diagnostic_long_best_step_11"
+      },
+      "h16_short_best_ep8": {
+        "title": "H16 Short-Best (Ep 8)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_vrmse_mean.pt",
+        "full_sha256": "2a88ecc1453204cbcb0065fc671e09f478257e1bb6b1d0ae52d46e7c2057fbf4",
+        "expected_horizon": 16,
+        "selection_criterion": "best_vrmse_mean"
+      },
+      "h16_long_best_ep12": {
+        "title": "H16 Long-Best (Ep 12)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_long_vrmse.pt",
+        "full_sha256": "959615be88dcd9e3328f6cc8063ce2ed3136e29d0e678e5d9df91ea45ded2c1e",
+        "expected_horizon": 16,
+        "selection_criterion": "best_long_vrmse_j_long"
+      }
+    }
+  },
+  {
+    "figure_name": "comparison_high_err_vorticity.png",
+    "sample_index": 36,
+    "sample_tag": "high_err",
+    "sample_description": "High Error Sample (Index 36, 85th percentile)",
+    "sample_selection_basis": "High-error window when 45 test windows are sorted by Parent H8 J_long VRMSE error (rank 39/45, ~85th percentile)",
+    "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+    "simulation_index": 16,
+    "start_t": 0,
+    "end_t": 34,
+    "variable": "vorticity",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "fbac2fd93aab0b09d1193be6b66a3f4f6286accd",
+    "evaluation_git_dirty": false,
+    "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+    "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_scaling_policy": "\u540c\u4e00\u65f6\u95f4\u6b65\u5171\u4eab\u8272\u6761\uff1b\u4e0d\u540c\u65f6\u95f4\u6b65\u72ec\u7acb\u7f29\u653e\uff1b\u663e\u793a\u8303\u56f4\u91c7\u7528 0.5%\u201399.5%\uff08\u573a\uff09\u4e0e 99.5%\uff08\u8bef\u5dee\uff09\u767e\u5206\u4f4d\u622a\u65ad\u3002\u4e0d\u53ef\u76f4\u63a5\u8de8\u65f6\u95f4\u6b65\uff08\u884c\uff09\u6bd4\u8f83\u989c\u8272\u6df1\u6d45\u3002",
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -5.361634731292725,
+        "field_vmax": 5.361634731292725,
+        "error_vmax": 0.5108587145805359
+      },
+      "h10": {
+        "field_vmin": -5.452507972717285,
+        "field_vmax": 5.452507972717285,
+        "error_vmax": 0.6025176644325256
+      },
+      "h20": {
+        "field_vmin": -6.26668119430542,
+        "field_vmax": 6.26668119430542,
+        "error_vmax": 2.0879781246185303
+      },
+      "h30": {
+        "field_vmin": -7.2138566970825195,
+        "field_vmax": 7.2138566970825195,
+        "error_vmax": 3.295301914215088
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": {
+        "title": "Parent H8 Saved Long-Best (Ep 11)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+        "full_sha256": "ea038c7af0f3a0fa5d851f25dd1ea224371b8c44ab2a80b8314f5c286c224147",
+        "expected_horizon": 8,
+        "selection_criterion": "diagnostic_long_best_step_11"
+      },
+      "h16_short_best_ep8": {
+        "title": "H16 Short-Best (Ep 8)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_vrmse_mean.pt",
+        "full_sha256": "2a88ecc1453204cbcb0065fc671e09f478257e1bb6b1d0ae52d46e7c2057fbf4",
+        "expected_horizon": 16,
+        "selection_criterion": "best_vrmse_mean"
+      },
+      "h16_long_best_ep12": {
+        "title": "H16 Long-Best (Ep 12)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_long_vrmse.pt",
+        "full_sha256": "959615be88dcd9e3328f6cc8063ce2ed3136e29d0e678e5d9df91ea45ded2c1e",
+        "expected_horizon": 16,
+        "selection_criterion": "best_long_vrmse_j_long"
+      }
+    }
+  },
+  {
+    "figure_name": "comparison_high_err_tracer.png",
+    "sample_index": 36,
+    "sample_tag": "high_err",
+    "sample_description": "High Error Sample (Index 36, 85th percentile)",
+    "sample_selection_basis": "High-error window when 45 test windows are sorted by Parent H8 J_long VRMSE error (rank 39/45, ~85th percentile)",
+    "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+    "simulation_index": 16,
+    "start_t": 0,
+    "end_t": 34,
+    "variable": "tracer",
+    "re": 10000.0,
+    "sc": 0.10000000149011612,
+    "evaluation_git_commit": "fbac2fd93aab0b09d1193be6b66a3f4f6286accd",
+    "evaluation_git_dirty": false,
+    "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+    "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+    "horizons": [
+      1,
+      10,
+      20,
+      30
+    ],
+    "colorbar_scaling_policy": "\u540c\u4e00\u65f6\u95f4\u6b65\u5171\u4eab\u8272\u6761\uff1b\u4e0d\u540c\u65f6\u95f4\u6b65\u72ec\u7acb\u7f29\u653e\uff1b\u663e\u793a\u8303\u56f4\u91c7\u7528 0.5%\u201399.5%\uff08\u573a\uff09\u4e0e 99.5%\uff08\u8bef\u5dee\uff09\u767e\u5206\u4f4d\u622a\u65ad\u3002\u4e0d\u53ef\u76f4\u63a5\u8de8\u65f6\u95f4\u6b65\uff08\u884c\uff09\u6bd4\u8f83\u989c\u8272\u6df1\u6d45\u3002",
+    "colorbar_norms": {
+      "h1": {
+        "field_vmin": -0.4860650599002838,
+        "field_vmax": 0.48997339606285095,
+        "error_vmax": 0.039991624653339386
+      },
+      "h10": {
+        "field_vmin": -0.478439062833786,
+        "field_vmax": 0.4905320703983307,
+        "error_vmax": 0.09502770751714706
+      },
+      "h20": {
+        "field_vmin": -0.5149997472763062,
+        "field_vmax": 0.4725934863090515,
+        "error_vmax": 0.2921046316623688
+      },
+      "h30": {
+        "field_vmin": -0.5286663174629211,
+        "field_vmax": 0.4922035336494446,
+        "error_vmax": 0.3517053723335266
+      }
+    },
+    "models_evaluated": {
+      "parent_h8_ep11": {
+        "title": "Parent H8 Saved Long-Best (Ep 11)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+        "full_sha256": "ea038c7af0f3a0fa5d851f25dd1ea224371b8c44ab2a80b8314f5c286c224147",
+        "expected_horizon": 8,
+        "selection_criterion": "diagnostic_long_best_step_11"
+      },
+      "h16_short_best_ep8": {
+        "title": "H16 Short-Best (Ep 8)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_vrmse_mean.pt",
+        "full_sha256": "2a88ecc1453204cbcb0065fc671e09f478257e1bb6b1d0ae52d46e7c2057fbf4",
+        "expected_horizon": 16,
+        "selection_criterion": "best_vrmse_mean"
+      },
+      "h16_long_best_ep12": {
+        "title": "H16 Long-Best (Ep 12)",
+        "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_long_vrmse.pt",
+        "full_sha256": "959615be88dcd9e3328f6cc8063ce2ed3136e29d0e678e5d9df91ea45ded2c1e",
+        "expected_horizon": 16,
+        "selection_criterion": "best_long_vrmse_j_long"
+      }
+    }
+  }
+]
