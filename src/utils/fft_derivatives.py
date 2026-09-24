@@ -7,9 +7,41 @@ Domain specifications for The Well shear_flow:
     Lx = 1.0, Ly = 2.0
 """
 
-from typing import Tuple
+from typing import Dict, Tuple
 import torch
 import torch.fft
+
+_WAVENUMBER_CACHE: Dict[Tuple[int, int, float, float, torch.device, torch.dtype], Tuple[torch.Tensor, torch.Tensor]] = {}
+
+
+def get_wavenumbers(
+    nx: int,
+    ny: int,
+    lx: float,
+    ly: float,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Retrieve or compute cached 2D wavenumber grids (kx, ky) for RFFT2.
+
+    Returns:
+        kx: Shape (nx, 1), 1D frequency grid along dim -2.
+        ky: Shape (1, ny // 2 + 1), RFFT frequency grid along dim -1.
+    """
+    key = (nx, ny, float(lx), float(ly), device, dtype)
+    cached = _WAVENUMBER_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    kx = 2.0 * torch.pi * torch.fft.fftfreq(nx, d=lx / nx, device=device, dtype=dtype).view(nx, 1)
+    ky = 2.0 * torch.pi * torch.fft.rfftfreq(ny, d=ly / ny, device=device, dtype=dtype).view(1, ny // 2 + 1)
+    _WAVENUMBER_CACHE[key] = (kx, ky)
+    return kx, ky
+
+
+def clear_wavenumber_cache() -> None:
+    """Clear all cached wavenumber grids."""
+    _WAVENUMBER_CACHE.clear()
 
 
 def spectral_grad_2d(
@@ -39,13 +71,12 @@ def spectral_grad_2d(
     calc_dtype = torch.float64 if orig_dtype == torch.float64 else torch.float32
     field_calc = field.to(dtype=calc_dtype)
 
-    # kx = 2 * pi * n / Lx, shape (..., nx, 1)
-    kx = 2.0 * torch.pi * torch.fft.fftfreq(nx, d=lx / nx, device=device, dtype=calc_dtype)
-    kx = kx.view(*([1] * (field.ndim - 2)), nx, 1)
-
-    # ky = 2 * pi * n / Ly, shape (..., 1, ny//2 + 1)
-    ky = 2.0 * torch.pi * torch.fft.rfftfreq(ny, d=ly / ny, device=device, dtype=calc_dtype)
-    ky = ky.view(*([1] * (field.ndim - 2)), 1, ny // 2 + 1)
+    kx_base, ky_base = get_wavenumbers(nx, ny, lx, ly, device, calc_dtype)
+    if field.ndim > 2:
+        kx = kx_base.view(*([1] * (field.ndim - 2)), nx, 1)
+        ky = ky_base.view(*([1] * (field.ndim - 2)), 1, ny // 2 + 1)
+    else:
+        kx, ky = kx_base, ky_base
 
     # Forward 2D RFFT over (x, y)
     f_hat = torch.fft.rfft2(field_calc, dim=(-2, -1))
@@ -168,11 +199,12 @@ def compute_laplacian_2d(
     calc_dtype = torch.float64 if orig_dtype == torch.float64 else torch.float32
     field_calc = field.to(dtype=calc_dtype)
 
-    kx = 2.0 * torch.pi * torch.fft.fftfreq(nx, d=lx / nx, device=device, dtype=calc_dtype)
-    kx = kx.view(*([1] * (field.ndim - 2)), nx, 1)
-
-    ky = 2.0 * torch.pi * torch.fft.rfftfreq(ny, d=ly / ny, device=device, dtype=calc_dtype)
-    ky = ky.view(*([1] * (field.ndim - 2)), 1, ny // 2 + 1)
+    kx_base, ky_base = get_wavenumbers(nx, ny, lx, ly, device, calc_dtype)
+    if field.ndim > 2:
+        kx = kx_base.view(*([1] * (field.ndim - 2)), nx, 1)
+        ky = ky_base.view(*([1] * (field.ndim - 2)), 1, ny // 2 + 1)
+    else:
+        kx, ky = kx_base, ky_base
 
     # -(kx^2 + ky^2)
     k_sq = kx**2 + ky**2

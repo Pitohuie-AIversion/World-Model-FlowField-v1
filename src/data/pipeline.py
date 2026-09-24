@@ -350,33 +350,42 @@ def create_flow_dataloaders(
     g = torch.Generator()
     g.manual_seed(seed)
 
+    effective_workers = num_workers if not preload_to_memory else 0
+    extra_loader_kwargs = {}
+    if effective_workers > 0:
+        extra_loader_kwargs["persistent_workers"] = True
+        extra_loader_kwargs["prefetch_factor"] = 2
+
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
         shuffle=(train_sampler is None),
         sampler=train_sampler,
-        num_workers=num_workers if not preload_to_memory else 0,
+        num_workers=effective_workers,
         worker_init_fn=seed_worker,
         generator=g if train_sampler is None else None,
         pin_memory=torch.cuda.is_available(),
+        **extra_loader_kwargs,
     )
 
     valid_loader = DataLoader(
         valid_ds,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers if not preload_to_memory else 0,
+        num_workers=effective_workers,
         worker_init_fn=seed_worker,
         pin_memory=torch.cuda.is_available(),
+        **extra_loader_kwargs,
     )
 
     test_loader = DataLoader(
         test_ds,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers if not preload_to_memory else 0,
+        num_workers=effective_workers,
         worker_init_fn=seed_worker,
         pin_memory=torch.cuda.is_available(),
+        **extra_loader_kwargs,
     )
 
     if return_sampler:

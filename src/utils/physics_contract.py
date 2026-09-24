@@ -10,10 +10,34 @@ normalized, so derivative operators must use the physical extents below.
 
 from typing import Any, Dict, List, Optional, Tuple
 import math
+import torch
 
 PHYSICS_PROTOCOL = "Closure-R4"
 SPATIAL_AXIS_CONTRACT = "tensor(...,C,Nx,Ny):dim-2=x,dim-1=y"
 SHEAR_FLOW_DOMAIN_SIZE_XY: Tuple[float, float] = (1.0, 2.0)
+
+
+def zero_mean_pressure_gauge(
+    tensor: torch.Tensor,
+    pressure_channel: int = 2,
+) -> torch.Tensor:
+    """Enforces zero spatial-mean gauge pressure condition on physical flow field tensors.
+
+    Supports arbitrary leading batch and time dimensions:
+      - 3D: (C, Nx, Ny)
+      - 4D: (T, C, Nx, Ny) or (B, C, Nx, Ny)
+      - 5D: (B, T, C, Nx, Ny)
+
+    Leaves all other channels (u, v, tracer) strictly bitwise unmodified.
+    Returns:
+        Tensor with zero spatial mean on pressure_channel.
+    """
+    if tensor.ndim < 3:
+        raise ValueError(f"zero_mean_pressure_gauge expects at least 3D tensor (C, Nx, Ny), got ndim={tensor.ndim}")
+    out = tensor.clone()
+    p_slice = out[..., pressure_channel : pressure_channel + 1, :, :]
+    out[..., pressure_channel : pressure_channel + 1, :, :] = p_slice - p_slice.mean(dim=(-2, -1), keepdim=True)
+    return out
 
 # Canonical semantic specifications for ablation groups E0 - E4
 ABLATION_SEMANTIC_SPECS: Dict[str, Dict[str, Any]] = {

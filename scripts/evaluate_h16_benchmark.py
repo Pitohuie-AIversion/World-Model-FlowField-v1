@@ -44,6 +44,7 @@ from src.utils.physics_contract import (
     PHYSICS_PROTOCOL,
     SPATIAL_AXIS_CONTRACT,
     SHEAR_FLOW_DOMAIN_SIZE_XY,
+    zero_mean_pressure_gauge,
 )
 from src.utils.provenance import (
     get_git_commit,
@@ -53,6 +54,7 @@ from src.utils.provenance import (
     compute_normalizer_hash,
     resolve_checkpoint_provenance,
     validate_evaluation_provenance,
+    validate_formal_provenance_bundle,
 )
 from src.utils.reproducibility import seed_everything
 
@@ -62,18 +64,24 @@ BENCHMARK_TARGETS = {
         "title": "Parent H8 Saved Long-Best (Ep 11)",
         "path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
         "expected_horizon": 8,
+        "expected_lambda_div": 0.01,
+        "expected_lambda_vort": 0.05,
         "selection_criterion": "diagnostic_long_best_step_11",
     },
     "h16_short_best_ep8": {
         "title": "H16 Short-Best (Ep 8)",
         "path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_vrmse_mean.pt",
         "expected_horizon": 16,
+        "expected_lambda_div": 0.01,
+        "expected_lambda_vort": 0.05,
         "selection_criterion": "best_vrmse_mean",
     },
     "h16_long_best_ep12": {
         "title": "H16 Long-Best (Ep 12)",
         "path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_long_vrmse.pt",
         "expected_horizon": 16,
+        "expected_lambda_div": 0.01,
+        "expected_lambda_vort": 0.05,
         "selection_criterion": "best_long_vrmse_j_long",
     },
 }
@@ -112,27 +120,28 @@ def validate_benchmark_checkpoint(
             f"Checkpoint horizon mismatch for {target_key}: expected {expected_horizon}, got {actual_horizon}"
         )
 
-    # 3. Physics protocol and spatial axis contract validation
-    if prov.get("physics_protocol") != PHYSICS_PROTOCOL:
+    # 3. Physics loss configuration check (E4 full physics coupling baseline)
+    expected_lambda_div = target_info.get("expected_lambda_div", 0.01)
+    expected_lambda_vort = target_info.get("expected_lambda_vort", 0.05)
+    actual_div = float(cfg.get("lambda_div", 0.0) or 0.0)
+    actual_vort = float(cfg.get("lambda_vort", 0.0) or 0.0)
+    import math
+    if not math.isclose(actual_div, expected_lambda_div, abs_tol=1e-5):
         raise ValueError(
-            f"Physics protocol mismatch for {target_key}: expected {PHYSICS_PROTOCOL}, got {prov.get('physics_protocol')}"
+            f"Loss configuration mismatch for {target_key}: lambda_div expected {expected_lambda_div}, got {actual_div}"
         )
-    if prov.get("spatial_axis_contract") != SPATIAL_AXIS_CONTRACT:
+    if not math.isclose(actual_vort, expected_lambda_vort, abs_tol=1e-5):
         raise ValueError(
-            f"Spatial axis contract mismatch for {target_key}: expected {SPATIAL_AXIS_CONTRACT}, got {prov.get('spatial_axis_contract')}"
+            f"Loss configuration mismatch for {target_key}: lambda_vort expected {expected_lambda_vort}, got {actual_vort}"
         )
 
-    # 4. Formal mode fail-closed checks
+    # 4. Formal mode fail-closed checks using standard repository validator
     if formal:
-        if prov.get("training_git_dirty") is True:
-            raise RuntimeError(
-                f"Formal evaluation failed-closed: checkpoint {ckpt_path} was trained on a dirty working tree."
-            )
-        training_commit = prov.get("training_git_commit")
-        if not training_commit or training_commit == "UNKNOWN":
-            raise RuntimeError(
-                f"Formal evaluation failed-closed: checkpoint {ckpt_path} has unknown training git commit."
-            )
+        validate_formal_provenance_bundle(
+            prov=prov,
+            label=f"target '{target_key}' ({ckpt_path})",
+            fail_closed=True,
+        )
 
     return prov
 
@@ -223,9 +232,9 @@ def evaluate_model_full_physical(
             initial_state = hist_eval[:, -1].clone()
 
             # Zero-mean gauge pressure normalization in physical coordinates
-            pred_eval[:, :, 2:3, :, :] = pred_eval[:, :, 2:3, :, :] - pred_eval[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
-            future_eval[:, :, 2:3, :, :] = future_eval[:, :, 2:3, :, :] - future_eval[:, :, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
-            initial_state[:, 2:3, :, :] = initial_state[:, 2:3, :, :] - initial_state[:, 2:3, :, :].mean(dim=(-2, -1), keepdim=True)
+            pred_eval = zero_mean_pressure_gauge(pred_eval)
+            future_eval = zero_mean_pressure_gauge(future_eval)
+            initial_state = zero_mean_pressure_gauge(initial_state)
 
             # Compute field, spectral, conservation and tracer metrics
             batch_res = evaluate_rollout_trajectory(
