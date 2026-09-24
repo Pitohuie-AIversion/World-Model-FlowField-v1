@@ -18,6 +18,16 @@ from scripts.generate_shear_flow_video import (
 REAL_HDF5 = "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5"
 
 
+def _has_video_writer() -> bool:
+    if shutil.which("ffmpeg") is not None:
+        return True
+    try:
+        import cv2  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 @pytest.fixture
 def mock_hdf5_file(tmp_path):
     """Create a minimal synthetic HDF5 file matching shear_flow schema."""
@@ -75,6 +85,7 @@ def test_load_trajectory_data_invalid_sim_idx(mock_hdf5_file):
         load_trajectory_data(mock_hdf5_file, sim_idx=99)
 
 
+@pytest.mark.skipif(not _has_video_writer(), reason="Neither ffmpeg nor cv2 available for video rendering")
 def test_render_shear_flow_video_mock(mock_hdf5_file, tmp_path):
     """Verify rendering pipeline produces valid video and metadata."""
     out_mp4 = str(tmp_path / "mock_output.mp4")
@@ -106,6 +117,7 @@ def test_render_shear_flow_video_mock(mock_hdf5_file, tmp_path):
     assert loaded["resolution"]["height"] > 0
 
 
+@pytest.mark.skipif(not _has_video_writer(), reason="Neither ffmpeg nor cv2 available for video rendering")
 def test_render_shear_flow_video_triple_layout(mock_hdf5_file, tmp_path):
     """Verify rendering with triple-panel layout."""
     out_mp4 = str(tmp_path / "mock_triple.mp4")

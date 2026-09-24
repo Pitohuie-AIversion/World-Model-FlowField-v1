@@ -153,3 +153,36 @@ def test_create_flow_dataloaders_persistent_workers():
         assert val_loader_2.prefetch_factor == 2
         assert test_loader_2.persistent_workers is True
         assert test_loader_2.prefetch_factor == 2
+
+
+def test_train_forecaster_compile_model_flag():
+    """Verify train_forecaster _build_model supports compile_model=True gracefully."""
+    from scripts.train_forecaster import _build_model
+
+    device = torch.device("cpu")
+    # Test _build_model with direct_transformer and compile_model=True
+    model, parent_ckpt, parent_sha = _build_model(
+        model_type="direct_transformer",
+        embed_dim=64,
+        depth=1,
+        num_heads=2,
+        prediction_mode="direct",
+        freeze_representation=False,
+        repr_checkpoint="",
+        init_checkpoint=None,
+        split_hash="dummy",
+        normalizer_hash="dummy",
+        seed=42,
+        expected_init_horizon=None,
+        lambda_div=0.0,
+        lambda_vort=0.0,
+        use_condition=False,
+        device=device,
+        is_distributed=False,
+        local_rank=0,
+        global_rank=0,
+        compile_model=True,
+    )
+    assert model is not None
+    assert hasattr(model, "forward")
+

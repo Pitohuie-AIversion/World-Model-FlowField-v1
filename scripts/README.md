@@ -145,3 +145,10 @@ python scripts/analyze_spectral_dissipation.py
 # 生成正文全部 LaTeX 表格 (Table 1 - Table 4)
 python scripts/generate_paper_tables.py
 ```
+
+### 3.4 高性能编译加速训练 (PyTorch 2.x torch.compile)
+```bash
+# 开启内核融合加速 (TorchInductor 自动融合注意力与解码层，零显存碎片)
+python scripts/train_forecaster.py --model latent_transformer --horizon 4 --compile
+```
+

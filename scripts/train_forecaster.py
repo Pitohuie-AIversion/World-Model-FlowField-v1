@@ -186,6 +186,7 @@ def _build_model(
     is_distributed: bool,
     local_rank: int,
     global_rank: int,
+    compile_model: bool = False,
 ) -> Tuple[nn.Module, Optional[str], Optional[str]]:
     """Construct neural model architecture, load representation/warm-start checkpoints."""
     if model_type == "latent_transformer":
@@ -300,6 +301,23 @@ def _build_model(
         load_msg = model.load_state_dict(state_dict_to_load, strict=True)
         if global_rank == 0:
             print(f"Successfully loaded dynamics model_state_dict: {load_msg}")
+
+    if compile_model:
+        if hasattr(torch, "compile"):
+            if global_rank == 0:
+                print("Enabling torch.compile(dynamic=True) for model acceleration...")
+            try:
+                if model_type == "latent_transformer":
+                    model.transformer = torch.compile(model.transformer, dynamic=True)
+                    model.decoder = torch.compile(model.decoder, dynamic=True)
+                else:
+                    model = torch.compile(model, dynamic=True)
+            except Exception as e:
+                if global_rank == 0:
+                    print(f"Warning: torch.compile failed with error: {e}. Falling back to uncompiled execution.")
+        else:
+            if global_rank == 0:
+                print("Notice: torch.compile not available in this PyTorch version. Skipping compilation.")
 
     if is_distributed:
         model = torch.nn.parallel.DistributedDataParallel(
@@ -634,6 +652,7 @@ def train_forecaster(
     grad_accum_steps: int = 1,
     val_diagnostic_horizons: Optional[List[int]] = None,
     expected_init_horizon: Optional[int] = None,
+    compile_model: bool = False,
 ):
     if grad_accum_steps < 1:
         raise ValueError(f"grad_accum_steps must be >= 1, got {grad_accum_steps}")
@@ -696,6 +715,7 @@ def train_forecaster(
         is_distributed=is_distributed,
         local_rank=local_rank,
         global_rank=global_rank,
+        compile_model=compile_model,
     )
 
     optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=1e-4)
@@ -920,6 +940,12 @@ if __name__ == "__main__":
         default=None,
         help="Expected prediction horizon of init_checkpoint for fail-closed lineage validation.",
     )
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        default=False,
+        help="Enable PyTorch 2.x torch.compile(dynamic=True) for model kernel fusion acceleration.",
+    )
     args = parser.parse_args()
 
     freeze_rep = False if args.joint else args.freeze_representation
@@ -957,4 +983,5 @@ if __name__ == "__main__":
         grad_accum_steps=args.grad_accum_steps,
         val_diagnostic_horizons=args.val_diagnostic_horizons,
         expected_init_horizon=args.expected_init_horizon,
+        compile_model=args.compile,
     )
