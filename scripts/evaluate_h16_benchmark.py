@@ -216,8 +216,9 @@ def print_markdown_tables(results: dict):
             ("vort_rmse", "Vorticity RMSE"),
             ("enstrophy_rel_err", "Enstrophy Rel Err"),
             ("energy_spectrum_mae", "Energy Spec MAE"),
-            ("tracer_oob_rate", "Tracer OOB Rate"),
-            ("tracer_integral_drift", "Tracer Drift"),
+            ("tracer_out_of_bounds_rate", "Tracer OOB Rate"),
+            ("tracer_mass_error", "Tracer Mass Err"),
+            ("tracer_mean_err", "Tracer Mean Drift"),
         ]:
             v1 = m_res.get("step_1", {}).get(metric_name, float("nan"))
             v10 = m_res.get("step_10", {}).get(metric_name, float("nan"))
