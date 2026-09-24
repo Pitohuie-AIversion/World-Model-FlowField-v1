@@ -62,21 +62,90 @@ BENCHMARK_TARGETS = {
         "title": "Parent H8 Saved Long-Best (Ep 11)",
         "path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
         "expected_horizon": 8,
+        "selection_criterion": "diagnostic_long_best_step_11",
     },
     "h16_short_best_ep8": {
         "title": "H16 Short-Best (Ep 8)",
         "path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_vrmse_mean.pt",
         "expected_horizon": 16,
+        "selection_criterion": "best_vrmse_mean",
     },
     "h16_long_best_ep12": {
         "title": "H16 Long-Best (Ep 12)",
         "path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_long_vrmse.pt",
         "expected_horizon": 16,
+        "selection_criterion": "best_long_vrmse_j_long",
     },
 }
 
 EVAL_HORIZONS = [1, 5, 10, 16, 20, 30]
 DEFAULT_OUTPUT_METRICS = "outputs/metrics/h16_benchmark_evaluation.json"
+
+
+def validate_benchmark_checkpoint(
+    ckpt_path: str,
+    ckpt_data: dict,
+    cfg: dict,
+    target_key: str,
+    target_info: dict,
+    eval_split_hash: str,
+    eval_normalizer_hash: str,
+    formal: bool = False,
+) -> dict:
+    """Strictly validates checkpoint against benchmark target specifications and protocol identity."""
+    prov = resolve_checkpoint_provenance(ckpt_path, ckpt_data)
+
+    # 1. Protocol identity validation (split, normalizer, seed)
+    validate_evaluation_provenance(
+        ckpt_provenance=prov,
+        eval_split_hash=eval_split_hash,
+        eval_normalizer_hash=eval_normalizer_hash,
+        expected_seed=42,
+        fail_closed=True,
+    )
+
+    # 2. Horizon semantic match
+    actual_horizon = cfg.get("horizon", ckpt_data.get("horizon"))
+    expected_horizon = target_info.get("expected_horizon")
+    if expected_horizon is not None and actual_horizon != expected_horizon:
+        raise ValueError(
+            f"Checkpoint horizon mismatch for {target_key}: expected {expected_horizon}, got {actual_horizon}"
+        )
+
+    # 3. Physics protocol and spatial axis contract validation
+    if prov.get("physics_protocol") != PHYSICS_PROTOCOL:
+        raise ValueError(
+            f"Physics protocol mismatch for {target_key}: expected {PHYSICS_PROTOCOL}, got {prov.get('physics_protocol')}"
+        )
+    if prov.get("spatial_axis_contract") != SPATIAL_AXIS_CONTRACT:
+        raise ValueError(
+            f"Spatial axis contract mismatch for {target_key}: expected {SPATIAL_AXIS_CONTRACT}, got {prov.get('spatial_axis_contract')}"
+        )
+
+    # 4. Formal mode fail-closed checks
+    if formal:
+        if prov.get("training_git_dirty") is True:
+            raise RuntimeError(
+                f"Formal evaluation failed-closed: checkpoint {ckpt_path} was trained on a dirty working tree."
+            )
+        training_commit = prov.get("training_git_commit")
+        if not training_commit or training_commit == "UNKNOWN":
+            raise RuntimeError(
+                f"Formal evaluation failed-closed: checkpoint {ckpt_path} has unknown training git commit."
+            )
+
+    return prov
+
+
+def validate_metric_finiteness(metrics: Dict[str, Dict[str, float]], target_key: str):
+    """Ensures all evaluated metrics are finite numbers (no NaN or Inf)."""
+    import math
+    for step_key, step_data in metrics.items():
+        for m_key, m_val in step_data.items():
+            if math.isnan(m_val) or math.isinf(m_val):
+                raise ValueError(
+                    f"Non-finite metric detected in {target_key} at {step_key}: {m_key}={m_val}"
+                )
 
 
 def load_model_from_checkpoint(ckpt_path: str, device: torch.device) -> Tuple[LatentForecaster, dict, dict]:
@@ -125,7 +194,6 @@ def evaluate_model_full_physical(
     model.eval()
     max_h = max(eval_horizons)
 
-    # Accumulate metrics keyed by step_{h}
     accumulated = {f"step_{h}": {} for h in eval_horizons}
     total_samples = 0
 
@@ -184,7 +252,7 @@ def print_markdown_tables(results: dict):
     models = list(results.keys())
 
     print("\n" + "=" * 90)
-    print("### TABLE 1: ROLLOUT FIELD VRMSE COMPARISON (Test Set)")
+    print("### TABLE 1: ROLLOUT FIELD VRMSE COMPARISON (Test Set - 45 sliding windows from 5 trajectories)")
     print("=" * 90)
     header = "| Model | h=1 | h=5 | h=10 | h=16 | h=20 | h=30 | J_long (mean 10,20,30) |"
     sep = "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |"
@@ -237,17 +305,16 @@ def main():
     parser.add_argument("--batch_size", type=int, default=2)
     args = parser.parse_args()
 
+    # 1. Formal preflight provenance: record state at script startup BEFORE opening any output files
+    eval_start_commit = get_git_commit(PROJECT_ROOT)
+    eval_start_dirty = is_git_dirty(PROJECT_ROOT)
+    if args.formal and eval_start_dirty:
+        raise RuntimeError("Formal evaluation failed-closed: working tree is dirty at startup.")
+
     seed_everything(42)
     device = torch.device(args.device)
 
-    # 1. Formal preflight provenance
-    if args.formal:
-        dirty = is_git_dirty()
-        if dirty:
-            raise RuntimeError("Formal evaluation failed-closed: working tree is dirty.")
-
-    current_commit = get_git_commit()
-    print(f"Executing H16 benchmark evaluation on {device} (Git Commit: {current_commit})...")
+    print(f"Executing H16 benchmark evaluation on {device} (Git Commit: {eval_start_commit}, Dirty: {eval_start_dirty})...")
 
     # 2. Setup dataset and read-only normalizer
     split_file = "outputs/splits/grouped_split.json"
@@ -277,7 +344,24 @@ def main():
         preload_to_memory=False,
         seed=42,
     )
-    print(f"Loaded test dataset: {len(test_loader.dataset)} samples ({len(test_loader)} batches).")
+    total_eval_windows = len(test_loader.dataset)
+    print(f"Loaded test dataset: {total_eval_windows} sliding evaluation windows across 5 source trajectories ({len(test_loader)} batches).")
+
+    dataset_protocol = {
+        "split_type": "grouped",
+        "split_file": split_file,
+        "split_hash": split_hash,
+        "normalizer_hash": normalizer_hash,
+        "num_source_trajectories": 5,
+        "num_clusters": 4,
+        "trajectory_total_steps": 200,
+        "history_length": 4,
+        "rollout_horizon": max(EVAL_HORIZONS),
+        "stride": 20,
+        "windows_per_trajectory": 9,
+        "total_evaluation_windows": total_eval_windows,
+        "sample_independence_note": "45 sliding windows evaluated across 5 source trajectories; not 45 independent simulations",
+    }
 
     # 3. Run evaluation across the 3 target models
     benchmark_results = {}
@@ -288,8 +372,20 @@ def main():
             raise FileNotFoundError(f"Target checkpoint not found: {ckpt_path}")
 
         model, cfg, ckpt_data = load_model_from_checkpoint(ckpt_path, device=device)
-        sha256 = compute_file_sha256(ckpt_path)
-        prov = resolve_checkpoint_provenance(ckpt_path, ckpt_data)
+        full_sha256 = compute_file_sha256(ckpt_path)
+
+        # STRICT PROVENANCE & SEMANTIC CONTRACT VERIFICATION BEFORE ROLLOUT
+        prov = validate_benchmark_checkpoint(
+            ckpt_path=ckpt_path,
+            ckpt_data=ckpt_data,
+            cfg=cfg,
+            target_key=target_key,
+            target_info=target_info,
+            eval_split_hash=split_hash,
+            eval_normalizer_hash=normalizer_hash,
+            formal=args.formal,
+        )
+
         t0 = time.time()
         metrics = evaluate_model_full_physical(
             model=model,
@@ -303,32 +399,35 @@ def main():
         elapsed = time.time() - t0
         print(f"Completed in {elapsed:.1f}s.")
 
+        # Ensure all metrics are strictly finite
+        validate_metric_finiteness(metrics, target_key)
+
         benchmark_results[target_key] = {
             "title": target_info["title"],
             "checkpoint_path": ckpt_path,
-            "sha256": sha256,
+            "full_sha256": full_sha256,
+            "epoch": ckpt_data.get("epoch"),
+            "selection_criterion": target_info.get("selection_criterion", ckpt_data.get("selection_criterion", "vrmse_mean")),
+            "horizon": cfg.get("horizon", ckpt_data.get("horizon")),
             "provenance": prov,
             "config": cfg,
             "metrics": metrics,
         }
 
-    # 4. Save results to output_file
+    # 4. Prepare JSON payload and write
+    payload = {
+        "evaluation_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "evaluation_git_commit": eval_start_commit,
+        "evaluation_git_dirty": eval_start_dirty,
+        "dataset_protocol": dataset_protocol,
+        "eval_horizons": EVAL_HORIZONS,
+        "results": benchmark_results,
+    }
+
     out_path = Path(args.output_file)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
-        json.dump(
-            {
-                "evaluation_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "evaluation_git_commit": current_commit,
-                "evaluation_git_dirty": is_git_dirty(),
-                "split_hash": split_hash,
-                "normalizer_hash": normalizer_hash,
-                "eval_horizons": EVAL_HORIZONS,
-                "results": benchmark_results,
-            },
-            f,
-            indent=2,
-        )
+        json.dump(payload, f, indent=2)
     print(f"\nResults saved to: {out_path}")
 
     # 5. Print summary tables

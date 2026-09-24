@@ -171,24 +171,71 @@ def create_checkpoint_provenance(
     }
 
 
+def _find_matching_manifest_group(
+    manifest: Dict[str, Any],
+    ckpt_path: str,
+    ckpt_sha: Optional[str],
+) -> Optional[Tuple[Dict[str, Any], Optional[str]]]:
+    """Search manifest groups matching checkpoint by absolute path or sha256.
+
+    Returns (grp_info, manifest_expected_sha) or None if no match.
+    Raises ValueError if matched by path but sha256 diverges.
+    """
+    abs_ckpt_path = os.path.abspath(ckpt_path)
+    for grp_key, grp_info in manifest.get("groups", {}).items():
+        grp_ckpt_path = os.path.abspath(grp_info.get("checkpoint_path", ""))
+        manifest_expected_sha = grp_info.get("checkpoint_sha256")
+        path_match = (grp_ckpt_path == abs_ckpt_path)
+        sha_match = bool(ckpt_sha and manifest_expected_sha == ckpt_sha)
+
+        if not (path_match or sha_match):
+            continue
+
+        if path_match and manifest_expected_sha and ckpt_sha and manifest_expected_sha != ckpt_sha:
+            raise ValueError(
+                f"Manifest integrity mismatch for {ckpt_path}: "
+                f"file SHA256 is {ckpt_sha}, but manifest expected {manifest_expected_sha}"
+            )
+        return grp_info, manifest_expected_sha
+    return None
+
+
+def _check_legacy_attestation(
+    attestation: Any,
+    ckpt_sha: Optional[str],
+    manifest_expected_sha: Optional[str] = None,
+) -> bool:
+    """Verify legacy attestation dictionary against computed or expected file sha."""
+    if not isinstance(attestation, dict):
+        return False
+    attested_sha = attestation.get("checkpoint_sha256")
+    status_ok = attestation.get("status") == "historical_untracked"
+    if not (status_ok and attested_sha):
+        return False
+    if ckpt_sha and attested_sha == ckpt_sha:
+        return True
+    if manifest_expected_sha and attested_sha == manifest_expected_sha:
+        return True
+    return False
+
+
 def resolve_checkpoint_provenance(
     ckpt_path: str,
     ckpt_data: dict,
     manifest_path: Optional[str] = "outputs/manifests/closure_r4_seed42.json",
 ) -> Dict[str, Any]:
     """Extract provenance bundle from checkpoint dict, with fallback to seed-42 manifest."""
-    commit = ckpt_data.get("training_git_commit") or ckpt_data.get("config", {}).get("training_git_commit")
-    git_dirty = ckpt_data.get("training_git_dirty")
-    if git_dirty is None and isinstance(ckpt_data.get("config"), dict):
-        git_dirty = ckpt_data["config"].get("training_git_dirty")
-    seed = ckpt_data.get("seed") if "seed" in ckpt_data else ckpt_data.get("config", {}).get("seed")
-    split_type = ckpt_data.get("split_type") or ckpt_data.get("config", {}).get("split_type")
-    split_hash = ckpt_data.get("split_hash") or ckpt_data.get("config", {}).get("split_hash")
-    normalizer_hash = ckpt_data.get("normalizer_hash") or ckpt_data.get("config", {}).get("normalizer_hash")
-    downsample_factor = ckpt_data.get("downsample_factor") or ckpt_data.get("config", {}).get("downsample_factor", 2)
-    physics_protocol = ckpt_data.get("physics_protocol") or ckpt_data.get("config", {}).get("physics_protocol")
-    spatial_axis_contract = ckpt_data.get("spatial_axis_contract") or ckpt_data.get("config", {}).get("spatial_axis_contract")
-    physics_domain_size_xy = ckpt_data.get("physics_domain_size_xy") or ckpt_data.get("config", {}).get("physics_domain_size_xy")
+    cfg = ckpt_data.get("config") if isinstance(ckpt_data.get("config"), dict) else {}
+    commit = ckpt_data.get("training_git_commit") or cfg.get("training_git_commit")
+    git_dirty = ckpt_data.get("training_git_dirty") if ckpt_data.get("training_git_dirty") is not None else cfg.get("training_git_dirty")
+    seed = ckpt_data.get("seed") if "seed" in ckpt_data else cfg.get("seed")
+    split_type = ckpt_data.get("split_type") or cfg.get("split_type")
+    split_hash = ckpt_data.get("split_hash") or cfg.get("split_hash")
+    normalizer_hash = ckpt_data.get("normalizer_hash") or cfg.get("normalizer_hash")
+    downsample_factor = ckpt_data.get("downsample_factor") or cfg.get("downsample_factor", 2)
+    physics_protocol = ckpt_data.get("physics_protocol") or cfg.get("physics_protocol")
+    spatial_axis_contract = ckpt_data.get("spatial_axis_contract") or cfg.get("spatial_axis_contract")
+    physics_domain_size_xy = ckpt_data.get("physics_domain_size_xy") or cfg.get("physics_domain_size_xy")
 
     # If missing any formal provenance attribute in state dict, consult manifest
     needs_manifest = any([
@@ -201,9 +248,7 @@ def resolve_checkpoint_provenance(
         spatial_axis_contract is None,
         physics_domain_size_xy is None,
     ])
-    legacy_attestation = ckpt_data.get("legacy_attestation") or (
-        ckpt_data.get("config", {}).get("legacy_attestation") if isinstance(ckpt_data.get("config"), dict) else None
-    )
+    legacy_attestation = ckpt_data.get("legacy_attestation") or cfg.get("legacy_attestation")
     legacy_attestation_verified = False
     ckpt_sha = None
     if os.path.exists(ckpt_path):
@@ -216,54 +261,37 @@ def resolve_checkpoint_provenance(
         try:
             with open(manifest_path, "r") as mf:
                 manifest = json.load(mf)
-            for grp_key, grp_info in manifest.get("groups", {}).items():
-                manifest_path_match = os.path.abspath(grp_info.get("checkpoint_path", "")) == os.path.abspath(ckpt_path)
-                manifest_sha_match = ckpt_sha and grp_info.get("checkpoint_sha256") == ckpt_sha
-                if manifest_path_match or manifest_sha_match:
-                    # Enforce SHA-256 integrity when matching by path
-                    manifest_expected_sha = grp_info.get("checkpoint_sha256")
-                    if manifest_expected_sha and ckpt_sha and manifest_expected_sha != ckpt_sha:
-                        raise ValueError(
-                            f"Manifest integrity mismatch for {ckpt_path}: "
-                            f"file SHA256 is {ckpt_sha}, but manifest expected {manifest_expected_sha}"
-                        )
-                    if commit in (None, "UNKNOWN"):
-                        commit = grp_info.get("training_git_commit") or manifest.get("training_commit") or "UNKNOWN"
-                    if git_dirty is None:
-                        if "training_git_dirty" in grp_info:
-                            git_dirty = grp_info.get("training_git_dirty")
-                        elif "training_git_dirty" in manifest:
-                            git_dirty = manifest.get("training_git_dirty")
-                    seed = seed if seed is not None else grp_info.get("seed")
-                    split_type = split_type or grp_info.get("split_type", "grouped")
-                    split_hash = split_hash or grp_info.get("split_hash")
-                    normalizer_hash = normalizer_hash or grp_info.get("normalizer_hash")
-                    downsample_factor = downsample_factor or grp_info.get("downsample_factor", 2)
-                    physics_protocol = physics_protocol or grp_info.get("physics_protocol", PHYSICS_PROTOCOL)
-                    spatial_axis_contract = spatial_axis_contract or grp_info.get("spatial_axis_contract", SPATIAL_AXIS_CONTRACT)
-                    physics_domain_size_xy = physics_domain_size_xy or grp_info.get("physics_domain_size_xy", list(SHEAR_FLOW_DOMAIN_SIZE_XY))
-                    grp_attestation = grp_info.get("legacy_attestation") or manifest.get("legacy_attestation")
-                    if grp_attestation:
-                        legacy_attestation = grp_attestation
-                        if isinstance(legacy_attestation, dict):
-                            attested_sha = legacy_attestation.get("checkpoint_sha256")
-                            status_ok = legacy_attestation.get("status") == "historical_untracked"
-                            if status_ok and attested_sha:
-                                if ckpt_sha and attested_sha == ckpt_sha:
-                                    legacy_attestation_verified = True
-                                elif manifest_expected_sha and attested_sha == manifest_expected_sha:
-                                    legacy_attestation_verified = True
-                    break
+            matched = _find_matching_manifest_group(manifest, ckpt_path, ckpt_sha)
+            if matched is not None:
+                grp_info, manifest_expected_sha = matched
+                if commit in (None, "UNKNOWN"):
+                    commit = grp_info.get("training_git_commit") or manifest.get("training_commit") or "UNKNOWN"
+                if git_dirty is None:
+                    if "training_git_dirty" in grp_info:
+                        git_dirty = grp_info.get("training_git_dirty")
+                    elif "training_git_dirty" in manifest:
+                        git_dirty = manifest.get("training_git_dirty")
+                seed = seed if seed is not None else grp_info.get("seed")
+                split_type = split_type or grp_info.get("split_type", "grouped")
+                split_hash = split_hash or grp_info.get("split_hash")
+                normalizer_hash = normalizer_hash or grp_info.get("normalizer_hash")
+                downsample_factor = downsample_factor or grp_info.get("downsample_factor", 2)
+                physics_protocol = physics_protocol or grp_info.get("physics_protocol", PHYSICS_PROTOCOL)
+                spatial_axis_contract = spatial_axis_contract or grp_info.get("spatial_axis_contract", SPATIAL_AXIS_CONTRACT)
+                physics_domain_size_xy = physics_domain_size_xy or grp_info.get("physics_domain_size_xy", list(SHEAR_FLOW_DOMAIN_SIZE_XY))
+                grp_attestation = grp_info.get("legacy_attestation") or manifest.get("legacy_attestation")
+                if grp_attestation:
+                    legacy_attestation = grp_attestation
+                    if _check_legacy_attestation(legacy_attestation, ckpt_sha, manifest_expected_sha):
+                        legacy_attestation_verified = True
         except ValueError:
             raise
         except Exception:
             pass
 
     # Check if legacy_attestation directly provided in ckpt_data matches file sha
-    if legacy_attestation and not legacy_attestation_verified and isinstance(legacy_attestation, dict):
-        attested_sha = legacy_attestation.get("checkpoint_sha256")
-        status_ok = legacy_attestation.get("status") == "historical_untracked"
-        if status_ok and attested_sha and ckpt_sha and attested_sha == ckpt_sha:
+    if legacy_attestation and not legacy_attestation_verified:
+        if _check_legacy_attestation(legacy_attestation, ckpt_sha):
             legacy_attestation_verified = True
 
     return {

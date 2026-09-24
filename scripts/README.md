@@ -1,6 +1,6 @@
 # 流水线脚本库全景拓扑与调用指南 (Scripts Architecture & Workflow)
 
-本目录包含流场世界模型（World-Model-FlowField-v1）完整科研闭环的 25 个核心脚本。涵盖数据工程、潜空间表征、动力学推演训练、物理消融实验、多种子评测统计、动力学机理诊断及论文出版图表渲染。
+本目录包含流场世界模型（World-Model-FlowField-v1）完整科研闭环的 27 个核心脚本。涵盖数据工程、潜空间表征、动力学推演训练、物理消融实验、多种子评测统计、动力学机理诊断及论文出版图表渲染。
 
 ---
 
@@ -84,6 +84,7 @@
 | [evaluate_rollout.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/evaluate_rollout.py) | 长程多步自回归滚动性能评估 | 输出 `outputs/metrics/rollout_benchmark.json` |
 | [evaluate_physics_ablation.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/evaluate_physics_ablation.py) | Closure-R4 物理损失消融全面评估 | 输出 `outputs/metrics/closure_r4_physics_ablation_*.json` |
 | [evaluate_horizon_ablation.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/evaluate_horizon_ablation.py) | Horizon-R1 跨度消融测试集评估与长程指标筛选 | 输出 `outputs/metrics/horizon_r1_test_evaluation.json` |
+| [evaluate_h16_benchmark.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/evaluate_h16_benchmark.py) | H16 扩展实验物理基准全面评测 (涡量、散度、能谱综合评估) | 输出 H16 综合评测指标与诊断 |
 | [aggregate_multi_seed.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/aggregate_multi_seed.py) | 聚合 Seed 42, 43, 44 评测指标并执行配对检验 | 输出 `outputs/metrics/closure_r4_physics_ablation_tri_seed_summary.json` |
 
 ### 2.5 深度物理分析与诊断 (Deep Diagnostics & Spectral Mechanics)
@@ -91,6 +92,7 @@
 | 脚本文件 | 功能说明 | 核心输入 / 输出 |
 | :--- | :--- | :--- |
 | [analyze_training_convergence.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/analyze_training_convergence.py) | 解析训练日志，分析损失收敛轨迹与速率 | 输出 `training_convergence_summary.json` 与曲线图 |
+| [analyze_horizon_ablation.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/analyze_horizon_ablation.py) | 跨度消融学习轨迹、验证集收敛与双指标遴选分析 | 输出 horizon_r1 统计轨迹并遴选 H8 最佳模型 |
 | [analyze_spectral_dissipation.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/analyze_spectral_dissipation.py) | 计算二维能谱、拟能级联与方向各向异性耗散比 | 输出 `directional_spectral_analysis.json` 与能谱比曲线 |
 | [analyze_failure_cases.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/analyze_failure_cases.py) | 识别与分析最差推演轨迹与发散机制 | 输出 `failure_cases_analysis.json` 与故障诊断图 |
 
