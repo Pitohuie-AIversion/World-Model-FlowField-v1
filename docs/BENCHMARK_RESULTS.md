@@ -93,11 +93,15 @@
 | **统计图表** | [outputs/dataset_viz/schmidt_comparison.png](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/dataset_viz/schmidt_comparison.png) | Schmidt 数不变性实测图（验证示踪剂对流场零反作用力） |
 | **统计图表** | [outputs/dataset_viz/vorticity.png](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/dataset_viz/vorticity.png) | 剪切流涡旋卷吸拓扑随时间演化图 |
 | **统计图表** | [outputs/dataset_viz/energy_spectrum.png](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/dataset_viz/energy_spectrum.png) | 二维剪切流能谱衰减分布 |
-| **评测曲线** | [outputs/figures/rollout_benchmark_curves.png](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/rollout_benchmark_curves.png) | 四大模型多步滚动误差发散对比曲线 |
+| **评测曲线** | [outputs/figures/benchmark/rollout_benchmark_curves.png](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/benchmark/rollout_benchmark_curves.png) | 四大模型多步滚动误差发散对比曲线 |
 | **数据划分配置** | [outputs/splits/grouped_split.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/splits/grouped_split.json) | 严格按初始扰动隔离的防数据泄漏划分文件 |
 | **归一化参数** | [outputs/normalization/stats_grouped.pt](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/normalization/stats_grouped.pt) | 流场各通道均值、方差与极值预处理统计参数 |
-| **消融评测指标** | [outputs/metrics/physics_ablation_benchmark.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/physics_ablation_benchmark.json) | 4 组物理消融在 Step 1/5/10/20/30 的全套量化指标落盘 |
-| **消融对比大图** | [outputs/figures/physics_ablation_curves.png](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/physics_ablation_curves.png) | 4 组消融模型在场误差、散度、涡量与能谱的 30 步演化对比图 |
+| **物理消融指标 (多种子)** | [outputs/metrics/closure_r4_physics_ablation_tri_seed_summary.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/closure_r4_physics_ablation_tri_seed_summary.json) | Closure-R4 Seeds 42/43/44 全量物理消融与配对检验汇总 |
+| **跨度消融指标** | [outputs/metrics/horizon_r1_test_evaluation.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/horizon_r1_test_evaluation.json) | Horizon-R1 ($H=2, 4, 8$) 长程泛化与 H8 Long-Best 遴选结果 |
+| **H16 极限基准指标** | [outputs/metrics/h16_benchmark_evaluation_v3.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/h16_benchmark_evaluation_v3.json) | H16 双卡 DDP 扩展与父模型全量对比评测大盘 |
+| **出版级对比大图** | [outputs/figures/manuscript/figure_a_vrmse_and_dispersion.png](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/manuscript/figure_a_vrmse_and_dispersion.png) | 论文正文 Figure A：多步 VRMSE 均值与跨种子方差耗散 |
+| **物理守恒图** | [outputs/figures/manuscript/figure_b_physical_invariants.png](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/manuscript/figure_b_physical_invariants.png) | 论文正文 Figure B：散度、涡量与拟能守恒演化曲线 |
+| **H16 定性图集** | [outputs/figures/h16_comparison_v2/](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/h16_comparison_v2/) | H16 多模型定性对比流场面板与元数据索引 |
 
 ---
 
