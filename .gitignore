@@ -131,6 +131,7 @@ outputs/*
 !outputs/.gitignore
 !outputs/**/.gitkeep
 !outputs/splits/*.json
+!outputs/manifests/*.json
 !outputs/metrics/*.json
 !outputs/normalization/*.pt
 !outputs/normalization/*.json
@@ -138,6 +139,8 @@ outputs/*
 !outputs/figures/**/*.json
 !outputs/figures/**/
 !outputs/figures/README.md
+!outputs/logs/README.md
+!outputs/tables/*.tex
 
 # ------------------------------------------------------------------------------
 # 10. 生成的可视化图像与多媒体 (Generated Visualizations & Media)

@@ -46,8 +46,8 @@ outputs/figures/
 
 - **论文核心图生成**：
   ```bash
-  python scripts/plot_manuscript_figures.py
-  python scripts/plot_directional_spectral_ratio.py
+  python scripts/generate_paper_figures.py
+  python scripts/analyze_spectral_dissipation.py
   ```
 - **Horizon-R1 消融图生成**：
   ```bash
@@ -55,7 +55,7 @@ outputs/figures/
   ```
 - **Closure-R4 物理消融图生成**：
   ```bash
-  python scripts/plot_closure_ablation.py
+  python scripts/plot_physics_ablation.py
   ```
 - **定性流场图 (Qualitative) 生成**：
   ```bash

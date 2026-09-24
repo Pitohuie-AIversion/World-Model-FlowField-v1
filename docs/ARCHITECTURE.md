@@ -130,3 +130,15 @@ p_{\text{proj}}(x, y) = p(x, y) - \frac{1}{|\Omega|}\iint_\Omega p(x', y') \, dx
 \frac{\partial \mathcal{L}_{\text{div}}}{\partial Z} = \left( \frac{\partial q}{\partial Z} \right)^T \frac{\partial \mathcal{L}_{\text{div}}}{\partial q}
 \]
 实测证明，反传梯度的 $L_2$ 范数达到 61.65，驱动 Transformer 主动向“零散度、低拟能误差”的物理守恒流形对齐。
+
+---
+
+## 6. 架构决策记录导航 (Architecture Decision Records, ADR)
+
+系统核心设计决策已纳入轻量级 ADR 规范进行版本化治理：
+
+- [ADR-001: 空间潜流形解耦与物理守恒梯度穿透架构](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-001-latent-world-model-architecture.md)
+- [ADR-002: 空间网格轴序契约与双向周期 FFT 谱导数算子](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-002-spatial-axis-ordering-and-spectral-derivatives.md)
+- [ADR-003: 产物分层治理规范与符号链接向后兼容策略](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-003-outputs-and-artifacts-governance.md)
+
+详见 [docs/adr/README.md](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/README.md)。

@@ -488,7 +488,13 @@ def train_forecaster(
 
             train_loss += loss.item() * len(q_hist)
 
-        train_loss /= len(train_loader.dataset)
+        if is_distributed:
+            import torch.distributed as dist
+            loss_tensor = torch.tensor([train_loss, float(total_samples)], device=device)
+            dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM)
+            train_loss = loss_tensor[0].item() / max(loss_tensor[1].item(), 1.0)
+        else:
+            train_loss /= len(train_loader.dataset)
 
         # Validation only on rank 0
         if global_rank == 0:

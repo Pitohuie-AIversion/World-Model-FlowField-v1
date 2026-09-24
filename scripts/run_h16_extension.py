@@ -211,7 +211,7 @@ def print_preflight_summary(
     print(f"lambda_div:             {H16_CONFIG['lambda_div']}")
     print(f"lambda_vort:            {H16_CONFIG['lambda_vort']}")
     print(f"Epochs:                 {epochs}")
-    print(f"Learning rate:          {lr} (min: {min_lr})")
+    print(f"Learning rate:          {lr} (constant, no scheduler)")
     gpu_str = ",".join(str(g) for g in gpu_ids)
     print(f"GPU ID:                 {gpu_ids[0] if len(gpu_ids) == 1 else gpu_str}")
     print(f"GPU count:              {len(gpu_ids)} ({'DDP Distributed' if len(gpu_ids) > 1 else 'Single GPU'})")

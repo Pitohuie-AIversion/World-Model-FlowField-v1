@@ -14,6 +14,7 @@
 # 确保子目录骨架可被追踪
 !checkpoints/
 !figures/
+!logs/
 !manifests/
 !metrics/
 !splits/
@@ -48,4 +49,5 @@ logs/*
 !figures/**/*.json
 !figures/**/
 !figures/README.md
+!logs/README.md
 !tables/*.tex
