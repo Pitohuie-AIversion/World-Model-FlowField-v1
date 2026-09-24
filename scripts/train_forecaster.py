@@ -23,7 +23,9 @@ from src.losses.divergence import DivergenceLoss
 from src.losses.field import FieldLoss
 from src.losses.rollout import RolloutLoss
 from src.losses.vorticity import VorticityLoss
+from src.losses.spectral import EnergySpectrumLoss
 from src.metrics.field import evaluate_field_metrics
+from src.metrics.spectral import compute_spectral_error
 from src.models.decoder import Decoder2D
 from src.models.direct_transformer import DirectSTTransformer
 from src.models.encoder import Encoder2D
@@ -402,10 +404,12 @@ def _compute_batch_loss(
     lambda_div: float,
     lambda_vort: float,
     rollout_loss_fn: nn.Module,
-    div_loss_fn: nn.Module,
-    vort_loss_fn: nn.Module,
+    div_loss_fn: Optional[nn.Module] = None,
+    vort_loss_fn: Optional[nn.Module] = None,
+    lambda_spec: float = 0.0,
+    spec_loss_fn: Optional[nn.Module] = None,
 ) -> torch.Tensor:
-    """Compute field loss and physical conservation penalties."""
+    """Compute field loss, physical conservation penalties, and multi-scale spectral loss."""
     if field_loss_space == "physical" and normalizer is not None:
         pred_field_loss = normalizer.denormalize(pred)
         target_field_loss = normalizer.denormalize(q_future)
@@ -415,7 +419,7 @@ def _compute_batch_loss(
 
     loss = rollout_loss_fn(pred_field_loss, target_field_loss)
 
-    if lambda_div > 0 or lambda_vort > 0:
+    if lambda_div > 0 or lambda_vort > 0 or lambda_spec > 0:
         if normalizer is not None:
             pred_phys = normalizer.denormalize(pred)
             target_phys = normalizer.denormalize(q_future)
@@ -423,10 +427,12 @@ def _compute_batch_loss(
             pred_phys = pred
             target_phys = q_future
 
-        if lambda_div > 0:
+        if lambda_div > 0 and div_loss_fn is not None:
             loss = loss + lambda_div * div_loss_fn(pred_phys)
-        if lambda_vort > 0:
+        if lambda_vort > 0 and vort_loss_fn is not None:
             loss = loss + lambda_vort * vort_loss_fn(pred_phys, target_phys)
+        if lambda_spec > 0 and spec_loss_fn is not None:
+            loss = loss + lambda_spec * spec_loss_fn(pred_phys, target_phys)
 
     return loss
 
@@ -439,8 +445,8 @@ def _train_epoch(
     scaler: torch.amp.GradScaler,
     normalizer: Optional[Any],
     rollout_loss_fn: nn.Module,
-    div_loss_fn: nn.Module,
-    vort_loss_fn: nn.Module,
+    div_loss_fn: Optional[nn.Module],
+    vort_loss_fn: Optional[nn.Module],
     horizon: int,
     grad_accum_steps: int,
     field_loss_space: str,
@@ -455,6 +461,8 @@ def _train_epoch(
     pushforward_steps: int = 0,
     pushforward_noise_std: float = 0.0,
     pushforward_mode: str = "future",
+    lambda_spec: float = 0.0,
+    spec_loss_fn: Optional[nn.Module] = None,
 ) -> float:
     """Execute one training epoch with exact sample-weighted gradient accumulation."""
     if is_distributed and train_sampler is not None:
@@ -519,6 +527,8 @@ def _train_epoch(
                 rollout_loss_fn=rollout_loss_fn,
                 div_loss_fn=div_loss_fn,
                 vort_loss_fn=vort_loss_fn,
+                lambda_spec=lambda_spec,
+                spec_loss_fn=spec_loss_fn,
             )
 
             window_start = (batch_idx // grad_accum_steps) * grad_accum_steps
@@ -600,6 +610,13 @@ def _validate_epoch(
                     for k, v in step_m.items():
                         rollout_step_metrics_sum[h][k] = rollout_step_metrics_sum[h].get(k, 0.0) + v * b_samples
 
+                    # Compute spectral error metrics for physical velocity fields
+                    pred_u, pred_v = pred_eval[:, h, 0], pred_eval[:, h, 1]
+                    target_u, target_v = target_eval[:, h, 0], target_eval[:, h, 1]
+                    spec_m = compute_spectral_error(pred_u, pred_v, target_u, target_v, domain_size=(1.0, 2.0))
+                    for k, v in spec_m.items():
+                        rollout_step_metrics_sum[h][k] = rollout_step_metrics_sum[h].get(k, 0.0) + v * b_samples
+
     n_val = len(valid_loader.dataset)
     val_step_metrics = {
         h: {k: v / n_val for k, v in rollout_step_metrics_sum[h].items()}
@@ -612,6 +629,7 @@ def _validate_epoch(
         rollout_mean_rmse = sum(val_step_metrics[h]["rmse_mean"] for h in range(horizon)) / horizon
         val_metrics["rollout_mean_vrmse"] = rollout_mean_vrmse
         val_metrics["rollout_mean_rmse"] = rollout_mean_rmse
+        val_metrics["rollout_mean_spec_err"] = sum(val_step_metrics[h]["spec_err_total"] for h in range(horizon)) / horizon
         val_criterion = rollout_mean_vrmse
     else:
         val_criterion = val_metrics["vrmse_mean"]
@@ -707,6 +725,9 @@ def train_forecaster(
     pushforward_steps: int = 0,
     pushforward_noise_std: float = 0.0,
     pushforward_mode: str = "future",
+    lambda_spec: float = 0.0,
+    spec_loss_type: str = "log_l1",
+    spec_high_freq_weight: float = 0.0,
 ):
     if grad_accum_steps < 1:
         raise ValueError(f"grad_accum_steps must be >= 1, got {grad_accum_steps}")
@@ -798,6 +819,15 @@ def train_forecaster(
     rollout_loss_fn = RolloutLoss(field_loss=field_loss_fn).to(device)
     div_loss_fn = DivergenceLoss(domain_size=(1.0, 2.0)).to(device)
     vort_loss_fn = VorticityLoss(domain_size=(1.0, 2.0)).to(device)
+    spec_loss_fn = (
+        EnergySpectrumLoss(
+            domain_size=(1.0, 2.0),
+            loss_type=spec_loss_type,
+            high_freq_weight=spec_high_freq_weight,
+        ).to(device)
+        if lambda_spec > 0
+        else None
+    )
     scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
     tracker = None
@@ -844,6 +874,8 @@ def train_forecaster(
             pushforward_steps=epoch_pushforward,
             pushforward_noise_std=epoch_noise,
             pushforward_mode=curriculum_config.pushforward_mode,
+            lambda_spec=lambda_spec,
+            spec_loss_fn=spec_loss_fn,
         )
 
         if global_rank == 0:
@@ -867,6 +899,7 @@ def train_forecaster(
                 if f"val_h{dh}_vrmse" in val_metrics
             ]
             diag_suffix = f" | Diag [{', '.join(diag_strs)}]" if diag_strs else ""
+            spec_suffix = f" | Spec Err: {val_metrics['spec_err_total']:.4f}" if "spec_err_total" in val_metrics else ""
             vram_gb = torch.cuda.max_memory_allocated(device=device) / (1024**3) if torch.cuda.is_available() else 0.0
 
             curric_info = f" (Train H: {epoch_horizon}, Push: {epoch_pushforward})" if (curriculum_rollout or pushforward_steps > 0) else ""
@@ -878,7 +911,7 @@ def train_forecaster(
                     f"Step 1 VRMSE: {val_metrics['vrmse_mean']:.4f} "
                     f"(u: {val_metrics['vrmse_u']:.4f}, v: {val_metrics['vrmse_v']:.4f}, "
                     f"p: {val_metrics['vrmse_p']:.4f}, s: {val_metrics['vrmse_s']:.4f})"
-                    f"{diag_suffix} | Max VRAM: {vram_gb:.2f} GB"
+                    f"{diag_suffix}{spec_suffix} | Max VRAM: {vram_gb:.2f} GB"
                 )
             else:
                 print(
@@ -886,7 +919,7 @@ def train_forecaster(
                     f"Val VRMSE Mean: {val_metrics['vrmse_mean']:.4f} "
                     f"(u: {val_metrics['vrmse_u']:.4f}, v: {val_metrics['vrmse_v']:.4f}, "
                     f"p: {val_metrics['vrmse_p']:.4f}, s: {val_metrics['vrmse_s']:.4f})"
-                    f"{diag_suffix} | Max VRAM: {vram_gb:.2f} GB"
+                    f"{diag_suffix}{spec_suffix} | Max VRAM: {vram_gb:.2f} GB"
                 )
 
             metadata_dict = {
@@ -921,6 +954,9 @@ def train_forecaster(
                 "freeze_representation": freeze_representation,
                 "lambda_div": lambda_div,
                 "lambda_vort": lambda_vort,
+                "lambda_spec": lambda_spec,
+                "spec_loss_type": spec_loss_type,
+                "spec_high_freq_weight": spec_high_freq_weight,
                 "field_loss_space": field_loss_space,
                 "lr": lr,
                 "batch_size": batch_size,
@@ -1076,6 +1112,25 @@ if __name__ == "__main__":
         choices=["future", "history"],
         help="Pushforward mode: future or history (default: future).",
     )
+    parser.add_argument(
+        "--lambda_spec",
+        type=float,
+        default=0.0,
+        help="Weight for multi-scale kinetic energy spectrum loss (default: 0.0).",
+    )
+    parser.add_argument(
+        "--spec_loss_type",
+        type=str,
+        default="log_l1",
+        choices=["log_l1", "rel_l2", "linear_l1", "combined"],
+        help="Loss formulation for energy spectrum loss (default: log_l1).",
+    )
+    parser.add_argument(
+        "--spec_high_freq_weight",
+        type=float,
+        default=0.0,
+        help="Linear wavenumber weighting alpha for high-frequency emphasis (default: 0.0).",
+    )
     args = parser.parse_args()
 
     freeze_rep = False if args.joint else args.freeze_representation
@@ -1121,4 +1176,7 @@ if __name__ == "__main__":
         pushforward_steps=args.pushforward_steps,
         pushforward_noise_std=args.pushforward_noise_std,
         pushforward_mode=args.pushforward_mode,
+        lambda_spec=args.lambda_spec,
+        spec_loss_type=args.spec_loss_type,
+        spec_high_freq_weight=args.spec_high_freq_weight,
     )
