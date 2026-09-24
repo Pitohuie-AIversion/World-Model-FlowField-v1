@@ -12,6 +12,7 @@ import torch
 import torch.fft
 
 _WAVENUMBER_CACHE: Dict[Tuple[int, int, float, float, torch.device, torch.dtype], Tuple[torch.Tensor, torch.Tensor]] = {}
+_RADIAL_SHELL_CACHE: Dict[Tuple[int, int, float, float, torch.device], Tuple[torch.Tensor, torch.Tensor, int]] = {}
 
 
 def get_wavenumbers(
@@ -39,9 +40,51 @@ def get_wavenumbers(
     return kx, ky
 
 
+def get_radial_shell_indices(
+    nx: int,
+    ny: int,
+    lx: float,
+    ly: float,
+    device: torch.device,
+) -> Tuple[torch.Tensor, torch.Tensor, int]:
+    """Retrieve or compute cached 1D radial wavenumber shells for RFFT2 grid.
+
+    Returns:
+        safe_indices: Tensor of shape (nx * (ny // 2 + 1),) mapping flattened Fourier
+                      modes to radial shell indices, with out-of-bounds modes mapped to num_bins.
+        k_bins: Physical wavenumber shell coordinates [0, delta_k, 2*delta_k, ...], shape (num_bins,).
+        num_bins: Number of valid isotropic radial bins.
+    """
+    key = (nx, ny, float(lx), float(ly), device)
+    cached = _RADIAL_SHELL_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    kx = torch.fft.fftfreq(nx, d=lx / nx, device=device) * 2.0 * torch.pi
+    ky = torch.fft.rfftfreq(ny, d=ly / ny, device=device) * 2.0 * torch.pi
+    kx_grid, ky_grid = torch.meshgrid(kx, ky, indexing="ij")
+    k_mag = torch.sqrt(kx_grid**2 + ky_grid**2)
+
+    delta_k = 2.0 * torch.pi / max(lx, ly)
+    k_nyq_x = (nx // 2) * (2.0 * torch.pi / lx)
+    k_nyq_y = (ny // 2) * (2.0 * torch.pi / ly)
+    k_max = min(k_nyq_x, k_nyq_y)
+    num_bins = int(torch.floor(torch.tensor(k_max / delta_k)).item())
+
+    flat_k = k_mag.flatten()
+    k_indices = torch.clamp(torch.floor(flat_k / delta_k + 1e-6).long(), 0, num_bins)
+    valid_mask = (k_indices < num_bins)
+    safe_indices = torch.where(valid_mask, k_indices, torch.tensor(num_bins, dtype=torch.long, device=device))
+    k_bins = torch.arange(num_bins, dtype=torch.float32, device=device) * delta_k
+
+    _RADIAL_SHELL_CACHE[key] = (safe_indices, k_bins, num_bins)
+    return safe_indices, k_bins, num_bins
+
+
 def clear_wavenumber_cache() -> None:
-    """Clear all cached wavenumber grids."""
+    """Clear all cached wavenumber grids and radial shell indices."""
     _WAVENUMBER_CACHE.clear()
+    _RADIAL_SHELL_CACHE.clear()
 
 
 def spectral_grad_2d(
@@ -335,5 +378,50 @@ def project_incompressible_state(
         proj_list.append(c)
 
     return torch.cat(proj_list, dim=-3)
+
+
+def compute_batched_radial_energy_spectrum(
+    u: torch.Tensor,
+    v: torch.Tensor,
+    domain_size: Tuple[float, float] = (1.0, 2.0),
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Compute 1D shell-integrated kinetic energy spectrum E(k) supporting arbitrary batch/time dims.
+
+    Differentiable and fully vectorized via scatter_add_.
+
+    Args:
+        u: Horizontal velocity along x, shape (..., Nx, Ny).
+        v: Vertical velocity along y, shape (..., Nx, Ny).
+        domain_size: (Lx, Ly) physical extent of domain. Defaults to (1.0, 2.0).
+
+    Returns:
+        k_bins: 1D wavenumber bins of shape (num_bins,).
+        e_k: Shell-integrated kinetic energy spectrum of shape (..., num_bins).
+    """
+    assert u.shape == v.shape, f"u and v must have identical shapes, got {u.shape} vs {v.shape}"
+    nx, ny = u.shape[-2], u.shape[-1]
+    lx, ly = domain_size
+    device = u.device
+
+    u_hat = torch.fft.rfft2(u, dim=(-2, -1), norm="forward")
+    v_hat = torch.fft.rfft2(v, dim=(-2, -1), norm="forward")
+
+    energy_2d = 0.5 * (torch.abs(u_hat) ** 2 + torch.abs(v_hat) ** 2)
+    if ny > 2:
+        energy_2d[..., :, 1:-1] *= 2.0
+
+    safe_indices, k_bins, num_bins = get_radial_shell_indices(nx, ny, lx, ly, device)
+
+    flat_energy = energy_2d.flatten(-2, -1)
+    orig_shape = flat_energy.shape[:-1]
+    b_total = flat_energy.numel() // flat_energy.shape[-1]
+    flat_energy_2d = flat_energy.view(b_total, -1)
+
+    out = torch.zeros(b_total, num_bins + 1, dtype=flat_energy.dtype, device=device)
+    out.scatter_add_(1, safe_indices.unsqueeze(0).expand(b_total, -1), flat_energy_2d)
+    e_k = out[:, :num_bins].view(*orig_shape, num_bins)
+
+    return k_bins, e_k
+
 
 

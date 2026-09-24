@@ -8,10 +8,13 @@ from src.losses.field import FieldLoss
 from src.losses.rollout import RolloutLoss
 from src.losses.divergence import DivergenceLoss
 from src.losses.vorticity import VorticityLoss
+from src.losses.spectral import EnergySpectrumLoss
 
 __all__ = [
     "FieldLoss",
     "RolloutLoss",
     "DivergenceLoss",
     "VorticityLoss",
+    "EnergySpectrumLoss",
 ]
+

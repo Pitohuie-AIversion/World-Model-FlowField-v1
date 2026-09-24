@@ -313,6 +313,7 @@ def _build_model(
         )
 
         state_dict_to_load = init_ckpt.get("model_state_dict") or init_ckpt.get("state_dict") or init_ckpt
+        state_dict_to_load = strip_compiled_prefix(state_dict_to_load)
         load_msg = model.load_state_dict(state_dict_to_load, strict=True)
         if global_rank == 0:
             print(f"Successfully loaded dynamics model_state_dict: {load_msg}")

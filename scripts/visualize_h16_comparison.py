@@ -78,6 +78,7 @@ TARGET_SAMPLES = [
         "source_relative_path": "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
         "sim_idx": 1,
         "start_t": 0,
+        "split_t": 4,
         "end_t": 34,
     },
     {
@@ -89,6 +90,7 @@ TARGET_SAMPLES = [
         "source_relative_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
         "sim_idx": 5,
         "start_t": 100,
+        "split_t": 104,
         "end_t": 134,
     },
     {
@@ -100,6 +102,7 @@ TARGET_SAMPLES = [
         "source_relative_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
         "sim_idx": 16,
         "start_t": 0,
+        "split_t": 4,
         "end_t": 34,
     },
 ]
@@ -134,7 +137,7 @@ def validate_target_samples_provenance(
 
     Raises:
         IndexError: If a target index exceeds dataset size.
-        ValueError: If any source_file, sim_idx, start_t, or end_t mismatch.
+        ValueError: If any source_file, sim_idx, start_t, split_t, or end_t mismatch.
     """
     for spec in target_samples:
         idx = spec["index"]
@@ -146,7 +149,7 @@ def validate_target_samples_provenance(
             )
 
         # Unpack: (f_idx, sim_idx, start_t, split_t, end_t, re_val, sc_val)
-        f_idx, sim_idx, start_t, _split_t, end_t, _re, _sc = dataset.samples[idx]
+        f_idx, sim_idx, start_t, split_t, end_t, _re, _sc = dataset.samples[idx]
         actual_file = os.path.basename(dataset.file_paths[f_idx])
         actual_rel_path = extract_relative_data_path(dataset.file_paths[f_idx])
 
@@ -170,6 +173,10 @@ def validate_target_samples_provenance(
         if "start_t" in spec and start_t != spec["start_t"]:
             mismatches.append(
                 f"start_t: expected {spec['start_t']}, actual {start_t}"
+            )
+        if "split_t" in spec and split_t != spec["split_t"]:
+            mismatches.append(
+                f"split_t: expected {spec['split_t']}, actual {split_t}"
             )
         if "end_t" in spec and end_t != spec["end_t"]:
             mismatches.append(
@@ -354,6 +361,7 @@ def generate_comparison_grid(
         "source_relative_path": sample_info.get("source_relative_path"),
         "simulation_index": sample_info.get("sim_idx"),
         "start_t": sample_info.get("start_t"),
+        "split_t": sample_info.get("split_t"),
         "end_t": sample_info.get("end_t"),
         "variable": var_name,
         "re": re_val,

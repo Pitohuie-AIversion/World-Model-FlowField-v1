@@ -135,6 +135,48 @@ class TestStripCompiledPrefix:
         with pytest.raises(ValueError, match="Key collision"):
             strip_compiled_prefix(sd)
 
+    def test_strips_submodule_prefix(self):
+        """Correctly strips submodule _orig_mod. prefixes (e.g. latent_transformer)."""
+        sd = OrderedDict([
+            ("encoder.weight", torch.tensor([1.0])),
+            ("transformer._orig_mod.weight", torch.tensor([2.0])),
+            ("decoder._orig_mod.weight", torch.tensor([3.0])),
+        ])
+        cleaned = strip_compiled_prefix(sd)
+        assert list(cleaned.keys()) == [
+            "encoder.weight",
+            "transformer.weight",
+            "decoder.weight",
+        ]
+        assert torch.equal(cleaned["transformer.weight"], torch.tensor([2.0]))
+        assert torch.equal(cleaned["decoder.weight"], torch.tensor([3.0]))
+
+    def test_strips_deeply_nested_submodule_prefix(self):
+        """Correctly strips deeply nested _orig_mod segments."""
+        sd = OrderedDict([
+            ("transformer.layers.0._orig_mod.attn.weight", torch.tensor([4.0])),
+            ("transformer.layers.0._orig_mod.attn.bias", torch.tensor([5.0])),
+        ])
+        cleaned = strip_compiled_prefix(sd)
+        assert list(cleaned.keys()) == [
+            "transformer.layers.0.attn.weight",
+            "transformer.layers.0.attn.bias",
+        ]
+
+    def test_strips_mixed_root_and_submodule_prefixes(self):
+        """Correctly handles mixed root and submodule _orig_mod prefixes."""
+        sd = OrderedDict([
+            ("_orig_mod.global_bias", torch.tensor([1.0])),
+            ("transformer._orig_mod.weight", torch.tensor([2.0])),
+            ("decoder.block._orig_mod.conv.weight", torch.tensor([3.0])),
+        ])
+        cleaned = strip_compiled_prefix(sd)
+        assert list(cleaned.keys()) == [
+            "global_bias",
+            "transformer.weight",
+            "decoder.block.conv.weight",
+        ]
+
     def test_returns_ordered_dict(self):
         """Always returns an OrderedDict."""
         model = _TinyModel()
@@ -181,6 +223,36 @@ class TestCompileCheckpointRoundTrip:
             ):
                 assert n1 == n2
                 assert torch.equal(p1, p2), f"Parameter mismatch at '{n1}'"
+
+    def test_submodule_compiled_save_uncompiled_load_strict(self):
+        """Submodule-level compile prefixes strip cleanly and load into uncompiled model with strict=True."""
+        model_src = _TinyModel()
+        with torch.no_grad():
+            for p in model_src.parameters():
+                p.normal_(0, 1)
+
+        # Simulate submodule-level compilation (e.g. encoder._orig_mod.0.weight)
+        submodule_compiled_sd = OrderedDict()
+        for k, v in model_src.state_dict().items():
+            parts = k.split(".")
+            # Insert _orig_mod after the first component (submodule)
+            new_k = f"{parts[0]}._orig_mod.{'.'.join(parts[1:])}"
+            submodule_compiled_sd[new_k] = v
+
+        clean_sd = strip_compiled_prefix(submodule_compiled_sd)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt_path = os.path.join(tmpdir, "submodule_ckpt.pt")
+            save_checkpoint({"model_state_dict": clean_sd}, ckpt_path)
+
+            model_dst = _TinyModel()
+            load_checkpoint(ckpt_path, model_dst, strict=True)
+
+            for (n1, p1), (n2, p2) in zip(
+                model_src.named_parameters(), model_dst.named_parameters()
+            ):
+                assert n1 == n2
+                assert torch.equal(p1, p2)
 
     def test_compiled_save_compiled_load(self):
         """Compiled checkpoint can also be loaded into another compiled model."""
@@ -355,3 +427,99 @@ class TestBuildModelCompileIntegration:
             )
 
             load_checkpoint(ckpt_path, model_eval, strict=True)
+
+    def test_build_model_compile_latent_transformer_train_step_roundtrip(self):
+        """End-to-end: latent_transformer with compiled submodules, 1 optimizer step,
+        saved via strip_compiled_prefix, and loaded with strict=True into uncompiled model.
+        Forward output consistency is verified within numerical tolerance.
+        """
+        from scripts.train_forecaster import _build_model
+
+        device = torch.device("cpu")
+        model_compiled, _, _ = _build_model(
+            model_type="latent_transformer",
+            embed_dim=64,
+            depth=1,
+            num_heads=2,
+            prediction_mode="direct",
+            freeze_representation=False,
+            repr_checkpoint="",
+            init_checkpoint=None,
+            split_hash="dummy",
+            normalizer_hash="dummy",
+            seed=42,
+            expected_init_horizon=None,
+            lambda_div=0.0,
+            lambda_vort=0.0,
+            use_condition=False,
+            device=device,
+            is_distributed=False,
+            local_rank=0,
+            global_rank=0,
+            compile_model=True,
+        )
+
+        # Confirm that submodule compile prefixes exist in raw state_dict
+        raw_sd = model_compiled.state_dict()
+        compiled_submodule_keys = [k for k in raw_sd if "_orig_mod" in k]
+        assert len(compiled_submodule_keys) > 0, "Expected _orig_mod in compiled latent_transformer state_dict"
+        assert any("transformer._orig_mod." in k for k in compiled_submodule_keys)
+        assert any("decoder._orig_mod." in k for k in compiled_submodule_keys)
+
+        # Execute one training step (forward + loss + backward + optimizer step)
+        optimizer = torch.optim.AdamW(model_compiled.parameters(), lr=1e-4)
+        optimizer.zero_grad()
+        dummy_q_hist = torch.randn(1, 4, 4, 32, 64)
+        dummy_target = torch.randn(1, 1, 4, 32, 64)
+        pred = model_compiled(dummy_q_hist, horizon=1)
+        loss = nn.functional.mse_loss(pred, dummy_target)
+        loss.backward()
+        optimizer.step()
+
+        # Clean state dict with strip_compiled_prefix
+        clean_sd = strip_compiled_prefix(model_compiled.state_dict())
+        # Assert no _orig_mod remains anywhere in keys
+        assert not any("_orig_mod" in k for k in clean_sd)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt_path = os.path.join(tmpdir, "latent_compiled_ckpt.pt")
+            save_checkpoint({"model_state_dict": clean_sd}, ckpt_path)
+
+            # Build uncompiled evaluation model
+            model_eval, _, _ = _build_model(
+                model_type="latent_transformer",
+                embed_dim=64,
+                depth=1,
+                num_heads=2,
+                prediction_mode="direct",
+                freeze_representation=False,
+                repr_checkpoint="",
+                init_checkpoint=None,
+                split_hash="dummy",
+                normalizer_hash="dummy",
+                seed=42,
+                expected_init_horizon=None,
+                lambda_div=0.0,
+                lambda_vort=0.0,
+                use_condition=False,
+                device=device,
+                is_distributed=False,
+                local_rank=0,
+                global_rank=0,
+                compile_model=False,
+            )
+
+            # Strict load must pass with 0 missing / unexpected keys
+            load_checkpoint(ckpt_path, model_eval, strict=True)
+
+            # Forward output consistency
+            model_compiled.eval()
+            model_eval.eval()
+            eval_input = torch.randn(1, 4, 4, 32, 64)
+            with torch.no_grad():
+                out_compiled = model_compiled(eval_input, horizon=1)
+                out_eval = model_eval(eval_input, horizon=1)
+
+            assert torch.allclose(out_compiled, out_eval, atol=1e-5), (
+                f"Prediction mismatch after reload: max diff = {(out_compiled - out_eval).abs().max().item():.2e}"
+            )

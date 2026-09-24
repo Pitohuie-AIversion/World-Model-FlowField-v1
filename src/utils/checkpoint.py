@@ -12,28 +12,43 @@ import torch.nn as nn
 # ``_orig_mod.`` to every key in state_dict().  To guarantee that checkpoints
 # produced during compiled training can be loaded by **uncompiled** evaluation
 # scripts with ``strict=True``, we strip these prefixes at save-time.
+_COMPILE_SEGMENT = "_orig_mod"
 _COMPILE_PREFIX = "_orig_mod."
 
 
 def strip_compiled_prefix(state_dict: Dict[str, Any]) -> OrderedDict:
-    """Remove ``_orig_mod.`` key prefixes injected by ``torch.compile``.
+    """Remove ``_orig_mod`` module segments injected by ``torch.compile``.
 
-    If no keys carry the prefix the original dict is returned unchanged (zero-copy).
-    This function is idempotent: applying it twice yields the same result.
+    ``torch.compile`` wraps modules in an ``OptimizedModule``, injecting
+    ``_orig_mod`` into parameter paths in ``state_dict()``. Depending on where
+    compile was applied, this segment may appear at the start of a key (when
+    compiling the entire model, e.g. ``_orig_mod.transformer.weight``) or inside
+    a sub-module path (when compiling sub-modules individually, e.g.
+    ``transformer._orig_mod.weight`` or ``transformer.block._orig_mod.weight``).
+
+    This function removes all dot-separated ``_orig_mod`` segments from keys.
+    If no keys carry ``_orig_mod``, the original dict is returned unchanged.
+    This function is idempotent and raises a ValueError on key collisions.
+
+    Args:
+        state_dict: Model state dictionary possibly containing compiled keys.
+
+    Returns:
+        OrderedDict with clean, uncompiled key names.
     """
-    needs_strip = any(k.startswith(_COMPILE_PREFIX) for k in state_dict)
+    needs_strip = any(_COMPILE_SEGMENT in k.split(".") for k in state_dict)
     if not needs_strip:
         return OrderedDict(state_dict)
 
     cleaned = OrderedDict()
     for key, value in state_dict.items():
-        new_key = key
-        # Strip potentially nested prefixes (e.g. compiled DDP wrapping)
-        while new_key.startswith(_COMPILE_PREFIX):
-            new_key = new_key[len(_COMPILE_PREFIX):]
+        parts = key.split(".")
+        new_parts = [p for p in parts if p != _COMPILE_SEGMENT]
+        new_key = ".".join(new_parts)
+
         if new_key in cleaned:
             raise ValueError(
-                f"Key collision after stripping '{_COMPILE_PREFIX}' prefix: "
+                f"Key collision after stripping '{_COMPILE_SEGMENT}' segments: "
                 f"both '{key}' and an earlier key map to '{new_key}'. "
                 f"This indicates an unexpected state_dict structure."
             )

@@ -57,6 +57,7 @@ from src.utils.provenance import (
     validate_formal_provenance_bundle,
 )
 from src.utils.reproducibility import seed_everything
+from src.utils.checkpoint import strip_compiled_prefix
 
 # Target candidate checkpoints
 BENCHMARK_TARGETS = {
@@ -181,10 +182,11 @@ def load_model_from_checkpoint(ckpt_path: str, device: torch.device) -> Tuple[La
     forecaster = LatentForecaster(encoder=encoder, transformer=transformer, decoder=decoder).to(device)
 
     state_dict = ckpt_data.get("model_state_dict", ckpt_data)
-    # Strip any DDP prefix if present
+    # Strip any DDP prefix and compiled prefix if present
     cleaned_state_dict = {
         (k[7:] if k.startswith("module.") else k): v for k, v in state_dict.items()
     }
+    cleaned_state_dict = strip_compiled_prefix(cleaned_state_dict)
     load_msg = forecaster.load_state_dict(cleaned_state_dict, strict=True)
     forecaster.eval()
     return forecaster, cfg, ckpt_data

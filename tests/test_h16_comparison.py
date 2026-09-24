@@ -262,3 +262,18 @@ def test_validate_target_samples_provenance_start_t_mismatch():
     }]
     with pytest.raises(ValueError, match="start_t"):
         validate_target_samples_provenance(ds, specs)
+
+
+def test_validate_target_samples_provenance_split_t_mismatch():
+    """Validator should raise ValueError when split_t doesn't match."""
+    ds = _MockDataset(
+        samples=[(0, 1, 0, 999, 34, 1e4, 1e-1)],
+        file_paths=["correct_file.hdf5"],
+    )
+    specs = [{
+        "index": 0, "tag": "test",
+        "source_file": "correct_file.hdf5",
+        "sim_idx": 1, "start_t": 0, "split_t": 4, "end_t": 34,
+    }]
+    with pytest.raises(ValueError, match="split_t"):
+        validate_target_samples_provenance(ds, specs)
