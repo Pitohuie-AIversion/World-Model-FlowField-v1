@@ -123,11 +123,12 @@ def test_extract_field_slice():
 
 def test_checkpoint_parity_between_eval_and_vis():
     """Ensure benchmark evaluation and visualization point to the exact same checkpoint files and SHAs."""
-    assert set(BENCHMARK_EVAL_TARGETS.keys()) == set(VISUALIZE_TARGETS.keys()), (
-        f"Target keys mismatch: {BENCHMARK_EVAL_TARGETS.keys()} vs {VISUALIZE_TARGETS.keys()}"
+    # Visualization targets must be a defined subset of benchmark evaluation targets
+    assert set(VISUALIZE_TARGETS.keys()).issubset(set(BENCHMARK_EVAL_TARGETS.keys())), (
+        f"Visualize targets not in eval targets: {set(VISUALIZE_TARGETS.keys()) - set(BENCHMARK_EVAL_TARGETS.keys())}"
     )
 
-    for k in BENCHMARK_EVAL_TARGETS:
+    for k in VISUALIZE_TARGETS:
         eval_path = BENCHMARK_EVAL_TARGETS[k]["path"]
         vis_path = VISUALIZE_TARGETS[k]["path"]
         assert eval_path == vis_path, f"Path mismatch for {k}: {eval_path} vs {vis_path}"
@@ -137,6 +138,85 @@ def test_checkpoint_parity_between_eval_and_vis():
             vis_sha = compute_file_sha256(vis_path)
             assert eval_sha == vis_sha
             assert len(eval_sha) == 64, f"Invalid SHA-256 hex length: {eval_sha}"
+
+
+def test_visualize_h16_targets_isolated_from_h12():
+    """Verify that H16 visualization only targets the 3 canonical H8/H16 models and excludes H12."""
+    from scripts.visualize_h16_comparison import H16_COMPARISON_TARGET_KEYS
+    assert set(H16_COMPARISON_TARGET_KEYS) == {
+        "parent_h8_ep11",
+        "h16_short_best_ep8",
+        "h16_long_best_ep12",
+    }
+    assert "h12_short_best" not in VISUALIZE_TARGETS
+    assert "h12_long_best" not in VISUALIZE_TARGETS
+    assert "h12_short_best" not in H16_COMPARISON_TARGET_KEYS
+    assert "h12_long_best" not in H16_COMPARISON_TARGET_KEYS
+
+
+def test_visualize_h16_does_not_load_h12_when_h12_missing():
+    """When H12 checkpoints do not exist, the visualizer default target keys must not touch H12 paths."""
+    from scripts.visualize_h16_comparison import H16_COMPARISON_TARGET_KEYS
+    # Ensure H12 checkpoint paths are non-existent
+    for k in ["h12_short_best", "h12_long_best"]:
+        assert not Path(BENCHMARK_EVAL_TARGETS[k]["path"]).exists()
+
+    # The default target keys must all be in H16_COMPARISON_TARGET_KEYS
+    for target_key in H16_COMPARISON_TARGET_KEYS:
+        assert target_key in ["parent_h8_ep11", "h16_short_best_ep8", "h16_long_best_ep12"]
+
+
+def test_generate_comparison_grid_metadata_matches_visualized_models(tmp_path):
+    """Verify that metadata models_evaluated strictly matches models_order in the visualization grid."""
+    from scripts.visualize_h16_comparison import generate_comparison_grid, HORIZONS
+
+    # Mock trajectories
+    gt = torch.randn(max(HORIZONS), 4, 16, 32)
+    models_order = ["parent_h8_ep11", "h16_short_best_ep8", "h16_long_best_ep12"]
+    preds = {m: torch.randn(max(HORIZONS), 4, 16, 32) for m in models_order}
+    models_meta = {
+        m: {
+            "title": f"Title {m}",
+            "checkpoint_path": f"/tmp/{m}.pt",
+            "full_sha256": "0" * 64,
+            "expected_horizon": 16 if "h16" in m else 8,
+            "selection_criterion": "test",
+        }
+        for m in models_order + ["h12_short_best", "h12_long_best"]  # extra models in registry
+    }
+    sample_info = {
+        "index": 0,
+        "tag": "test_tag",
+        "desc": "Test Sample",
+        "selection_basis": "test",
+        "source_file": "test.hdf5",
+        "source_relative_path": "data/test.hdf5",
+        "sim_idx": 1,
+        "start_t": 0,
+        "split_t": 4,
+        "end_t": 34,
+    }
+
+    out_file, meta = generate_comparison_grid(
+        sample_info=sample_info,
+        var_name="u",
+        gt_trajectory=gt,
+        predictions=preds,
+        models_meta=models_meta,
+        out_dir=tmp_path,
+        re_val=1e4,
+        sc_val=0.1,
+        git_commit="test_commit",
+        git_dirty=False,
+        split_hash="test_split",
+        norm_hash="test_norm",
+        models_order=models_order,
+    )
+
+    # models_evaluated in meta must only contain the 3 visualized models, not the extra 2 in registry
+    assert set(meta["models_evaluated"].keys()) == set(models_order)
+    assert "h12_short_best" not in meta["models_evaluated"]
+    assert "h12_long_best" not in meta["models_evaluated"]
 
 
 def test_target_samples_provenance_and_ranking_basis():

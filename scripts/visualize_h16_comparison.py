@@ -46,10 +46,22 @@ import numpy as np
 import torch
 
 from scripts.evaluate_h16_benchmark import (
-    BENCHMARK_TARGETS,
+    BENCHMARK_TARGETS as ALL_BENCHMARK_TARGETS,
     load_model_from_checkpoint,
     validate_benchmark_checkpoint,
 )
+
+# Canonical 3-model target keys for H16 publication comparison
+H16_COMPARISON_TARGET_KEYS = [
+    "parent_h8_ep11",
+    "h16_short_best_ep8",
+    "h16_long_best_ep12",
+]
+H16_COMPARISON_TARGETS = {
+    k: ALL_BENCHMARK_TARGETS[k] for k in H16_COMPARISON_TARGET_KEYS
+}
+# Backward-compatibility alias: ensures external imports get canonical 3 H16 targets
+BENCHMARK_TARGETS = H16_COMPARISON_TARGETS
 from src.data.pipeline import create_flow_dataloaders, FieldNormalizer
 from src.metrics.field import evaluate_field_metrics
 from src.utils.fft_derivatives import compute_vorticity
@@ -234,24 +246,38 @@ def generate_comparison_grid(
     git_dirty: bool,
     split_hash: str,
     norm_hash: str,
+    models_order: Optional[List[str]] = None,
 ) -> Tuple[str, dict]:
-    """Generates 4x7 comparative grid figure with row-shared colorbars."""
+    """Generates comparative grid figure with row-shared colorbars."""
+    if models_order is None:
+        models_order = [m for m in H16_COMPARISON_TARGET_KEYS if m in predictions]
+        if not models_order:
+            models_order = list(predictions.keys())
+
     n_rows = len(HORIZONS)
-    n_cols = 7  # GT, H8 Pred, H8 Err, H16-S Pred, H16-S Err, H16-L Pred, H16-L Err
+    n_cols = 1 + 2 * len(models_order)  # Col 0: GT, then (Pred, Err) for each model
 
     fig, axes = plt.subplots(
         n_rows,
         n_cols,
-        figsize=(24, 14),
+        figsize=(8 * max(len(models_order), 1), 14),
         gridspec_kw={"wspace": 0.08, "hspace": 0.25},
     )
+    if n_rows == 1 and n_cols == 1:
+        axes = np.array([[axes]])
+    elif n_rows == 1:
+        axes = np.array([axes])
+    elif n_cols == 1:
+        axes = np.array([[ax] for ax in axes])
 
-    models_order = ["parent_h8_ep11", "h16_short_best_ep8", "h16_long_best_ep12"]
     model_labels = {
         "parent_h8_ep11": "Parent H8 Long-Best",
         "h16_short_best_ep8": "H16 Short-Best (Ep8)",
         "h16_long_best_ep12": "H16 Long-Best (Ep12)",
     }
+    for m in models_order:
+        if m not in model_labels:
+            model_labels[m] = models_meta.get(m, {}).get("title", m)
 
     # Colormap selection
     if var_name in ("vorticity", "v"):
@@ -373,7 +399,7 @@ def generate_comparison_grid(
         "horizons": HORIZONS,
         "colorbar_scaling_policy": "同一时间步共享色条；不同时间步独立缩放；显示范围采用 0.5%–99.5%（场）与 99.5%（误差）百分位截断。不可直接跨时间步（行）比较颜色深浅。",
         "colorbar_norms": norm_metadata,
-        "models_evaluated": models_meta,
+        "models_evaluated": {m: models_meta[m] for m in models_order if m in models_meta},
     }
     meta_path = out_dir / f"comparison_{sample_info['tag']}_{var_name}_metadata.json"
     with open(meta_path, "w") as f:
@@ -388,6 +414,12 @@ def main():
     parser.add_argument("--out_dir", type=str, default="outputs/figures/h16_comparison_v2")
     parser.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--formal", action="store_true", help="Fail closed on dirty git state")
+    parser.add_argument(
+        "--targets",
+        type=str,
+        default=",".join(H16_COMPARISON_TARGET_KEYS),
+        help=f"Comma-separated list of target keys to visualize (default: canonical H8/H16 comparison targets). Available: {list(ALL_BENCHMARK_TARGETS.keys())}",
+    )
     args = parser.parse_args()
 
     # Capture git state at startup BEFORE creating any output directories or files
@@ -430,10 +462,19 @@ def main():
     # Validate TARGET_SAMPLES provenance against live dataset
     validate_target_samples_provenance(test_loader.dataset)
 
-    # 2. Load all 3 models with strict contract checks
+    # 2. Load requested models with strict contract checks
+    target_keys = [k.strip() for k in args.targets.split(",") if k.strip()]
+    for k in target_keys:
+        if k not in ALL_BENCHMARK_TARGETS:
+            raise KeyError(
+                f"Target key '{k}' not found in ALL_BENCHMARK_TARGETS. "
+                f"Available: {list(ALL_BENCHMARK_TARGETS.keys())}"
+            )
+
     models = {}
     models_meta = {}
-    for m_key, m_info in BENCHMARK_TARGETS.items():
+    for m_key in target_keys:
+        m_info = ALL_BENCHMARK_TARGETS[m_key]
         ckpt_path = m_info["path"]
         print(f"Loading and validating: {m_info['title']} ({ckpt_path})")
         model, cfg, ckpt_data = load_model_from_checkpoint(ckpt_path, device=device)
@@ -476,8 +517,8 @@ def main():
                 t_phys = zero_mean_pressure_gauge(t_phys)
 
                 preds = {}
-                for m_key, m in models.items():
-                    pred_traj = m.forward_rollout(q_hist, re, sc, horizon=max(HORIZONS))
+                for m_key in target_keys:
+                    pred_traj = models[m_key].forward_rollout(q_hist, re, sc, horizon=max(HORIZONS))
                     p_phys = normalizer.denormalize(pred_traj[0, :max(HORIZONS)]).clone()
                     p_phys = zero_mean_pressure_gauge(p_phys)
                     preds[m_key] = p_phys
@@ -513,6 +554,7 @@ def main():
                 git_dirty=git_dirty,
                 split_hash=split_hash,
                 norm_hash=norm_hash,
+                models_order=target_keys,
             )
             print(f"  Saved: {fig_path}")
             manifest.append(meta)

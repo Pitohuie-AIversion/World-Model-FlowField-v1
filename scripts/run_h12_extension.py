@@ -206,6 +206,8 @@ def print_preflight_summary(
     parent_path: Path,
     parent_sha: str,
     parent_horizon: int,
+    target_horizon: int,
+    expected_init_horizon: int,
     gpu_ids: List[int],
     epochs: int,
     lr: float,
@@ -214,6 +216,7 @@ def print_preflight_summary(
     batch_size: int,
     grad_accum_steps: int,
     effective_batch_size: int,
+    dirty_flag: bool,
     dry_run: bool = False,
 ):
     """Print structured parameter table matching governance verification format."""
@@ -223,8 +226,8 @@ def print_preflight_summary(
     print(f"Parent checkpoint:      {parent_path}")
     print(f"Parent SHA256:          {parent_sha}")
     print(f"Parent horizon:         {parent_horizon}")
-    print(f"Target horizon:         {H12_CONFIG['horizon']} (constant throughout)")
-    print(f"Expected init horizon:  {H12_CONFIG['expected_init_horizon']}")
+    print(f"Target horizon:         {target_horizon} (constant throughout)")
+    print(f"Expected init horizon:  {expected_init_horizon}")
     print(f"Microbatch per GPU:     {batch_size}")
     print(f"Grad accumulation:      {grad_accum_steps}")
     print(f"Effective batch size:   {effective_batch_size}")
@@ -242,7 +245,6 @@ def print_preflight_summary(
     print(f"GPU count:              {len(gpu_ids)} ({'DDP Distributed' if len(gpu_ids) > 1 else 'Single GPU'})")
     print(f"Output directory:       {output_dir}")
     print(f"Log file:               {log_file}")
-    dirty_flag = is_git_dirty()
     print(f"Git dirty:              {dirty_flag} (working tree {'DIRTY' if dirty_flag else 'CLEAN'})")
     print("=" * 80)
 
@@ -286,7 +288,7 @@ def main():
 
     num_gpus = len(gpu_ids)
 
-    # Compute grad_accum_steps to strictly preserve Beff = 8
+    # Compute and enforce grad_accum_steps to strictly preserve Beff = 8
     target_beff = args.effective_batch_size
     microbatch = args.batch_size
     if args.grad_accum_steps is not None:
@@ -299,6 +301,29 @@ def main():
         else:
             grad_accum_steps = max(1, target_beff // microbatch)
             effective_beff = microbatch * grad_accum_steps
+
+    # Strict governance assertions: reject mismatched effective batch size or horizon
+    if target_beff != 8:
+        raise ValueError(
+            f"Effective batch size contract violation: expected target Beff=8 for H12 experiment, got {target_beff}"
+        )
+    if effective_beff != 8:
+        raise ValueError(
+            f"Effective batch size calculation mismatch: resulting nominal effective batch size is {effective_beff}, "
+            f"which does not equal required Beff=8 (microbatch={microbatch}, "
+            f"grad_accum_steps={grad_accum_steps}, num_gpus={num_gpus}). "
+            f"Configuration must satisfy microbatch * grad_accum_steps * num_gpus == 8."
+        )
+    if args.horizon != 12:
+        raise ValueError(
+            f"Horizon contract violation: this runner is fixed for H=12 extension experiment, "
+            f"got --horizon {args.horizon}. To train other horizons, use the appropriate runner."
+        )
+    if args.expected_init_horizon != 8:
+        raise ValueError(
+            f"Expected init horizon contract violation: H12 extension requires expected_init_horizon=8, "
+            f"got {args.expected_init_horizon}."
+        )
 
     # Resolve and validate parent checkpoint
     parent_path = resolve_parent_checkpoint(args.parent_checkpoint)
@@ -313,11 +338,14 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(args.log_dir, exist_ok=True)
     log_file = os.path.join(args.log_dir, "h12_extension_train.log")
+    dirty_flag = is_git_dirty(PROJECT_ROOT)
 
     print_preflight_summary(
         parent_path=parent_path,
         parent_sha=parent_sha,
         parent_horizon=parent_horizon,
+        target_horizon=args.horizon,
+        expected_init_horizon=args.expected_init_horizon,
         gpu_ids=gpu_ids,
         epochs=args.epochs,
         lr=args.lr,
@@ -326,6 +354,7 @@ def main():
         batch_size=microbatch,
         grad_accum_steps=grad_accum_steps,
         effective_batch_size=effective_beff,
+        dirty_flag=dirty_flag,
         dry_run=args.dry_run,
     )
 
@@ -354,6 +383,15 @@ def main():
     if args.dry_run:
         print("[DRY RUN] Preflight passed successfully. Command generated without execution.")
         return 0
+
+    # Formal execution guard: refuse to launch training on dirty working tree
+    if dirty_flag:
+        raise RuntimeError(
+            "Formal training execution blocked: git working tree is dirty.\n"
+            "All changes must be committed or stashed before launching formal H12 training "
+            "to ensure cryptographic provenance reproducibility.\n"
+            "(Use --dry_run if you only wish to verify preflight configuration)."
+        )
 
     # Set CUDA_VISIBLE_DEVICES if specific GPUs requested
     env = os.environ.copy()

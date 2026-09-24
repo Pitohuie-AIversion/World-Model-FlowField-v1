@@ -249,3 +249,60 @@ class TestH12BenchmarkEvaluationIntegration:
         assert prov["seed"] == 42
         assert prov["split_hash"] == "41fbe6ebe7edd460"
         assert prov["normalizer_hash"] == "3a0fe52689657618"
+
+
+class TestH12RunnerGovernanceAndRejection:
+    """Verify H12 runner startup assertions, Beff enforcement, horizon guards, and git status checks."""
+
+    def test_default_dual_gpu_beff8_allows_preflight(self, monkeypatch):
+        """Default dual-GPU configuration results in Beff=8 and allows preflight in dry run."""
+        from scripts.run_h12_extension import main
+        monkeypatch.setattr("sys.argv", ["run_h12_extension.py", "--dry_run", "--gpu_ids", "0,1"])
+        ret = main()
+        assert ret == 0
+
+    def test_beff_mismatch_fails_closed(self, monkeypatch):
+        """Configurations resulting in Beff != 8 must be rejected before preflight/training."""
+        from scripts.run_h12_extension import main
+        # batch_size=3 with 2 GPUs gives accum=1 -> Beff=6 != 8
+        monkeypatch.setattr("sys.argv", ["run_h12_extension.py", "--dry_run", "--gpu_ids", "0,1", "--batch_size", "3"])
+        with pytest.raises(ValueError, match="Effective batch size calculation mismatch"):
+            main()
+
+        # Explicit grad_accum_steps=5 with 2 GPUs gives Beff=10 != 8
+        monkeypatch.setattr("sys.argv", ["run_h12_extension.py", "--dry_run", "--gpu_ids", "0,1", "--grad_accum_steps", "5"])
+        with pytest.raises(ValueError, match="Effective batch size calculation mismatch"):
+            main()
+
+        # Setting effective_batch_size != 8 must also fail closed
+        monkeypatch.setattr("sys.argv", ["run_h12_extension.py", "--dry_run", "--effective_batch_size", "10"])
+        with pytest.raises(ValueError, match="Effective batch size contract violation"):
+            main()
+
+    def test_horizon_override_fails_closed(self, monkeypatch):
+        """Attempting to run a horizon other than 12 on H12 runner must fail closed."""
+        from scripts.run_h12_extension import main
+        monkeypatch.setattr("sys.argv", ["run_h12_extension.py", "--dry_run", "--horizon", "16"])
+        with pytest.raises(ValueError, match="Horizon contract violation"):
+            main()
+
+        monkeypatch.setattr("sys.argv", ["run_h12_extension.py", "--dry_run", "--expected_init_horizon", "12"])
+        with pytest.raises(ValueError, match="Expected init horizon contract violation"):
+            main()
+
+    def test_dirty_git_rejects_formal_run_without_starting_subprocess(self, monkeypatch):
+        """In non-dry-run mode, if git tree is dirty, runner must reject execution without spawning subprocess."""
+        import subprocess
+        from scripts.run_h12_extension import main
+
+        # Mock is_git_dirty to return True
+        monkeypatch.setattr("scripts.run_h12_extension.is_git_dirty", lambda root=None: True)
+
+        # Ensure subprocess.Popen is never called
+        def fail_popen(*args, **kwargs):
+            raise AssertionError("subprocess.Popen should not have been called on dirty git tree!")
+        monkeypatch.setattr(subprocess, "Popen", fail_popen)
+
+        monkeypatch.setattr("sys.argv", ["run_h12_extension.py", "--gpu_ids", "0,1"])
+        with pytest.raises(RuntimeError, match="Formal training execution blocked: git working tree is dirty"):
+            main()
