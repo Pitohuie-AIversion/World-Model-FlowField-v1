@@ -371,11 +371,14 @@ def test_get_model_display_name():
 
 def test_resolve_parent_and_h8_aliases():
     """Verify that aliases resolve to valid files if present on disk."""
-    parent_path = resolve_group_checkpoint_path("parent", seed=42)
+    try:
+        parent_path = resolve_group_checkpoint_path("parent", seed=42)
+        h8_path = resolve_group_checkpoint_path("H8_saved_long_best", seed=42)
+    except FileNotFoundError as exc:
+        pytest.skip(f"Real checkpoints not present in environment: {exc}")
+
     assert os.path.exists(parent_path)
     assert "best_vrmse_mean.pt" in parent_path
-
-    h8_path = resolve_group_checkpoint_path("H8_saved_long_best", seed=42)
     assert os.path.exists(h8_path)
     assert "checkpoint_step_11_vrmse_mean_0.2186.pt" in h8_path
 
