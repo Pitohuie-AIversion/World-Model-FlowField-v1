@@ -2,9 +2,43 @@
 
 import os
 import shutil
-from typing import Any, Dict, List, Optional
+from collections import OrderedDict
+from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
+
+# --- torch.compile compatibility -------------------------------------------
+# torch.compile wraps modules inside an OptimizedModule, which prepends
+# ``_orig_mod.`` to every key in state_dict().  To guarantee that checkpoints
+# produced during compiled training can be loaded by **uncompiled** evaluation
+# scripts with ``strict=True``, we strip these prefixes at save-time.
+_COMPILE_PREFIX = "_orig_mod."
+
+
+def strip_compiled_prefix(state_dict: Dict[str, Any]) -> OrderedDict:
+    """Remove ``_orig_mod.`` key prefixes injected by ``torch.compile``.
+
+    If no keys carry the prefix the original dict is returned unchanged (zero-copy).
+    This function is idempotent: applying it twice yields the same result.
+    """
+    needs_strip = any(k.startswith(_COMPILE_PREFIX) for k in state_dict)
+    if not needs_strip:
+        return OrderedDict(state_dict)
+
+    cleaned = OrderedDict()
+    for key, value in state_dict.items():
+        new_key = key
+        # Strip potentially nested prefixes (e.g. compiled DDP wrapping)
+        while new_key.startswith(_COMPILE_PREFIX):
+            new_key = new_key[len(_COMPILE_PREFIX):]
+        if new_key in cleaned:
+            raise ValueError(
+                f"Key collision after stripping '{_COMPILE_PREFIX}' prefix: "
+                f"both '{key}' and an earlier key map to '{new_key}'. "
+                f"This indicates an unexpected state_dict structure."
+            )
+        cleaned[new_key] = value
+    return cleaned
 
 
 def save_checkpoint(
@@ -38,13 +72,16 @@ def load_checkpoint(
     map_location = device or torch.device("cpu")
     checkpoint = torch.load(filepath, map_location=map_location)
 
-    # Handle model state dict
+    # Handle model state dict — strip _orig_mod. prefixes for compile compat
     if "model_state_dict" in checkpoint:
-        model.load_state_dict(checkpoint["model_state_dict"], strict=strict)
+        sd = strip_compiled_prefix(checkpoint["model_state_dict"])
+        model.load_state_dict(sd, strict=strict)
     elif "state_dict" in checkpoint:
-        model.load_state_dict(checkpoint["state_dict"], strict=strict)
+        sd = strip_compiled_prefix(checkpoint["state_dict"])
+        model.load_state_dict(sd, strict=strict)
     else:
-        model.load_state_dict(checkpoint, strict=strict)
+        sd = strip_compiled_prefix(checkpoint)
+        model.load_state_dict(sd, strict=strict)
 
     if optimizer is not None and "optimizer_state_dict" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])

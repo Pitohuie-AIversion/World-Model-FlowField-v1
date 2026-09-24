@@ -29,7 +29,7 @@ from src.models.direct_transformer import DirectSTTransformer
 from src.models.encoder import Encoder2D
 from src.models.history_buffer import HistoryBuffer
 from src.models.latent_transformer import LatentSTTransformer
-from src.utils.checkpoint import BestCheckpointTracker, load_checkpoint, save_checkpoint
+from src.utils.checkpoint import BestCheckpointTracker, load_checkpoint, save_checkpoint, strip_compiled_prefix
 from src.utils.reproducibility import seed_everything
 from src.utils.physics_contract import (
     PHYSICS_PROTOCOL,
@@ -595,11 +595,14 @@ def _save_checkpoint_artifacts(
 ):
     """Save epoch checkpoint and update best score trackers."""
     raw_model = model.module if is_distributed else model
+    # Strip _orig_mod. prefixes from torch.compile before persisting,
+    # so checkpoints are always loadable by uncompiled evaluation scripts.
+    clean_state_dict = strip_compiled_prefix(raw_model.state_dict())
     state = {
         "epoch": epoch,
         **metadata_dict,
         "config": config_dict,
-        "model_state_dict": raw_model.state_dict(),
+        "model_state_dict": clean_state_dict,
         "optimizer_state_dict": optimizer.state_dict(),
         "val_metrics": val_metrics,
         "val_step_metrics": val_step_metrics,

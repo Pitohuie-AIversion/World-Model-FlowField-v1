@@ -19,6 +19,7 @@ from src.utils.physics_contract import (
     ABLATION_SEMANTIC_SPECS,
     validate_ablation_checkpoint_semantics,
 )
+from src.utils.checkpoint import strip_compiled_prefix
 
 __all__ = [
     "spectral_grad_2d",
@@ -36,5 +37,6 @@ __all__ = [
     "SHEAR_FLOW_DOMAIN_SIZE_XY",
     "ABLATION_SEMANTIC_SPECS",
     "validate_ablation_checkpoint_semantics",
+    "strip_compiled_prefix",
 ]
 
