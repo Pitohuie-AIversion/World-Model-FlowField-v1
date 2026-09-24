@@ -29,6 +29,7 @@ from scripts.visualize_h16_comparison import (
     BENCHMARK_TARGETS as VISUALIZE_TARGETS,
     TARGET_SAMPLES,
     extract_field_slice,
+    validate_target_samples_provenance,
 )
 
 
@@ -154,3 +155,110 @@ def test_target_samples_provenance_and_ranking_basis():
     # Confirm explicit H8 ranking basis in descriptions
     assert "H8" in TARGET_SAMPLES[1]["selection_basis"]
     assert "H8" in TARGET_SAMPLES[2]["selection_basis"]
+
+
+# ---------------------------------------------------------------------------
+# validate_target_samples_provenance tests
+# ---------------------------------------------------------------------------
+
+class _MockDataset:
+    """Lightweight mock for ShearFlowDataset with .samples and .file_paths."""
+    def __init__(self, samples, file_paths):
+        self.samples = samples
+        self.file_paths = file_paths
+
+
+def test_validate_target_samples_provenance_passes_on_correct_data():
+    """Validator should pass when dataset.samples match TARGET_SAMPLES exactly."""
+    # Build a mock dataset large enough for all target indices
+    max_idx = max(s["index"] for s in TARGET_SAMPLES)
+    file_paths = [
+        "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+    ]
+
+    # Fill samples with dummy entries, then place correct entries at target indices
+    samples = [(0, 0, 0, 0, 0, 1e4, 1e-1)] * (max_idx + 1)
+    for spec in TARGET_SAMPLES:
+        f_idx = 0 if "test" in spec.get("source_relative_path", "") else 1
+        samples[spec["index"]] = (
+            f_idx,  # f_idx -> file_paths[f_idx]
+            spec["sim_idx"],
+            spec["start_t"],
+            spec["start_t"] + 4,  # split_t (unused)
+            spec["end_t"],
+            1e4,  # re
+            1e-1,  # sc
+        )
+
+    ds = _MockDataset(samples, file_paths)
+    # Should not raise
+    validate_target_samples_provenance(ds)
+
+
+def test_validate_target_samples_provenance_index_out_of_range():
+    """Validator should raise IndexError when target index exceeds dataset size."""
+    ds = _MockDataset(samples=[], file_paths=["dummy.hdf5"])
+    with pytest.raises(IndexError, match="TARGET_SAMPLES specifies index=0"):
+        validate_target_samples_provenance(ds, [{"index": 0, "tag": "test"}])
+
+
+def test_validate_target_samples_provenance_source_file_mismatch():
+    """Validator should raise ValueError when source_file doesn't match."""
+    ds = _MockDataset(
+        samples=[(0, 1, 0, 4, 34, 1e4, 1e-1)],
+        file_paths=["wrong_file.hdf5"],
+    )
+    specs = [{
+        "index": 0, "tag": "test",
+        "source_file": "expected_file.hdf5",
+        "sim_idx": 1, "start_t": 0, "end_t": 34,
+    }]
+    with pytest.raises(ValueError, match="source_file"):
+        validate_target_samples_provenance(ds, specs)
+
+
+def test_validate_target_samples_provenance_source_relative_path_mismatch():
+    """Validator should raise ValueError when source_relative_path doesn't match."""
+    ds = _MockDataset(
+        samples=[(0, 1, 0, 4, 34, 1e4, 1e-1)],
+        file_paths=["/path/to/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5"],
+    )
+    specs = [{
+        "index": 0, "tag": "test",
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "source_relative_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "sim_idx": 1, "start_t": 0, "end_t": 34,
+    }]
+    with pytest.raises(ValueError, match="source_relative_path"):
+        validate_target_samples_provenance(ds, specs)
+
+
+def test_validate_target_samples_provenance_sim_idx_mismatch():
+    """Validator should raise ValueError when sim_idx doesn't match."""
+    ds = _MockDataset(
+        samples=[(0, 99, 0, 4, 34, 1e4, 1e-1)],
+        file_paths=["correct_file.hdf5"],
+    )
+    specs = [{
+        "index": 0, "tag": "test",
+        "source_file": "correct_file.hdf5",
+        "sim_idx": 1, "start_t": 0, "end_t": 34,
+    }]
+    with pytest.raises(ValueError, match="sim_idx"):
+        validate_target_samples_provenance(ds, specs)
+
+
+def test_validate_target_samples_provenance_start_t_mismatch():
+    """Validator should raise ValueError when start_t doesn't match."""
+    ds = _MockDataset(
+        samples=[(0, 1, 999, 4, 34, 1e4, 1e-1)],
+        file_paths=["correct_file.hdf5"],
+    )
+    specs = [{
+        "index": 0, "tag": "test",
+        "source_file": "correct_file.hdf5",
+        "sim_idx": 1, "start_t": 0, "end_t": 34,
+    }]
+    with pytest.raises(ValueError, match="start_t"):
+        validate_target_samples_provenance(ds, specs)

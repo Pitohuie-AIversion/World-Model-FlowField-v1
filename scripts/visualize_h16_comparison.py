@@ -75,6 +75,7 @@ TARGET_SAMPLES = [
         "desc": "Fixed Reference Sample (Index 0)",
         "selection_basis": "Fixed anchor window index 0 for longitudinal benchmark consistency",
         "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "source_relative_path": "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
         "sim_idx": 1,
         "start_t": 0,
         "end_t": 34,
@@ -85,6 +86,7 @@ TARGET_SAMPLES = [
         "desc": "Median Error Sample (Index 23)",
         "selection_basis": "Median window when 45 test windows are sorted by Parent H8 J_long VRMSE error (rank 23/45)",
         "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "source_relative_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
         "sim_idx": 5,
         "start_t": 100,
         "end_t": 134,
@@ -95,6 +97,7 @@ TARGET_SAMPLES = [
         "desc": "High Error Sample (Index 36, 85th percentile)",
         "selection_basis": "High-error window when 45 test windows are sorted by Parent H8 J_long VRMSE error (rank 39/45, ~85th percentile)",
         "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "source_relative_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
         "sim_idx": 16,
         "start_t": 0,
         "end_t": 34,
@@ -103,6 +106,88 @@ TARGET_SAMPLES = [
 
 TARGET_VARS = ["u", "vorticity", "tracer"]
 HORIZONS = [1, 10, 20, 30]
+
+
+def extract_relative_data_path(file_path: str) -> str:
+    """Extract relative dataset path starting from 'data/' if present, else basename."""
+    norm_path = os.path.normpath(file_path)
+    parts = norm_path.split(os.sep)
+    if "data" in parts:
+        data_idx = parts.index("data")
+        return "/".join(parts[data_idx:])
+    return os.path.basename(file_path)
+
+
+def validate_target_samples_provenance(
+    dataset,
+    target_samples: list = TARGET_SAMPLES,
+) -> None:
+    """Fail-closed validation: cross-check hardcoded TARGET_SAMPLES metadata
+    against the actual dataset.samples index at runtime.
+
+    This prevents silent provenance drift if the data split, file ordering,
+    stride, or horizon configuration changes.
+
+    Args:
+        dataset: A ShearFlowDataset instance with `.samples` and `.file_paths`.
+        target_samples: The TARGET_SAMPLES list of dicts to validate.
+
+    Raises:
+        IndexError: If a target index exceeds dataset size.
+        ValueError: If any source_file, sim_idx, start_t, or end_t mismatch.
+    """
+    for spec in target_samples:
+        idx = spec["index"]
+        if idx >= len(dataset.samples):
+            raise IndexError(
+                f"TARGET_SAMPLES specifies index={idx} but dataset has only "
+                f"{len(dataset.samples)} samples. Data split or windowing "
+                f"configuration may have changed."
+            )
+
+        # Unpack: (f_idx, sim_idx, start_t, split_t, end_t, re_val, sc_val)
+        f_idx, sim_idx, start_t, _split_t, end_t, _re, _sc = dataset.samples[idx]
+        actual_file = os.path.basename(dataset.file_paths[f_idx])
+        actual_rel_path = extract_relative_data_path(dataset.file_paths[f_idx])
+
+        # Dynamically record relative source path
+        if "source_relative_path" not in spec:
+            spec["source_relative_path"] = actual_rel_path
+
+        mismatches = []
+        if "source_file" in spec and actual_file != spec["source_file"]:
+            mismatches.append(
+                f"source_file: expected '{spec['source_file']}', actual '{actual_file}'"
+            )
+        if "source_relative_path" in spec and actual_rel_path != spec["source_relative_path"]:
+            mismatches.append(
+                f"source_relative_path: expected '{spec['source_relative_path']}', actual '{actual_rel_path}'"
+            )
+        if "sim_idx" in spec and sim_idx != spec["sim_idx"]:
+            mismatches.append(
+                f"sim_idx: expected {spec['sim_idx']}, actual {sim_idx}"
+            )
+        if "start_t" in spec and start_t != spec["start_t"]:
+            mismatches.append(
+                f"start_t: expected {spec['start_t']}, actual {start_t}"
+            )
+        if "end_t" in spec and end_t != spec["end_t"]:
+            mismatches.append(
+                f"end_t: expected {spec['end_t']}, actual {end_t}"
+            )
+
+        if mismatches:
+            raise ValueError(
+                f"TARGET_SAMPLES provenance mismatch at index={idx} "
+                f"(tag='{spec.get('tag', '?')}'): "
+                + "; ".join(mismatches)
+                + ". The data split, file ordering, or windowing "
+                "configuration has changed since TARGET_SAMPLES was authored. "
+                "Update TARGET_SAMPLES or investigate the data pipeline."
+            )
+
+    print(f"  ✓ TARGET_SAMPLES provenance validated against dataset ({len(target_samples)} samples)")
+
 
 
 def extract_field_slice(
@@ -266,6 +351,7 @@ def generate_comparison_grid(
         "sample_description": sample_info["desc"],
         "sample_selection_basis": sample_info.get("selection_basis"),
         "source_file": sample_info.get("source_file"),
+        "source_relative_path": sample_info.get("source_relative_path"),
         "simulation_index": sample_info.get("sim_idx"),
         "start_t": sample_info.get("start_t"),
         "end_t": sample_info.get("end_t"),
@@ -332,6 +418,9 @@ def main():
         preload_to_memory=False,
         seed=42,
     )
+
+    # Validate TARGET_SAMPLES provenance against live dataset
+    validate_target_samples_provenance(test_loader.dataset)
 
     # 2. Load all 3 models with strict contract checks
     models = {}
