@@ -155,3 +155,109 @@ class TestEnergySpectrumLoss:
         # Only 1 channel provided -> should assert failure
         with pytest.raises(AssertionError, match="must have >= 2 channels"):
             loss_fn(torch.randn(2, 1, 32, 64), torch.randn(2, 1, 32, 64))
+
+
+class TestTrainForecasterSpectralIntegration:
+    """Tests integration of EnergySpectrumLoss and spectral evaluation in train_forecaster."""
+
+    def test_compute_batch_loss_with_spectral_penalty(self):
+        """_compute_batch_loss adds lambda_spec * spec_loss when lambda_spec > 0."""
+        from scripts.train_forecaster import _compute_batch_loss
+        from src.losses.field import FieldLoss
+        from src.losses.rollout import RolloutLoss
+
+        pred = torch.randn(2, 2, 4, 16, 32)
+        target = torch.randn(2, 2, 4, 16, 32)
+
+        rollout_fn = RolloutLoss(field_loss=FieldLoss(loss_type="mse"))
+        spec_fn = EnergySpectrumLoss(domain_size=(1.0, 2.0))
+
+        loss_no_spec = _compute_batch_loss(
+            pred=pred,
+            q_future=target,
+            normalizer=None,
+            field_loss_space="normalized",
+            lambda_div=0.0,
+            lambda_vort=0.0,
+            rollout_loss_fn=rollout_fn,
+            lambda_spec=0.0,
+            spec_loss_fn=None,
+        )
+
+        loss_with_spec = _compute_batch_loss(
+            pred=pred,
+            q_future=target,
+            normalizer=None,
+            field_loss_space="normalized",
+            lambda_div=0.0,
+            lambda_vort=0.0,
+            rollout_loss_fn=rollout_fn,
+            lambda_spec=0.1,
+            spec_loss_fn=spec_fn,
+        )
+
+        assert loss_with_spec.item() > loss_no_spec.item()
+
+    def test_train_epoch_with_spectral_loss(self):
+        """_train_epoch executes cleanly with lambda_spec > 0 and updates gradients."""
+        from scripts.train_forecaster import _train_epoch
+        from src.losses.field import FieldLoss
+        from src.losses.rollout import RolloutLoss
+        import torch.nn as nn
+
+        b, l, c, ny, nx = 2, 4, 4, 16, 32
+        device = torch.device("cpu")
+
+        class SimpleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(c, c, 3, padding=1)
+
+            def forward(self, q_hist, re=None, sc=None, horizon=1, pushforward_steps=0, noise_std=0.0):
+                # produce non-zero output connected to conv
+                base = self.conv(q_hist[:, -1])
+                return base.unsqueeze(1).repeat(1, horizon, 1, 1, 1)
+
+        model = SimpleModel()
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        scaler = torch.amp.GradScaler(enabled=False)
+
+        batch = {
+            "history": torch.randn(b, l, c, ny, nx),
+            "future": torch.randn(b, 2, c, ny, nx),
+            "re": torch.tensor([1e4, 2e4]),
+            "sc": torch.tensor([0.1, 0.5]),
+        }
+        train_loader = [batch]
+
+        rollout_fn = RolloutLoss(field_loss=FieldLoss(loss_type="mse"))
+        spec_fn = EnergySpectrumLoss(domain_size=(1.0, 2.0))
+
+        loss_val = _train_epoch(
+            model=model,
+            model_type="latent_transformer",
+            train_loader=train_loader,
+            optimizer=optimizer,
+            scaler=scaler,
+            normalizer=None,
+            rollout_loss_fn=rollout_fn,
+            div_loss_fn=None,
+            vort_loss_fn=None,
+            horizon=2,
+            grad_accum_steps=1,
+            field_loss_space="normalized",
+            lambda_div=0.0,
+            lambda_vort=0.0,
+            use_condition=True,
+            use_amp=False,
+            device=device,
+            is_distributed=False,
+            train_sampler=None,
+            epoch=1,
+            lambda_spec=0.05,
+            spec_loss_fn=spec_fn,
+        )
+
+        assert isinstance(loss_val, float)
+        assert loss_val > 0.0
+

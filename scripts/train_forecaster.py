@@ -1122,8 +1122,8 @@ if __name__ == "__main__":
         "--spec_loss_type",
         type=str,
         default="log_l1",
-        choices=["log_l1", "rel_l2", "linear_l1", "combined"],
-        help="Loss formulation for energy spectrum loss (default: log_l1).",
+        choices=["log_l1", "log_l2", "relative"],
+        help="Loss formulation for energy spectrum loss: 'log_l1', 'log_l2', or 'relative' (default: log_l1).",
     )
     parser.add_argument(
         "--spec_high_freq_weight",
