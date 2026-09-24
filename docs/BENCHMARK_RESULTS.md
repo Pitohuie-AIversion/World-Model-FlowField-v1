@@ -151,3 +151,22 @@
   - **在 Step 10，全物理耦合相较基线误差暴降 92.0%！在 Step 30，相较基线误差暴降 89.3%**；
   - **Step 30 场真实 RMSE 达到 0.1774**，优于纯场基线的 0.3298（误差降低 46.2%）。
 - **Pareto 权衡**：虽然纯场基线在 Step 1 获得了更低的单步 VRMSE（0.7640 vs 3.8565），但属于典型的“单步过拟合短视行为”；全物理耦合模型牺牲了极少量的单步表观重构度，换取了系统物理守恒流形的严格闭合，在 30 步乃至更长程的推演中展现出绝对的鲁棒性。
+
+---
+
+## 6. Horizon 跨度消融与 H16 极端展开评测 ($H=2, 4, 8, 16$)
+
+为进一步探索自回归训练展开窗口对长时程演化稳定性的影响，系统开展了 Horizon-R1 与 Horizon-R2 系列长训评测：
+
+### 6.1 Horizon-R1 跨度消融 ($H=2, 4, 8$)
+- **长程最优模型遴选**：评测表明，采用 $H=8$ 训练得到的模型（`H8 Saved Long-Best`）在测试集 30 步自回归长推演中展现出最佳的宏观涡旋拓扑保持能力，大幅抑制了 $H=2$ 模型在 10 步以后出现的能谱高频翘曲；
+- **定性可视化面板**：生成了对比父模型基线的标准面板（输出至 [outputs/figures/qualitative/horizon_r1/](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/qualitative/horizon_r1/)）。
+
+### 6.2 Horizon-R2 极端长跨度 H16 双卡 DDP 扩展
+- **分布式加速度与样本等价**：利用双卡 DDP 实现 $H=16$ 极限展开训练，严格保持有效样本批量 $B_{\text{eff}}=8$ 不变；
+- **极限评测结论**：
+  - 评测指标全面固化于 [outputs/metrics/h16_benchmark_evaluation_v3.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/h16_benchmark_evaluation_v3.json)；
+  - 产出了具备严格 Provenance 溯源的出版级多模型定性比较三联图（[outputs/figures/h16_comparison_v2/](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/h16_comparison_v2/)）；
+  - 验证了课程式多步递进与推前机制对极端长跨度训练收敛的决定性保障作用。
+- **论文级详细数据与表格**：
+  完整 LaTeX 表格与物理解析详见 [docs/MANUSCRIPT_RESULTS.md](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/MANUSCRIPT_RESULTS.md)。
