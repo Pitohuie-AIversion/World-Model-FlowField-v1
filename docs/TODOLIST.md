@@ -2,8 +2,8 @@
 
 > **项目名称**：World-Model-FlowField-v1  
 > **基准数据集**：The Well `shear_flow` (2D 不可压缩剪切流 + 被动示踪标量)  
-> **计算环境**：NVIDIA vGPU-32GB × 2 (CUDA 13.0, PyTorch 2.10.0+cu128)  
-> **工程测试基线**：全套自动化测试套件通过（247 项用例收集/回归测试全部绿灯通过，含协议契约、实验身份治理、编译兼容性与时序对齐测试）
+> **计算环境**：NVIDIA vGPU-32GB × 2 (Ada Lovelace AD103 / RTX 4080 32G, CUDA 13.0, PyTorch 2.10.0+cu128，详见 [HARDWARE_ENVIRONMENT.md](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/HARDWARE_ENVIRONMENT.md))  
+> **工程测试基线**：全套自动化测试套件通过（256 项用例收集/回归测试全部绿灯通过，含协议契约、实验身份治理、H12 扩展契约、编译兼容性与时序对齐测试）
 
 ---
 
