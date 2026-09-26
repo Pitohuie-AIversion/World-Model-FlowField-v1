@@ -3,7 +3,8 @@
 Trains ONLY the conditional VarianceHead2D on top of a strictly frozen D0 LatentForecaster.
 Governance Contract:
 1. Strict pre-flight identity verification (D0 SHA-256, G0 stats SHA-256 verified against audit record,
-   split_hash, normalizer_hash). Rejects missing D0 binding in G0 stats.
+   split_hash, normalizer_hash). Rejects missing D0 binding in G0 stats, and fails closed if
+   the audit verification record is missing.
 2. Parameter freeze: encoder, decoder, and Transformer backbone are frozen (requires_grad=False).
 3. Optimizer: Adam updates exclusively VarianceHead2D parameters (requires_grad=True).
 4. G0 alignment: Variance head is initialized with G0 second-moment biases and zero weights.
@@ -12,11 +13,15 @@ Governance Contract:
    and saves g0_baseline_initialization.pt.
 6. Fail-closed on non-finite values: Empty validation dataloader raises ValueError. Any non-finite
    loss, prediction, variance, or gradient fails closed immediately.
-7. Artifact isolation: Smoke tests and formal runs use distinct directory paths. Reusing an existing
-   output directory without --overwrite fails closed (FileExistsError).
+7. Safe artifact isolation and overwrite: Smoke tests and formal runs use distinct directory paths.
+   Existing artifacts are checked early, but never removed or archived until pre-flight, model build,
+   and dataloaders are completely verified. Overwritten artifacts are safely backed up.
 8. Model selection & no-improvement handling: Best checkpoint chosen exclusively on validation NLL.
    If no training epoch beats Epoch 0 G0 baseline, outcome is recorded as NO_IMPROVEMENT_OVER_G0
    and no spurious best_g1_variance_head.pt is written.
+9. Deterministic seeding: Random seeds control Python, NumPy, PyTorch CPU/GPU, and DataLoader samplers.
+10. Exact window accounting: Validation accounting accumulates actual batch sizes (windows_evaluated),
+    accurately tracking tail batches.
 """
 
 from datetime import datetime, timezone
@@ -25,10 +30,12 @@ import json
 import math
 import os
 from pathlib import Path
+import random
 import shutil
 import sys
 from typing import Dict, Any, Tuple, Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -68,6 +75,8 @@ def verify_phase2_preflight_contract(
 ) -> Tuple[Dict[str, Any], Dict[str, Any], FieldNormalizer, str, str, str, str]:
     """Verify cryptographic bindings across D0 checkpoint, G0 stats, normalizer, split, and audit record.
 
+    Fails closed if trusted expected hash or audit record is missing.
+
     Returns:
         (ckpt_data, stats_data, normalizer, d0_sha256, stats_sha256, runtime_split_hash, runtime_norm_hash)
     """
@@ -84,14 +93,18 @@ def verify_phase2_preflight_contract(
     with open(stats_path, "r") as f:
         stats_data = json.load(f)
 
-    # Cryptographic binding of G0 stats identity against frozen audit record
+    # Cryptographic binding of G0 stats identity against frozen audit record (fail-closed)
     if expected_stats_sha256 is not None:
         if stats_sha256 != expected_stats_sha256:
             raise ValueError(
                 f"G0 stats SHA-256 mismatch against explicit expectation!\n"
                 f"Expected: {expected_stats_sha256}\nActual:   {stats_sha256}"
             )
-    elif verification_record_path and os.path.exists(verification_record_path):
+    elif verification_record_path is not None:
+        if not os.path.isfile(verification_record_path):
+            raise FileNotFoundError(
+                f"Audit verification record not found: {verification_record_path}"
+            )
         with open(verification_record_path, "r") as f:
             v_record = json.load(f)
         record_stats_sha = v_record.get("stats_file", {}).get("sha256")
@@ -102,6 +115,10 @@ def verify_phase2_preflight_contract(
                 f"G0 stats SHA-256 mismatch against verified audit record!\n"
                 f"Expected: {record_stats_sha}\nActual:   {stats_sha256}"
             )
+    else:
+        raise ValueError(
+            "A trusted expected G0 hash or audit verification record path is required. Fails closed."
+        )
 
     # 3. Normalizer file
     if not os.path.exists(normalizer_path):
@@ -260,6 +277,7 @@ def evaluate_variance_nll(
     """Evaluate one-step Gaussian NLL and variance statistics on a dataloader.
 
     Fails closed on empty dataloader or non-finite values.
+    Accurately tracks actual windows evaluated across tail batches.
     """
     forecaster.eval()
     total_loss = 0.0
@@ -269,6 +287,7 @@ def evaluate_variance_nll(
     var_sum = 0.0
     non_finite_count = 0
     batches_evaluated = 0
+    windows_evaluated = 0
 
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataloader):
@@ -280,6 +299,9 @@ def evaluate_variance_nll(
             q_next = batch["future"][:, 0:1].to(device)  # (B, 1, 4, Ny, Nx)
             re = batch["re"].to(device)
             sc = batch["sc"].to(device)
+
+            b_windows = q_hist.shape[0]
+            windows_evaluated += b_windows
 
             mu, var = forecaster.predict_distribution_single_step(q_hist, re=re, sc=sc)
             target_z = forecaster.encoder(q_next)
@@ -338,6 +360,7 @@ def evaluate_variance_nll(
         "max_variance": float(max_var) if max_var != float("-inf") else float("nan"),
         "non_finite_batches": non_finite_count,
         "batches_evaluated": batches_evaluated,
+        "windows_evaluated": windows_evaluated,
         "tokens_evaluated": total_tokens,
         "is_valid": is_valid,
     }
@@ -361,6 +384,8 @@ def train_prob_latent_variance(
     smoke_test: bool = False,
     overwrite: bool = False,
     verification_record_path: Optional[str] = "outputs/normalization/latent_audit_verification_record.json",
+    expected_stats_sha256: Optional[str] = None,
+    seed: int = 42,
 ) -> Dict[str, Any]:
     """Execute complete Phase 2 variance head training workflow."""
     if device is None:
@@ -372,13 +397,22 @@ def train_prob_latent_variance(
     print(f"ProbLatent-R1 Phase 2: Latent Variance Head Training [{run_mode.upper()}]")
     print("=================================================================")
     print(f"Target device:     {device}")
+    print(f"Random seed:       {seed}")
     print(f"D0 checkpoint:     {d0_checkpoint}")
     print(f"G0 stats file:     {stats_path}")
     print(f"Normalizer:        {normalizer_path}")
     print(f"Split file:        {split_file}")
     print(f"Output directory:  {output_dir}")
 
-    # Output directory collision and reuse check
+    # Set deterministic random seed across frameworks
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+    # 1. Output directory collision check (defer actual archive/cleanup until pre-flight succeeds)
+    existing_artifacts = []
     if os.path.exists(output_dir):
         existing_artifacts = [
             f for f in ["best_g1_variance_head.pt", "variance_training_history.json", "g0_baseline_initialization.pt"]
@@ -389,13 +423,8 @@ def train_prob_latent_variance(
                 f"Output directory '{output_dir}' already contains artifacts from a prior run: {existing_artifacts}. "
                 f"Use a different output_dir or pass overwrite=True."
             )
-        if overwrite:
-            print(f"[Warning] Overwrite specified: clearing existing artifacts in {output_dir}")
-            for f in existing_artifacts:
-                os.remove(os.path.join(output_dir, f))
-    os.makedirs(output_dir, exist_ok=True)
 
-    # 1. Pre-flight verification
+    # 2. Pre-flight verification (must succeed BEFORE modifying or archiving any existing artifacts)
     (
         ckpt_data,
         stats_data,
@@ -410,6 +439,7 @@ def train_prob_latent_variance(
         normalizer_path=normalizer_path,
         split_file=split_file,
         verification_record_path=verification_record_path,
+        expected_stats_sha256=expected_stats_sha256,
     )
     print("\n[Contract Preflight Verified]")
     print(f"  D0 SHA-256:        {d0_sha256}")
@@ -417,7 +447,7 @@ def train_prob_latent_variance(
     print(f"  Split hash:        {runtime_split_hash}")
     print(f"  Normalizer hash:   {runtime_norm_hash}")
 
-    # 2. Build model and freeze D0
+    # 3. Build model and freeze D0
     forecaster, effective_g0 = build_and_freeze_probabilistic_model(
         ckpt_data=ckpt_data,
         stats_data=stats_data,
@@ -428,7 +458,7 @@ def train_prob_latent_variance(
     print("  Representation & Transformer backbone frozen successfully.")
     print("  VarianceHead2D attached and initialized from G0 second moments.")
 
-    # 3. Create DataLoaders
+    # 4. Create DataLoaders
     train_loader, valid_loader, _, _ = create_flow_dataloaders(
         split_type="grouped",
         split_file=split_file,
@@ -443,14 +473,29 @@ def train_prob_latent_variance(
         num_workers=2,
         normalize=True,
         normalizer=normalizer,
+        seed=seed,
     )
     print(f"\n[DataLoaders Ready] Total dataset windows: Train={len(train_loader.dataset)}, Valid={len(valid_loader.dataset)}")
     if smoke_test:
         print(f"  Smoke test mode active: capping train batches to {max_train_batches}, val batches to {max_val_batches}.")
 
-    # 4. Rigorous G0 broadcast vs G1 initial element-wise check on actual input
+    # 5. Initialization verification complete -> now safe to prepare output directory and archive prior run
+    os.makedirs(output_dir, exist_ok=True)
+    if existing_artifacts and overwrite:
+        backup_dir = os.path.join(
+            output_dir,
+            f"backup_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        )
+        os.makedirs(backup_dir, exist_ok=True)
+        print(f"[Archive] Overwrite enabled: safely archiving {len(existing_artifacts)} existing artifacts to {backup_dir}")
+        for f in existing_artifacts:
+            src_f = os.path.join(output_dir, f)
+            shutil.move(src_f, os.path.join(backup_dir, f))
+
+    # 6. Rigorous G0 broadcast vs G1 initial element-wise check on actual input
     forecaster.eval()
     first_val_batch = next(iter(valid_loader))
+    init_check_val_windows = int(first_val_batch["history"].shape[0])
     with torch.no_grad():
         _, init_val_var = forecaster.predict_distribution_single_step(
             first_val_batch["history"].to(device),
@@ -466,14 +511,14 @@ def train_prob_latent_variance(
             f"G1 initial variance diverges from effective G0 variance! Max error: {max_elem_diff:.8e}"
         )
 
-    # 5. Strict Optimizer Setup (VarianceHead2D only)
+    # 7. Strict Optimizer Setup (VarianceHead2D only)
     optimizer = torch.optim.Adam(
         forecaster.transformer.variance_head.parameters(),
         lr=lr,
         weight_decay=weight_decay,
     )
 
-    # 6. Epoch 0 Baseline Evaluation and Checkpoint Saving
+    # 8. Epoch 0 Baseline Evaluation and Checkpoint Saving
     print("\n--- Evaluating Epoch 0 (G0 Baseline on Validation Set) ---")
     epoch0_metrics = evaluate_variance_nll(
         forecaster=forecaster,
@@ -503,6 +548,7 @@ def train_prob_latent_variance(
                     "normalizer_hash": runtime_norm_hash,
                 },
                 "run_mode": run_mode,
+                "seed": seed,
                 "epoch": 0,
                 "val_nll": epoch0_metrics["nll"],
                 "saved_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -512,7 +558,7 @@ def train_prob_latent_variance(
     )
     print(f"  --> Saved G0 baseline initialization state to {g0_baseline_path}")
 
-    # 7. Training Loop
+    # 9. Training Loop
     history = []
     best_val_nll = epoch0_metrics["nll"]
     best_epoch = 0
@@ -581,7 +627,7 @@ def train_prob_latent_variance(
             max_batches=max_val_batches,
             fail_on_non_finite=True,
         )
-        total_val_windows_processed += val_metrics["batches_evaluated"] * batch_size
+        total_val_windows_processed += val_metrics["windows_evaluated"]
 
         epoch_record = {
             "epoch": epoch,
@@ -592,6 +638,7 @@ def train_prob_latent_variance(
             "val_min_variance": val_metrics["min_variance"],
             "val_max_variance": val_metrics["max_variance"],
             "val_batches_evaluated": val_metrics["batches_evaluated"],
+            "val_windows_evaluated": val_metrics["windows_evaluated"],
             "val_is_valid": val_metrics["is_valid"],
         }
         history.append(epoch_record)
@@ -620,6 +667,7 @@ def train_prob_latent_variance(
                     "normalizer_hash": runtime_norm_hash,
                 },
                 "run_mode": run_mode,
+                "seed": seed,
                 "best_epoch": best_epoch,
                 "best_val_nll": best_val_nll,
                 "baseline_g0_nll": epoch0_metrics["nll"],
@@ -637,7 +685,7 @@ def train_prob_latent_variance(
             )
             print(f"  --> Saved new best checkpoint to {best_ckpt_path} (Val NLL: {best_val_nll:.6f})")
 
-    # 8. Final Report Formulation
+    # 10. Final Report Formulation
     if best_epoch > 0 and selected_ckpt_path is not None:
         training_outcome = "IMPROVEMENT_FOUND"
         training_status = "PHASE2_VARIANCE_TRAINING_COMPLETE"
@@ -652,6 +700,7 @@ def train_prob_latent_variance(
         "status": training_status,
         "outcome": training_outcome,
         "run_mode": run_mode,
+        "seed": seed,
         "d0_sha256": d0_sha256,
         "stats_sha256": stats_sha256,
         "runtime_split_hash": runtime_split_hash,
@@ -662,6 +711,7 @@ def train_prob_latent_variance(
         "selected_checkpoint_path": selected_ckpt_path,
         "training_configuration": {
             "epochs": epochs,
+            "seed": seed,
             "lr": lr,
             "weight_decay": weight_decay,
             "batch_size": batch_size,
@@ -670,6 +720,12 @@ def train_prob_latent_variance(
             "max_val_batches": max_val_batches,
             "total_train_windows_processed": total_train_windows_processed,
             "total_val_windows_processed": total_val_windows_processed,
+            "training_epochs_val_windows_processed": total_val_windows_processed,
+            "init_check_val_windows": init_check_val_windows,
+            "epoch_0_val_windows": epoch0_metrics["windows_evaluated"],
+            "grand_total_val_windows_processed": (
+                init_check_val_windows + epoch0_metrics["windows_evaluated"] + total_val_windows_processed
+            ),
         },
         "history": history,
     }
@@ -709,6 +765,12 @@ def main():
         help="Path to dataset split JSON.",
     )
     parser.add_argument(
+        "--verification_record_path",
+        type=str,
+        default="outputs/normalization/latent_audit_verification_record.json",
+        help="Path to immutable audit verification record JSON.",
+    )
+    parser.add_argument(
         "--data_root",
         type=str,
         default="/root/autodl-tmp/datasets/shear_flow",
@@ -724,7 +786,7 @@ def main():
         "--seed",
         type=int,
         default=42,
-        help="Random seed for tracking and directory organization.",
+        help="Random seed for tracking, initialization, and directory organization.",
     )
     parser.add_argument(
         "--epochs",
@@ -758,7 +820,7 @@ def main():
     parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="Overwrite existing output directory if it contains previous artifacts.",
+        help="Safely overwrite existing output directory by archiving previous artifacts.",
     )
     parser.add_argument(
         "--max_train_batches",
@@ -802,6 +864,8 @@ def main():
         max_val_batches=max_val_batches,
         smoke_test=args.smoke_test,
         overwrite=args.overwrite,
+        verification_record_path=args.verification_record_path,
+        seed=args.seed,
     )
 
 

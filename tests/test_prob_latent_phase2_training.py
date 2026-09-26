@@ -112,9 +112,18 @@ class TestEvaluateVarianceNLLFailureModes:
         assert math.isnan(metrics["nll"])
         assert metrics["non_finite_batches"] == 1
 
+    def test_evaluate_variance_nll_exact_window_count_with_tail_batch(self):
+        model = MockForecaster()
+        # 7 samples with batch_size=4 -> Batch 1: 4 samples, Batch 2: 3 samples
+        ds = DummySyntheticDataset(num_samples=7)
+        loader = DataLoader(ds, batch_size=4)
+        metrics = evaluate_variance_nll(model, loader, device=torch.device("cpu"))
+        assert metrics["batches_evaluated"] == 2
+        assert metrics["windows_evaluated"] == 7  # strictly 7, not 2 * 4 = 8
+
 
 class TestDirectoryReuseAndOutcomeGovernance:
-    """Verify artifact isolation and no-improvement outcome tracking."""
+    """Verify artifact isolation, safe overwrite order, and no-improvement outcome tracking."""
 
     def test_existing_artifacts_fail_closed_without_overwrite(self, tmp_path):
         out_dir = tmp_path / "run_artifacts"
@@ -122,7 +131,6 @@ class TestDirectoryReuseAndOutcomeGovernance:
         # Create a lingering previous artifact
         (out_dir / "best_g1_variance_head.pt").write_text("dummy")
 
-        # Mock preflight and model build by catching FileExistsError early
         with pytest.raises(FileExistsError, match="already contains artifacts"):
             train_prob_latent_variance(
                 d0_checkpoint="dummy",
@@ -132,6 +140,202 @@ class TestDirectoryReuseAndOutcomeGovernance:
                 data_root="dummy",
                 output_dir=str(out_dir),
                 overwrite=False,
+            )
+
+    def test_no_improvement_over_g0_records_baseline_and_does_not_write_best_g1(self, tmp_path, monkeypatch):
+        from scripts import train_prob_latent_variance as train_mod
+
+        out_dir = tmp_path / "test_no_improvement_run"
+        ckpt_file = tmp_path / "d0.pt"
+        torch.save({}, ckpt_file)
+        stats_file = tmp_path / "stats.json"
+        with open(stats_file, "w") as f:
+            json.dump({
+                "d0_checkpoint": {"sha256": "dummy"},
+                "statistics": {"channel_residual_second_moment_g0": [0.5] * 64},
+                "data_protocol": {"split_hash": "dummy", "normalizer_hash": "dummy"},
+            }, f)
+        norm_file = tmp_path / "norm.pt"
+        torch.save({}, norm_file)
+        split_file = tmp_path / "split.json"
+        with open(split_file, "w") as f:
+            json.dump({}, f)
+
+        monkeypatch.setattr(
+            train_mod,
+            "verify_phase2_preflight_contract",
+            lambda **kwargs: ({}, {}, None, "dummy_d0_sha", "dummy_stats_sha", "dummy_split", "dummy_norm"),
+        )
+
+        class MiniEncoder(nn.Module):
+            def forward(self, q):
+                b = q.shape[0]
+                return torch.zeros(b, 1, 64, 16, 16)
+
+        class MiniModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.encoder = MiniEncoder()
+                self.decoder = nn.Identity()
+                self.transformer = nn.Module()
+                self.transformer.variance_head = nn.Linear(8, 8)
+            def predict_distribution_single_step(self, q_hist, re=None, sc=None):
+                b = q_hist.shape[0]
+                dummy = self.transformer.variance_head.weight.sum() * 0.0
+                mu = torch.zeros(b, 1, 64, 16, 16)
+                var = torch.ones(b, 1, 64, 16, 16) + dummy
+                return mu, var
+
+        monkeypatch.setattr(
+            train_mod,
+            "build_and_freeze_probabilistic_model",
+            lambda **kwargs: (MiniModel(), torch.ones(64)),
+        )
+
+        dummy_loader = DataLoader(DummySyntheticDataset(num_samples=2), batch_size=2)
+        monkeypatch.setattr(
+            train_mod,
+            "create_flow_dataloaders",
+            lambda **kwargs: (dummy_loader, dummy_loader, dummy_loader, None),
+        )
+
+        eval_call_count = [0]
+        def mock_eval(**kwargs):
+            eval_call_count[0] += 1
+            if eval_call_count[0] == 1:
+                # Epoch 0: G0 baseline is good (NLL = 0.0)
+                return {
+                    "nll": 0.0,
+                    "mean_variance": 0.5,
+                    "min_variance": 0.5,
+                    "max_variance": 0.5,
+                    "non_finite_batches": 0,
+                    "batches_evaluated": 1,
+                    "windows_evaluated": 2,
+                    "tokens_evaluated": 2048,
+                    "is_valid": True,
+                }
+            else:
+                # Epoch 1: worse than G0 (NLL = 2.0)
+                return {
+                    "nll": 2.0,
+                    "mean_variance": 0.5,
+                    "min_variance": 0.5,
+                    "max_variance": 0.5,
+                    "non_finite_batches": 0,
+                    "batches_evaluated": 1,
+                    "windows_evaluated": 2,
+                    "tokens_evaluated": 2048,
+                    "is_valid": True,
+                }
+
+        monkeypatch.setattr(train_mod, "evaluate_variance_nll", mock_eval)
+
+        summary = train_mod.train_prob_latent_variance(
+            d0_checkpoint=str(ckpt_file),
+            stats_path=str(stats_file),
+            normalizer_path=str(norm_file),
+            split_file=str(split_file),
+            data_root="dummy",
+            output_dir=str(out_dir),
+            epochs=1,
+            max_train_batches=1,
+            max_val_batches=1,
+            device=torch.device("cpu"),
+        )
+
+        assert summary["best_epoch"] == 0
+        assert summary["outcome"] == "NO_IMPROVEMENT_OVER_G0"
+        assert summary["status"] == "PHASE2_VARIANCE_TRAINING_NO_IMPROVEMENT"
+        assert summary["selected_checkpoint_path"].endswith("g0_baseline_initialization.pt")
+        assert summary["seed"] == 42
+        assert summary["training_configuration"]["seed"] == 42
+        assert summary["training_configuration"]["init_check_val_windows"] == 2
+        assert summary["training_configuration"]["epoch_0_val_windows"] == 2
+        assert summary["training_configuration"]["training_epochs_val_windows_processed"] == 2
+        assert summary["training_configuration"]["grand_total_val_windows_processed"] == 6
+        # best_g1_variance_head.pt MUST NOT be created
+        assert not (out_dir / "best_g1_variance_head.pt").exists()
+        # g0_baseline_initialization.pt MUST exist
+        assert (out_dir / "g0_baseline_initialization.pt").exists()
+
+        # Check saved history JSON file
+        history_path = out_dir / "variance_training_history.json"
+        assert history_path.exists()
+        with open(history_path, "r") as f:
+            h_data = json.load(f)
+        assert h_data["outcome"] == "NO_IMPROVEMENT_OVER_G0"
+        assert h_data["seed"] == 42
+        assert h_data["selected_checkpoint_path"].endswith("g0_baseline_initialization.pt")
+
+    def test_overwrite_preserves_old_artifacts_if_preflight_fails(self, tmp_path):
+        out_dir = tmp_path / "run_artifacts"
+        out_dir.mkdir(parents=True)
+        artifact_path = out_dir / "best_g1_variance_head.pt"
+        artifact_path.write_text("precious_prior_run_data")
+
+        # Calling with overwrite=True but invalid d0_checkpoint must fail in pre-flight
+        # WITHOUT deleting precious_prior_run_data
+        with pytest.raises(FileNotFoundError, match="D0 checkpoint not found"):
+            train_prob_latent_variance(
+                d0_checkpoint=str(tmp_path / "nonexistent_d0.pt"),
+                stats_path="dummy",
+                normalizer_path="dummy",
+                split_file="dummy",
+                data_root="dummy",
+                output_dir=str(out_dir),
+                overwrite=True,
+            )
+
+        # Artifact must still exist unharmed
+        assert artifact_path.exists()
+        assert artifact_path.read_text() == "precious_prior_run_data"
+
+    def test_preflight_fails_closed_when_record_missing_and_no_explicit_hash(self, tmp_path):
+        from src.utils.provenance import compute_split_hash_from_file, compute_normalizer_hash
+        from src.data.normalization import FieldNormalizer
+
+        split_file = tmp_path / "split.json"
+        with open(split_file, "w") as f:
+            json.dump({"train": []}, f)
+        real_split_hash = compute_split_hash_from_file(str(split_file))
+
+        norm_file = tmp_path / "norm.pt"
+        torch.save({"mean": torch.zeros(4), "std": torch.ones(4)}, norm_file)
+        norm_obj = FieldNormalizer()
+        norm_obj.load_state_dict(torch.load(norm_file, weights_only=True))
+        real_norm_hash = compute_normalizer_hash(norm_obj)
+
+        ckpt_file = tmp_path / "d0.pt"
+        torch.save({"split_hash": real_split_hash, "normalizer_hash": real_norm_hash}, ckpt_file)
+
+        stats_file = tmp_path / "stats.json"
+        with open(stats_file, "w") as f:
+            json.dump({
+                "d0_checkpoint": {"sha256": "dummy"},
+                "data_protocol": {"split_hash": real_split_hash, "normalizer_hash": real_norm_hash},
+            }, f)
+
+        # 1. Non-existent verification_record_path raises FileNotFoundError
+        with pytest.raises(FileNotFoundError, match="Audit verification record not found"):
+            verify_phase2_preflight_contract(
+                d0_checkpoint_path=str(ckpt_file),
+                stats_path=str(stats_file),
+                normalizer_path=str(norm_file),
+                split_file=str(split_file),
+                verification_record_path=str(tmp_path / "nonexistent_record.json"),
+                expected_stats_sha256=None,
+            )
+
+        # 2. Both verification_record_path=None and expected_stats_sha256=None raises ValueError
+        with pytest.raises(ValueError, match="A trusted expected G0 hash or audit verification record path is required"):
+            verify_phase2_preflight_contract(
+                d0_checkpoint_path=str(ckpt_file),
+                stats_path=str(stats_file),
+                normalizer_path=str(norm_file),
+                split_file=str(split_file),
+                verification_record_path=None,
+                expected_stats_sha256=None,
             )
 
     def test_preflight_fails_closed_when_stats_missing_d0_sha(self, tmp_path):
@@ -161,13 +365,20 @@ class TestDirectoryReuseAndOutcomeGovernance:
                 "data_protocol": {"split_hash": real_split_hash, "normalizer_hash": real_norm_hash},
             }, f)
 
+        # Provide a matching record so it proceeds to check d0_checkpoint.sha256
+        from src.utils.provenance import compute_file_sha256
+        stats_sha = compute_file_sha256(stats_file)
+        record_file = tmp_path / "record.json"
+        with open(record_file, "w") as f:
+            json.dump({"stats_file": {"sha256": stats_sha}}, f)
+
         with pytest.raises(ValueError, match="missing required 'd0_checkpoint.sha256'"):
             verify_phase2_preflight_contract(
                 d0_checkpoint_path=str(ckpt_file),
                 stats_path=str(stats_file),
                 normalizer_path=str(norm_file),
                 split_file=str(split_file),
-                verification_record_path=None,
+                verification_record_path=str(record_file),
             )
 
     def test_preflight_fails_closed_when_stats_sha_mismatches_record(self, tmp_path):
@@ -195,6 +406,7 @@ class TestDirectoryReuseAndOutcomeGovernance:
                 split_file=str(split_file),
                 verification_record_path=str(record_file),
             )
+
 
 
 D0_PATH = "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H12/latent_transformer/best_long_vrmse.pt"
