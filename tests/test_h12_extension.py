@@ -254,9 +254,17 @@ class TestH12BenchmarkEvaluationIntegration:
 class TestH12RunnerGovernanceAndRejection:
     """Verify H12 runner startup assertions, Beff enforcement, horizon guards, and git status checks."""
 
-    def test_default_dual_gpu_beff8_allows_preflight(self, monkeypatch):
+    def test_default_dual_gpu_beff8_allows_preflight(self, monkeypatch, tmp_path):
         """Default dual-GPU configuration results in Beff=8 and allows preflight in dry run."""
-        from scripts.run_h12_extension import main
+        from scripts.run_h12_extension import main, resolve_parent_checkpoint
+        try:
+            resolve_parent_checkpoint()
+        except FileNotFoundError:
+            mock_ckpt = tmp_path / "mock_h8.pt"
+            mock_ckpt.touch()
+            monkeypatch.setattr("scripts.run_h12_extension.resolve_parent_checkpoint", lambda *args, **kwargs: mock_ckpt)
+            monkeypatch.setattr("scripts.run_h12_extension.validate_parent_for_h12", lambda *args, **kwargs: (True, "mock_sha", {"horizon": 8}))
+
         monkeypatch.setattr("sys.argv", ["run_h12_extension.py", "--dry_run", "--gpu_ids", "0,1"])
         ret = main()
         assert ret == 0
@@ -290,10 +298,18 @@ class TestH12RunnerGovernanceAndRejection:
         with pytest.raises(ValueError, match="Expected init horizon contract violation"):
             main()
 
-    def test_dirty_git_rejects_formal_run_without_starting_subprocess(self, monkeypatch):
+    def test_dirty_git_rejects_formal_run_without_starting_subprocess(self, monkeypatch, tmp_path):
         """In non-dry-run mode, if git tree is dirty, runner must reject execution without spawning subprocess."""
         import subprocess
-        from scripts.run_h12_extension import main
+        from scripts.run_h12_extension import main, resolve_parent_checkpoint
+
+        try:
+            resolve_parent_checkpoint()
+        except FileNotFoundError:
+            mock_ckpt = tmp_path / "mock_h8.pt"
+            mock_ckpt.touch()
+            monkeypatch.setattr("scripts.run_h12_extension.resolve_parent_checkpoint", lambda *args, **kwargs: mock_ckpt)
+            monkeypatch.setattr("scripts.run_h12_extension.validate_parent_for_h12", lambda *args, **kwargs: (True, "mock_sha", {"horizon": 8}))
 
         # Mock is_git_dirty to return True
         monkeypatch.setattr("scripts.run_h12_extension.is_git_dirty", lambda root=None: True)

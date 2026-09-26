@@ -26,6 +26,11 @@ from src.models.positional_embedding import (
     get_2d_sincos_position_embedding,
     clear_pos_embed_cache,
 )
+from src.models.probabilistic_latent_dynamics import (
+    VarianceHead2D,
+    sample_next_latent,
+    gaussian_nll_latent_loss,
+)
 
 __all__ = [
     "Encoder2D",
@@ -45,4 +50,7 @@ __all__ = [
     "build_2d_sincos_position_embedding",
     "get_2d_sincos_position_embedding",
     "clear_pos_embed_cache",
+    "VarianceHead2D",
+    "sample_next_latent",
+    "gaussian_nll_latent_loss",
 ]

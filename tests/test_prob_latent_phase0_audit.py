@@ -242,3 +242,238 @@ class TestFullD0AtomicParityVerification:
         assert enc_match_c is True
         assert dec_match_c is False
         assert max_diff_c > 0.4
+
+
+class TestProductionStatisticsFunctionAudit:
+    """Directly invoke production compute_latent_statistics_and_diagnostics to audit identities and tail batches."""
+
+    def test_production_statistics_channel_identities_and_tail_batch_weighting(self):
+        from scripts.compute_latent_statistics import compute_latent_statistics_and_diagnostics
+
+        class MockEncoder(nn.Module):
+            def forward(self, q):
+                # q: (B, L, 4, Ny, Nx) or (B, 1, 4, Ny, Nx)
+                # Map to constant latent for testing
+                b = q.shape[0]
+                l = q.shape[1]
+                # Return z with value 3.0
+                return torch.full((b, l, 64, 4, 4), 3.0, dtype=torch.float32)
+
+        class MockTransformer(nn.Module):
+            def forward(self, z_hist, re=None, sc=None):
+                # z_hist: (B, L, 64, 4, 4)
+                # Predict mu with value 1.0 (so residual r = 3.0 - 1.0 = 2.0)
+                b = z_hist.shape[0]
+                return torch.full((b, 1, 64, 4, 4), 1.0, dtype=torch.float32)
+
+        class MockDecoder(nn.Module):
+            def forward(self, z):
+                b = z.shape[0]
+                return torch.zeros((b, 1, 4, 8, 8), dtype=torch.float32)
+
+        class MockForecaster(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.encoder = MockEncoder()
+                self.transformer = MockTransformer()
+                self.decoder = MockDecoder()
+
+        class MockNormalizer:
+            def denormalize(self, x):
+                return x
+
+        forecaster = MockForecaster()
+        normalizer = MockNormalizer()
+
+        # Create two batches with different batch sizes: B1=6, B2=2 (tail batch)
+        # In batch 2, we perturb the latent so residual is 4.0 instead of 2.0
+        class VaryingMockTransformer(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.call_count = 0
+
+            def forward(self, z_hist, re=None, sc=None):
+                b = z_hist.shape[0]
+                self.call_count += 1
+                # 1st batch: mu = 1.0 -> r = 3.0 - 1.0 = 2.0
+                # 2nd batch: mu = -1.0 -> r = 3.0 - (-1.0) = 4.0
+                val = 1.0 if self.call_count % 2 == 1 else -1.0
+                return torch.full((b, 1, 64, 4, 4), val, dtype=torch.float32)
+
+        forecaster.transformer = VaryingMockTransformer()
+
+        batch1 = {
+            "history": torch.zeros((6, 4, 4, 8, 8)),
+            "future": torch.zeros((6, 1, 4, 8, 8)),
+            "re": torch.zeros((6, 1)),
+            "sc": torch.zeros((6, 1)),
+        }
+        batch2 = {
+            "history": torch.zeros((2, 4, 4, 8, 8)),
+            "future": torch.zeros((2, 1, 4, 8, 8)),
+            "re": torch.zeros((2, 1)),
+            "sc": torch.zeros((2, 1)),
+        }
+
+        mock_dataloader = [batch1, batch2]
+
+        results = compute_latent_statistics_and_diagnostics(
+            forecaster=forecaster,
+            dataloader=mock_dataloader,
+            normalizer=normalizer,
+            device=torch.device("cpu"),
+        )
+
+        # Expected token-weighted statistics:
+        # B1=6, r=2.0; B2=2, r=4.0
+        # Tokens per batch: 6 * 16 = 96, 2 * 16 = 32. Total = 128 tokens per channel.
+        # Expected mean = (6 * 2.0 + 2 * 4.0) / 8 = (12 + 8) / 8 = 2.5
+        # Expected second moment = (6 * 2.0^2 + 2 * 4.0^2) / 8 = (24 + 32) / 8 = 7.0
+        # Expected centered variance = 7.0 - 2.5^2 = 7.0 - 6.25 = 0.75
+        expected_mean = 2.5
+        expected_m2 = 7.0
+        expected_var = 0.75
+
+        means = results["channel_residual_mean"]
+        second_moments = results["channel_residual_second_moment_g0"]
+        vars_c = results["channel_residual_centered_variance"]
+        summary = results["summary"]
+
+        assert results["sample_count"] == 8
+        assert results["token_count_per_channel"] == 128
+        assert len(means) == 64
+
+        # 1. Channel statistical identity: max_c |m_2,c - v_c - m_c^2| < 1e-14
+        for m, m2, v in zip(means, second_moments, vars_c):
+            assert abs(m - expected_mean) < 1e-7
+            assert abs(m2 - expected_m2) < 1e-7
+            assert abs(v - expected_var) < 1e-7
+            assert abs(m2 - v - m ** 2) < 1e-14
+
+        # 2. Summary identities
+        assert abs(summary["mean_channel_centered_variance"] + summary["mean_channel_squared_bias"] - summary["mean_channel_second_moment"]) < 1e-14
+        assert abs(summary["pooled_residual_variance"] - (summary["mean_channel_second_moment"] - summary["pooled_residual_mean"] ** 2)) < 1e-14
+        assert abs(summary["mean_channel_centered_variance"] - expected_var) < 1e-7
+        assert abs(summary["pooled_residual_variance"] - expected_var) < 1e-7
+
+
+class TestDataProtocolFingerprintVerificationFailClosed:
+    """Verify that compute_latent_statistics fails closed when runtime split/normalizer mismatches checkpoint."""
+
+    def test_split_hash_mismatch_fails_closed(self, tmp_path):
+        import json
+        from scripts.compute_latent_statistics import verify_data_protocol_against_checkpoint
+
+        split_file = tmp_path / "custom_split.json"
+        with open(split_file, "w") as f:
+            json.dump({"train": [], "valid": []}, f)
+
+        # Checkpoint requires a specific different split hash
+        ckpt_data = {
+            "split_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "normalizer_hash": "NONE",
+        }
+
+        with pytest.raises(ValueError, match="Split hash contract violation"):
+            verify_data_protocol_against_checkpoint(
+                ckpt_data=ckpt_data,
+                split_file=str(split_file),
+                normalizer=None,
+            )
+
+    def test_normalizer_hash_mismatch_fails_closed(self, tmp_path):
+        import json
+        from scripts.compute_latent_statistics import verify_data_protocol_against_checkpoint
+        from src.utils.provenance import compute_split_hash_from_file
+
+        split_file = tmp_path / "valid_split.json"
+        with open(split_file, "w") as f:
+            json.dump({"train": [{"traj_idx": 0}], "valid": []}, f)
+
+        real_split_hash = compute_split_hash_from_file(str(split_file))
+
+        # Split matches, but normalizer hash mismatches
+        ckpt_data = {
+            "split_hash": real_split_hash,
+            "normalizer_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }
+
+        with pytest.raises(ValueError, match="Normalizer hash contract violation"):
+            verify_data_protocol_against_checkpoint(
+                ckpt_data=ckpt_data,
+                split_file=str(split_file),
+                normalizer=None,  # normalizer=None produces 'NONE'
+            )
+
+    def test_matching_protocol_passes_verification(self, tmp_path):
+        import json
+        from scripts.compute_latent_statistics import verify_data_protocol_against_checkpoint
+        from src.utils.provenance import compute_split_hash_from_file
+
+        split_file = tmp_path / "matching_split.json"
+        with open(split_file, "w") as f:
+            json.dump({"train": [{"traj_idx": 0}], "valid": []}, f)
+
+        real_split_hash = compute_split_hash_from_file(str(split_file))
+
+        ckpt_data = {
+            "split_hash": real_split_hash,
+            "normalizer_hash": "NONE",
+        }
+
+        s_hash, n_hash = verify_data_protocol_against_checkpoint(
+            ckpt_data=ckpt_data,
+            split_file=str(split_file),
+            normalizer=None,
+        )
+        assert s_hash == real_split_hash
+        assert n_hash == "NONE"
+
+
+class TestArchivedLatentResidualStatsIntegrity:
+    """Verify the archived latent_residual_stats.json satisfies all mathematical and metadata contracts."""
+
+    def test_archived_stats_satisfy_all_invariants(self):
+        import json
+        from pathlib import Path
+
+        stats_path = Path("outputs/normalization/latent_residual_stats.json")
+        if not stats_path.exists():
+            pytest.skip("latent_residual_stats.json not yet generated on current machine")
+
+        with open(stats_path, "r") as f:
+            data = json.load(f)
+
+        stats = data["statistics"]
+        means = stats["channel_residual_mean"]
+        vars_c = stats["channel_residual_centered_variance"]
+        second_moments = stats["channel_residual_second_moment_g0"]
+        summary = stats["summary"]
+
+        assert len(means) == 64
+        assert len(vars_c) == 64
+        assert len(second_moments) == 64
+
+        # 1. 64-channel identity: |m2,c - vc - mc^2| < 1e-14
+        max_diff = max(abs(m2 - v - m ** 2) for m, m2, v in zip(means, second_moments, vars_c))
+        assert max_diff < 1e-14
+
+        # 2. Summary variance identity: mean_channel_centered_variance + mean_channel_squared_bias == mean_channel_second_moment
+        assert abs(summary["mean_channel_centered_variance"] + summary["mean_channel_squared_bias"] - summary["mean_channel_second_moment"]) < 1e-14
+
+        # 3. Pooled variance: pooled_residual_variance == mean_channel_second_moment - pooled_residual_mean^2
+        assert abs(summary["pooled_residual_variance"] - (summary["mean_channel_second_moment"] - summary["pooled_residual_mean"] ** 2)) < 1e-14
+
+        # 4. Numerical values match established benchmarks
+        assert summary["mean_channel_centered_variance"] == pytest.approx(0.21243567587842088, rel=1e-6)
+        assert summary["mean_channel_squared_bias"] == pytest.approx(0.29603029999300406, rel=1e-6)
+        assert summary["mean_channel_second_moment"] == pytest.approx(0.508465975871425, rel=1e-6)
+        assert summary["pooled_residual_mean"] == pytest.approx(-0.09137061342520868, rel=1e-6)
+        assert summary["pooled_residual_variance"] == pytest.approx(0.500117386873726, rel=1e-6)
+
+        # 5. Dataset coverage
+        coverage = data["data_protocol"]["dataset_coverage"]
+        assert coverage["num_trajectories"] == 33
+        assert coverage["num_initial_condition_clusters"] == 27
+        assert coverage["num_windows"] == 825
+        assert coverage["stride"] == 8

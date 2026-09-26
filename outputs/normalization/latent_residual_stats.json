@@ -23,7 +23,16 @@
     "domain_size_xy": [
       1.0,
       2.0
-    ]
+    ],
+    "split_file": "outputs/splits/grouped_split.json",
+    "verified_against_checkpoint": true,
+    "dataset_coverage": {
+      "split_name": "train",
+      "num_trajectories": 33,
+      "num_initial_condition_clusters": 27,
+      "num_windows": 825,
+      "stride": 8
+    }
   },
   "statistics": {
     "sample_count": 825,
@@ -228,8 +237,13 @@
       0.2377637200127069
     ],
     "summary": {
-      "global_residual_mean": -0.09137061342520868,
+      "mean_channel_centered_variance": 0.21243567587842088,
+      "mean_channel_squared_bias": 0.29603029999300406,
+      "mean_channel_second_moment": 0.508465975871425,
+      "pooled_residual_mean": -0.09137061342520868,
+      "pooled_residual_variance": 0.500117386873726,
       "global_centered_variance": 0.21243567587842088,
+      "global_residual_mean": -0.09137061342520868,
       "global_second_moment_g0": 0.508465975871425,
       "min_channel_second_moment": 0.09385928502263584,
       "max_channel_second_moment": 3.226099720888263

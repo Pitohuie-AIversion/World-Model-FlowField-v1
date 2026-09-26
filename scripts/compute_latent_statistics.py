@@ -41,7 +41,14 @@ from src.utils.physics_contract import (
     SHEAR_FLOW_DOMAIN_SIZE_XY,
     SPATIAL_AXIS_CONTRACT,
 )
-from src.utils.provenance import compute_file_sha256, get_git_commit, is_git_dirty
+from src.utils.provenance import (
+    compute_file_sha256,
+    compute_normalizer_hash,
+    compute_split_hash_from_file,
+    get_git_commit,
+    hash_matches,
+    is_git_dirty,
+)
 
 
 def verify_representation_parity(
@@ -212,6 +219,12 @@ def compute_latent_statistics_and_diagnostics(
     second_moment_r = (sum_r2 / total_tokens_per_channel).tolist()
     var_r = [(m2 - m ** 2) for m, m2 in zip(mean_r, second_moment_r)]
 
+    mean_r_mean = float(sum(mean_r) / num_channels)
+    second_moment_mean = float(sum(second_moment_r) / num_channels)
+    var_r_mean = float(sum(var_r) / num_channels)
+    squared_bias_mean = float(sum(m ** 2 for m in mean_r) / num_channels)
+    pooled_variance = second_moment_mean - (mean_r_mean ** 2)
+
     mean_sensitivity = {
         f"scale_{scale}": float(sum(ratios) / len(ratios)) if ratios else 0.0
         for scale, ratios in sensitivity_ratios.items()
@@ -225,9 +238,15 @@ def compute_latent_statistics_and_diagnostics(
         "channel_residual_centered_variance": var_r,
         "channel_residual_second_moment_g0": second_moment_r,
         "summary": {
-            "global_residual_mean": float(sum(mean_r) / num_channels),
-            "global_centered_variance": float(sum(var_r) / num_channels),
-            "global_second_moment_g0": float(sum(second_moment_r) / num_channels),
+            "mean_channel_centered_variance": var_r_mean,
+            "mean_channel_squared_bias": squared_bias_mean,
+            "mean_channel_second_moment": second_moment_mean,
+            "pooled_residual_mean": mean_r_mean,
+            "pooled_residual_variance": pooled_variance,
+            # Backward-compatible legacy aliases (exact numerical values retained)
+            "global_centered_variance": var_r_mean,  # Legacy alias for mean_channel_centered_variance
+            "global_residual_mean": mean_r_mean,  # Legacy alias for pooled_residual_mean
+            "global_second_moment_g0": second_moment_mean,  # Legacy alias for mean_channel_second_moment
             "min_channel_second_moment": float(min(second_moment_r)),
             "max_channel_second_moment": float(max(second_moment_r)),
         },
@@ -238,6 +257,91 @@ def compute_latent_statistics_and_diagnostics(
             "latent_space_rms_error": float(latent_diff_error_sum / total_samples),
         },
         "decoder_local_amplification_around_mu": mean_sensitivity,
+    }
+
+
+def resolve_split_file(split_type: str, split_file: Optional[str] = None) -> str:
+    """Resolve path to split manifest JSON file."""
+    if split_file and os.path.exists(split_file):
+        return split_file
+    cand1 = f"outputs/splits/{split_type}_split.json"
+    cand2 = f"outputs/splits/{split_type}.json"
+    if os.path.exists(cand1):
+        return cand1
+    elif os.path.exists(cand2):
+        return cand2
+    return cand1
+
+
+def verify_data_protocol_against_checkpoint(
+    ckpt_data: Dict[str, Any],
+    split_file: str,
+    normalizer: Any,
+) -> Tuple[str, str]:
+    """Verify runtime split and normalizer cryptographic fingerprints against D0 contract.
+
+    Fails closed (raises ValueError) if runtime hashes do not match checkpoint contract.
+    """
+    if not os.path.exists(split_file):
+        raise FileNotFoundError(f"Runtime split manifest not found: {split_file}")
+
+    actual_split_hash = compute_split_hash_from_file(split_file)
+    actual_normalizer_hash = compute_normalizer_hash(normalizer)
+
+    expected_split_hash = (
+        ckpt_data.get("split_hash")
+        or ckpt_data.get("config", {}).get("split_hash")
+    )
+    expected_normalizer_hash = (
+        ckpt_data.get("normalizer_hash")
+        or ckpt_data.get("config", {}).get("normalizer_hash")
+    )
+
+    if expected_split_hash:
+        if not hash_matches(expected_split_hash, actual_split_hash, min_prefix_len=16):
+            raise ValueError(
+                f"Split hash contract violation: D0 checkpoint requires {expected_split_hash[:16]}..., "
+                f"but runtime split manifest '{split_file}' produced {actual_split_hash[:16]}... "
+                f"Refusing to generate latent statistics on mismatched data split."
+            )
+
+    if expected_normalizer_hash:
+        if not hash_matches(expected_normalizer_hash, actual_normalizer_hash, min_prefix_len=16):
+            raise ValueError(
+                f"Normalizer hash contract violation: D0 checkpoint requires {expected_normalizer_hash[:16]}..., "
+                f"but runtime normalizer produced {actual_normalizer_hash[:16]}... "
+                f"Refusing to generate latent statistics on mismatched normalizer."
+            )
+
+    return actual_split_hash, actual_normalizer_hash
+
+
+def extract_dataset_coverage(dataset: Any, split_name: str = "train", stride: int = 8) -> Dict[str, Any]:
+    """Extract formal dataset coverage metadata (trajectories, clusters, windows)."""
+    num_windows = len(dataset)
+    trajectories = getattr(dataset, "trajectories", None)
+    num_trajectories = None
+    num_clusters = None
+
+    if trajectories is not None and isinstance(trajectories, list):
+        num_trajectories = len(trajectories)
+        clusters = {
+            t.get("cluster_id")
+            for t in trajectories
+            if isinstance(t, dict) and "cluster_id" in t
+        }
+        if clusters:
+            num_clusters = len(clusters)
+    elif hasattr(dataset, "file_paths"):
+        fps = getattr(dataset, "file_paths", [])
+        num_trajectories = len(fps)
+
+    return {
+        "split_name": split_name,
+        "num_trajectories": num_trajectories,
+        "num_initial_condition_clusters": num_clusters,
+        "num_windows": num_windows,
+        "stride": stride,
     }
 
 
@@ -277,6 +381,12 @@ def main():
         help="Number of training batches to audit (0 for full training set, positive int for fixed subset).",
     )
     parser.add_argument(
+        "--split_file",
+        type=str,
+        default=None,
+        help="Optional explicit path to split manifest JSON.",
+    )
+    parser.add_argument(
         "--output_path",
         type=str,
         default="outputs/normalization/latent_residual_stats.json",
@@ -296,9 +406,13 @@ def main():
     print(f"  Decoder bit-wise match: {dec_match}")
     print(f"  Max absolute difference: {max_diff:.8e}")
 
+    split_file = resolve_split_file(args.split_type, args.split_file)
+    print(f"[Latent Audit] Resolved split file: {split_file}")
+
     train_loader, _, _, normalizer = create_flow_dataloaders(
         data_root=args.data_root,
         split_type=args.split_type,
+        split_file=split_file,
         history_length=4,
         horizon=1,
         batch_size=args.batch_size,
@@ -306,6 +420,19 @@ def main():
         downsample_factor=2,
         normalize=True,
         num_workers=0,
+    )
+
+    actual_split_hash, actual_normalizer_hash = verify_data_protocol_against_checkpoint(
+        ckpt_data=ckpt_data,
+        split_file=split_file,
+        normalizer=normalizer,
+    )
+    coverage = extract_dataset_coverage(train_loader.dataset, split_name="train", stride=8)
+    print(f"[Data Protocol Verified] Split hash: {actual_split_hash[:16]}... Normalizer hash: {actual_normalizer_hash[:16]}...")
+    print(
+        f"[Dataset Coverage] {coverage['num_trajectories']} trajectories, "
+        f"{coverage['num_initial_condition_clusters']} initial clusters, "
+        f"{coverage['num_windows']} windows."
     )
 
     stats = compute_latent_statistics_and_diagnostics(
@@ -334,8 +461,11 @@ def main():
         },
         "data_protocol": {
             "split_type": args.split_type,
-            "split_hash": ckpt_data.get("split_hash"),
-            "normalizer_hash": ckpt_data.get("normalizer_hash"),
+            "split_file": split_file,
+            "split_hash": actual_split_hash,
+            "normalizer_hash": actual_normalizer_hash,
+            "verified_against_checkpoint": True,
+            "dataset_coverage": coverage,
             "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
             "physics_protocol": PHYSICS_PROTOCOL,
             "domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),

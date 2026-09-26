@@ -156,14 +156,24 @@ class LatentSTTransformer(nn.Module):
 
         self.final_norm = AdaLN(embed_dim, cond_dim)
         self.out_proj = nn.Linear(embed_dim, latent_channels)
+        self.variance_head: Optional[nn.Module] = None
 
-    def forward(
+    def attach_variance_head(self, variance_head: nn.Module) -> None:
+        """Attach a variance projection head to the transformer backbone."""
+        self.variance_head = variance_head
+
+    @property
+    def has_variance_head(self) -> bool:
+        """Return True if a variance head is currently attached."""
+        return self.variance_head is not None
+
+    def forward_features(
         self,
         z_hist: torch.Tensor,
         re: Optional[torch.Tensor] = None,
         sc: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        """Forward pass predicting the next latent state Z_{t+1}.
+    ) -> Tuple[torch.Tensor, Tuple[int, int, int, int, int]]:
+        """Extract normalized latent features before output projection heads.
 
         Args:
             z_hist: Latent sequence of shape (B, L, C_z, H_z, W_z).
@@ -171,7 +181,8 @@ class LatentSTTransformer(nn.Module):
             sc: Optional Schmidt number tensor (B,).
 
         Returns:
-            z_next: Next latent state prediction of shape (B, 1, C_z, H_z, W_z).
+            x_last: Normalized last-token features of shape (B, 1, N, embed_dim).
+            shape_info: Tuple of (b, l, c_z, h_z, w_z).
         """
         b, l, c_z, h_z, w_z = z_hist.shape
         n_spatial = h_z * w_z
@@ -198,6 +209,25 @@ class LatentSTTransformer(nn.Module):
         # Use final time step representation
         x_last = x[:, -1:]  # (B, 1, N, D)
         x_last = self.final_norm(x_last, cond)
+        return x_last, (b, l, c_z, h_z, w_z)
+
+    def forward(
+        self,
+        z_hist: torch.Tensor,
+        re: Optional[torch.Tensor] = None,
+        sc: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Deterministic forward pass predicting the next latent state Z_{t+1}.
+
+        Args:
+            z_hist: Latent sequence of shape (B, L, C_z, H_z, W_z).
+            re: Optional Reynolds number tensor (B,).
+            sc: Optional Schmidt number tensor (B,).
+
+        Returns:
+            z_next: Next latent state prediction of shape (B, 1, C_z, H_z, W_z).
+        """
+        x_last, (b, l, c_z, h_z, w_z) = self.forward_features(z_hist, re=re, sc=sc)
         delta_or_pred = self.out_proj(x_last)  # (B, 1, N, C_z)
 
         # Reshape to (B, 1, C_z, H_z, W_z)
@@ -208,3 +238,41 @@ class LatentSTTransformer(nn.Module):
             return z_last + pred_latent
         else:
             return pred_latent
+
+    def predict_distribution(
+        self,
+        z_hist: torch.Tensor,
+        re: Optional[torch.Tensor] = None,
+        sc: Optional[torch.Tensor] = None,
+        variance_head: Optional[nn.Module] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Predict conditional Gaussian parameters (mu, variance) for next latent state.
+
+        Args:
+            z_hist: Latent sequence of shape (B, L, C_z, H_z, W_z).
+            re: Optional Reynolds number tensor (B,).
+            sc: Optional Schmidt number tensor (B,).
+            variance_head: Optional override variance head module.
+
+        Returns:
+            mu: Predicted mean latent state of shape (B, 1, C_z, H_z, W_z).
+            variance: Predicted conditional variance of shape (B, 1, C_z, H_z, W_z).
+        """
+        vhead = variance_head if variance_head is not None else self.variance_head
+        if vhead is None:
+            raise RuntimeError(
+                "No variance head attached to LatentSTTransformer. "
+                "Call attach_variance_head() or pass variance_head explicitly."
+            )
+
+        x_last, (b, l, c_z, h_z, w_z) = self.forward_features(z_hist, re=re, sc=sc)
+        delta_or_pred = self.out_proj(x_last)
+        pred_latent = delta_or_pred.view(b, 1, h_z, w_z, c_z).permute(0, 1, 4, 2, 3)
+
+        if self.prediction_mode == "residual":
+            mu = z_hist[:, -1:] + pred_latent
+        else:
+            mu = pred_latent
+
+        variance = vhead(x_last, h_z=h_z, w_z=w_z)
+        return mu, variance
