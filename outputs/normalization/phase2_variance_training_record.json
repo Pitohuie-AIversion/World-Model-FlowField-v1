@@ -1,0 +1,131 @@
+{
+  "record_version": "ProbLatent-R1-Phase2-Training-Record-v1",
+  "record_timestamp_utc": "2026-09-26T17:25:00+00:00",
+  "git_commit": "d9ba98eeea422293250aee6285ac12d483fa60fa",
+  "training_command": "python scripts/train_prob_latent_variance.py --seed 42 --epochs 5 --lr 0.001 --batch_size 16 --max_train_batches 0 --max_val_batches 0 --output_dir outputs/checkpoints/probabilistic/variance_head/formal_r1_seed42",
+  "artifacts": {
+    "g0_baseline_initialization": {
+      "path": "outputs/checkpoints/probabilistic/variance_head/formal_r1_seed42/g0_baseline_initialization.pt",
+      "sha256": "41c36d8573604eccc95c81956e954c6edfcf87233e23d83084b7a603ea5c5730"
+    },
+    "best_g1_variance_head": {
+      "path": "outputs/checkpoints/probabilistic/variance_head/formal_r1_seed42/best_g1_variance_head.pt",
+      "sha256": "cedf5f3fd24db54a29fbf618c98a2b979e9fd1cf41d357b85d115fae9477d2fe"
+    },
+    "variance_training_history": {
+      "path": "outputs/checkpoints/probabilistic/variance_head/formal_r1_seed42/variance_training_history.json",
+      "sha256": "88d3423e7f174a54129352db987f908becdfc73c5b139fd32580083f7220ff4a"
+    }
+  },
+  "cryptographic_bindings": {
+    "d0_checkpoint": {
+      "path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H12/latent_transformer/best_long_vrmse.pt",
+      "sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6"
+    },
+    "stats_file": {
+      "path": "outputs/normalization/latent_residual_stats.json",
+      "sha256": "448b2c338d7ec9e3eb05c1fb1ca4d0ca2088eae2e7e6bec5fd2fab0c27978f36"
+    },
+    "data_protocol": {
+      "split_file": "outputs/splits/grouped_split.json",
+      "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+      "normalizer_file": "outputs/normalization/stats_grouped.pt",
+      "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec"
+    }
+  },
+  "loss_formulation_and_units": {
+    "loss_function": "F.gaussian_nll_loss(input=mu, target=target, var=variance, full=False, reduction='mean')",
+    "metric_unit": "nats/latent element",
+    "omitted_constant_term": "-0.5 * log(2 * pi)",
+    "note": "Per PyTorch documentation, full=False omits constant term -0.5*log(2*pi). NLL is reduced across all scalar latent elements, invariant to additive shift."
+  },
+  "training_summary": {
+    "status": "PHASE2_VARIANCE_TRAINING_COMPLETE",
+    "outcome": "IMPROVEMENT_FOUND",
+    "run_mode": "formal",
+    "seed": 42,
+    "baseline_g0_nll": 0.023723599476118882,
+    "best_epoch": 5,
+    "best_val_nll": -0.20664313832918804,
+    "delta_val_nll_vs_g0": -0.23036673780530692,
+    "selected_checkpoint_path": "outputs/checkpoints/probabilistic/variance_head/formal_r1_seed42/best_g1_variance_head.pt",
+    "training_configuration": {
+      "epochs": 5,
+      "seed": 42,
+      "lr": 0.001,
+      "weight_decay": 0.0,
+      "batch_size": 16,
+      "variance_floor": 0.0001,
+      "max_train_batches": 0,
+      "max_val_batches": 0,
+      "total_train_windows_processed": 4125,
+      "total_val_windows_processed": 750,
+      "training_epochs_val_windows_processed": 750,
+      "init_check_val_windows": 16,
+      "epoch_0_val_windows": 150,
+      "grand_total_val_windows_processed": 916
+    },
+    "history": [
+      {
+        "epoch": 1,
+        "train_nll": -0.11558045383655664,
+        "train_batches_evaluated": 52,
+        "val_nll": -0.15524942994117738,
+        "val_mean_variance": 0.4758262765407562,
+        "val_min_variance": 0.011911414563655853,
+        "val_max_variance": 5.183163642883301,
+        "val_batches_evaluated": 10,
+        "val_windows_evaluated": 150,
+        "val_is_valid": true
+      },
+      {
+        "epoch": 2,
+        "train_nll": -0.18107728481292726,
+        "train_batches_evaluated": 52,
+        "val_nll": -0.18289982557296752,
+        "val_mean_variance": 0.49888270696004233,
+        "val_min_variance": 0.007228559348732233,
+        "val_max_variance": 5.943173408508301,
+        "val_batches_evaluated": 10,
+        "val_windows_evaluated": 150,
+        "val_is_valid": true
+      },
+      {
+        "epoch": 3,
+        "train_nll": -0.19950514795202198,
+        "train_batches_evaluated": 52,
+        "val_nll": -0.19513758540153503,
+        "val_mean_variance": 0.5012532556056977,
+        "val_min_variance": 0.005421050824224949,
+        "val_max_variance": 6.171920299530029,
+        "val_batches_evaluated": 10,
+        "val_windows_evaluated": 150,
+        "val_is_valid": true
+      },
+      {
+        "epoch": 4,
+        "train_nll": -0.20962882280349732,
+        "train_batches_evaluated": 52,
+        "val_nll": -0.2013559579849243,
+        "val_mean_variance": 0.5068069465955098,
+        "val_min_variance": 0.005098510999232531,
+        "val_max_variance": 6.600780963897705,
+        "val_batches_evaluated": 10,
+        "val_windows_evaluated": 150,
+        "val_is_valid": true
+      },
+      {
+        "epoch": 5,
+        "train_nll": -0.21652183137156747,
+        "train_batches_evaluated": 52,
+        "val_nll": -0.20664313832918804,
+        "val_mean_variance": 0.5032539693514506,
+        "val_min_variance": 0.004878893028944731,
+        "val_max_variance": 6.755346298217773,
+        "val_batches_evaluated": 10,
+        "val_windows_evaluated": 150,
+        "val_is_valid": true
+      }
+    ]
+  }
+}
