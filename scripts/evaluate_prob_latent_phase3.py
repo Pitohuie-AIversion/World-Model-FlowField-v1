@@ -79,6 +79,19 @@ from src.utils.provenance import (
 )
 
 
+def format_trajectory_key(file_path: str, sim_idx: int) -> str:
+    """Format collision-free trajectory identifier preserving dataset folder and simulation index."""
+    norm_path = file_path.replace("\\", "/")
+    if "/data/" in norm_path:
+        sub_path = "data/" + norm_path.split("/data/", 1)[1]
+    elif norm_path.startswith("data/"):
+        sub_path = norm_path
+    else:
+        p = Path(norm_path)
+        sub_path = f"{p.parent.name}/{p.name}"
+    return f"{sub_path}::sim_{sim_idx:02d}"
+
+
 def apply_pressure_gauge(field: torch.Tensor, pressure_channel: int = 2) -> torch.Tensor:
     """Apply zero-mean pressure gauge normalization: p = p - mean(p) over spatial dimensions."""
     field = field.clone()
@@ -577,7 +590,7 @@ def evaluate_single_step_probability(
                 re_val = float(re[i].item()) if re is not None else 0.0
                 sc_val = float(sc[i].item()) if sc is not None else 0.0
 
-                traj_key = f"{Path(src_path).name}::sim_{sim_idx:02d}"
+                traj_key = format_trajectory_key(src_path, sim_idx)
                 if traj_key not in traj_records:
                     traj_records[traj_key] = {
                         "trajectory_id": traj_key,
@@ -883,7 +896,7 @@ def evaluate_autoregressive_rollouts(
                 s_t = int(start_times[i].item())
                 c_id = int(cluster_ids[i].item())
 
-                traj_key = f"{Path(src_file).name}::sim_{sim_idx:02d}"
+                traj_key = format_trajectory_key(src_file, sim_idx)
                 unique_trajs.add(traj_key)
                 unique_clusters.add(c_id)
 

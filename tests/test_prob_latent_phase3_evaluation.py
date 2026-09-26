@@ -225,8 +225,8 @@ class TestIdentityAndGroupingFailClosed:
         trajs = res["trajectory_diagnostics"]
         assert len(trajs) == 2, f"Expected 2 distinct trajectories, got {len(trajs)}"
         traj_ids = {t["trajectory_id"] for t in trajs}
-        assert "shear_flow_A.hdf5::sim_01" in traj_ids
-        assert "shear_flow_B.hdf5::sim_01" in traj_ids
+        assert "data/test/shear_flow_A.hdf5::sim_01" in traj_ids
+        assert "data/train/shear_flow_B.hdf5::sim_01" in traj_ids
         for t in trajs:
             assert t["windows"] == 2
 
