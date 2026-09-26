@@ -244,6 +244,7 @@ def _build_model(
             num_heads=num_heads,
             history_length=4,
             prediction_mode=prediction_mode,
+            use_spatial_pos=use_spatial_pos,
         )
         model = LatentForecasterWrapper(
             encoder=encoder,
@@ -714,6 +715,7 @@ def train_forecaster(
     freeze_representation: bool = True,
     prediction_mode: str = "direct",
     use_condition: bool = True,
+    use_spatial_pos: bool = True,
     horizon: int = 1,
     epochs: int = 50,
     batch_size: int = 4,
@@ -951,6 +953,7 @@ def train_forecaster(
                 "model_type": model_type,
                 "prediction_mode": prediction_mode,
                 "use_condition": use_condition,
+                "use_spatial_pos": use_spatial_pos,
                 "downsample_factor": downsample_factor,
                 "physics_protocol": PHYSICS_PROTOCOL,
                 "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
@@ -1042,6 +1045,7 @@ if __name__ == "__main__":
     parser.add_argument("--joint", action="store_true", help="Jointly train representation and dynamics")
     parser.add_argument("--prediction_mode", type=str, default="direct", choices=["direct", "residual"])
     parser.add_argument("--use_condition", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--use_spatial_pos", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--horizon", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=4)
@@ -1175,6 +1179,7 @@ if __name__ == "__main__":
         freeze_representation=freeze_rep,
         prediction_mode=args.prediction_mode,
         use_condition=args.use_condition,
+        use_spatial_pos=args.use_spatial_pos,
         horizon=args.horizon,
         epochs=args.epochs,
         batch_size=args.batch_size,

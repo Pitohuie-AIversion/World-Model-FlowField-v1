@@ -157,3 +157,67 @@ class BestCheckpointTracker:
                     pass
 
         return is_best
+
+
+POST_SPATIAL_POS_INTRO_COMMIT = "0f2ed248d360acf28b55370f59ecfc756931047a"
+
+KNOWN_SPATIAL_POS_PRE_COMMITS = {
+    "6593b65005843c3f3c2640cb262bfd56708e11ad",  # Parent H8 saved long-best (ep 11)
+    "6593b650",
+    "0a8a4da137e3f73c4f696cc81f527c32a8ba8405",  # H16 short-best (ep 8)
+    "0a8a4da1",
+    "02298bc6110f6cfc721c5f35dcf3f084ba68fe0d",  # H16 long-best (ep 12)
+    "02298bc6",
+}
+KNOWN_SPATIAL_POS_POST_COMMITS = {
+    "09e49d949430c6aeb851be97193b2bf8a1b6377e",  # H12 extension runner
+    "09e49d9",
+    "f9f5815e5a8d9be37d7d0830d1b3b08b7a32866f",  # H12 extension runner with Beff guards
+    "f9f5815",
+}
+
+
+def resolve_spatial_pos_config(checkpoint_data: Dict[str, Any]) -> bool:
+    """Resolve whether spatial positional encoding was active during model training.
+
+    Ensures strict backward compatibility:
+    1. If `use_spatial_pos` is explicitly specified in `config`, honor that boolean setting.
+    2. If absent from `config`:
+       - Check `training_git_commit` / `commit_sha`.
+       - Commit `0f2ed24` introduced 2D spatial sincos position embedding.
+       - If commit is in known pre-commit list or prior to 0f2ed24 -> return False.
+       - If commit is in known post-commit list or descendant of 0f2ed24 -> return True.
+       - Fallback: for legacy checkpoints without explicit config, safely default to False
+         to avoid corrupting representations trained without spatial position embeddings.
+    """
+    cfg = checkpoint_data.get("config", {}) if isinstance(checkpoint_data, dict) else {}
+    if "use_spatial_pos" in cfg:
+        return bool(cfg["use_spatial_pos"])
+
+    # Fallback to commit-based inference
+    commit = (
+        checkpoint_data.get("training_git_commit")
+        or checkpoint_data.get("commit_sha")
+        or cfg.get("training_git_commit")
+        or cfg.get("commit_sha")
+    )
+    if commit:
+        commit_str = str(commit).strip()
+        if any(commit_str.startswith(c) for c in KNOWN_SPATIAL_POS_PRE_COMMITS):
+            return False
+        if any(commit_str.startswith(c) for c in KNOWN_SPATIAL_POS_POST_COMMITS):
+            return True
+        try:
+            import subprocess
+            res = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", POST_SPATIAL_POS_INTRO_COMMIT, commit_str],
+                capture_output=True,
+                timeout=2,
+            )
+            if res.returncode == 0:
+                return True
+        except Exception:
+            pass
+
+    # Safe default for legacy checkpoints: False
+    return False

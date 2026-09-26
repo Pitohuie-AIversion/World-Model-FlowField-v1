@@ -34,7 +34,7 @@ from src.models.decoder import Decoder2D
 from src.models.encoder import Encoder2D
 from src.models.latent_transformer import LatentSTTransformer
 from src.models.latent_forecaster import LatentForecaster
-from src.utils.checkpoint import load_checkpoint
+from src.utils.checkpoint import load_checkpoint, resolve_spatial_pos_config
 from src.utils.reproducibility import seed_everything
 from src.utils.physics_contract import (
     PHYSICS_PROTOCOL,
@@ -100,6 +100,7 @@ def load_forecaster(ckpt_path: str, device: torch.device) -> Tuple[LatentForecas
 
     encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
     decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=False)
+    use_spatial_pos = resolve_spatial_pos_config(ckpt_data)
     transformer = LatentSTTransformer(
         latent_channels=64,
         embed_dim=emb_dim,
@@ -108,6 +109,7 @@ def load_forecaster(ckpt_path: str, device: torch.device) -> Tuple[LatentForecas
         num_heads=num_heads,
         history_length=4,
         prediction_mode=pred_mode,
+        use_spatial_pos=use_spatial_pos,
     )
     forecaster = LatentForecaster(encoder=encoder, transformer=transformer, decoder=decoder).to(device)
 

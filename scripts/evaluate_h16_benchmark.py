@@ -57,7 +57,7 @@ from src.utils.provenance import (
     validate_formal_provenance_bundle,
 )
 from src.utils.reproducibility import seed_everything
-from src.utils.checkpoint import strip_compiled_prefix
+from src.utils.checkpoint import strip_compiled_prefix, resolve_spatial_pos_config
 
 # Target candidate checkpoints
 BENCHMARK_TARGETS = {
@@ -187,6 +187,7 @@ def load_model_from_checkpoint(ckpt_path: str, device: torch.device) -> Tuple[La
 
     encoder = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
     decoder = Decoder2D(latent_channels=64, out_channels=4, base_channels=32, project_pressure=False)
+    use_spatial_pos = resolve_spatial_pos_config(ckpt_data)
     transformer = LatentSTTransformer(
         latent_channels=64,
         embed_dim=emb_dim,
@@ -195,6 +196,7 @@ def load_model_from_checkpoint(ckpt_path: str, device: torch.device) -> Tuple[La
         num_heads=num_heads,
         history_length=4,
         prediction_mode=pred_mode,
+        use_spatial_pos=use_spatial_pos,
     )
     forecaster = LatentForecaster(encoder=encoder, transformer=transformer, decoder=decoder).to(device)
 

@@ -1,0 +1,72 @@
+{
+  "figure_name": "comparison_high_err_tracer.png",
+  "sample_index": 36,
+  "sample_tag": "high_err",
+  "sample_description": "High Error Sample (Index 36, 85th percentile)",
+  "sample_selection_basis": "High-error window when 45 test windows are sorted by Parent H8 J_long VRMSE error (rank 39/45, ~85th percentile)",
+  "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+  "source_relative_path": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+  "simulation_index": 16,
+  "start_t": 0,
+  "split_t": 4,
+  "end_t": 34,
+  "variable": "tracer",
+  "re": 10000.0,
+  "sc": 0.10000000149011612,
+  "evaluation_git_commit": "f9f5815e5a8d9be37d7d0830d1b3b08b7a32866f",
+  "evaluation_git_dirty": true,
+  "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+  "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+  "horizons": [
+    1,
+    10,
+    20,
+    30
+  ],
+  "colorbar_scaling_policy": "\u540c\u4e00\u65f6\u95f4\u6b65\u5171\u4eab\u8272\u6761\uff1b\u4e0d\u540c\u65f6\u95f4\u6b65\u72ec\u7acb\u7f29\u653e\uff1b\u663e\u793a\u8303\u56f4\u91c7\u7528 0.5%\u201399.5%\uff08\u573a\uff09\u4e0e 99.5%\uff08\u8bef\u5dee\uff09\u767e\u5206\u4f4d\u622a\u65ad\u3002\u4e0d\u53ef\u76f4\u63a5\u8de8\u65f6\u95f4\u6b65\uff08\u884c\uff09\u6bd4\u8f83\u989c\u8272\u6df1\u6d45\u3002",
+  "colorbar_norms": {
+    "h1": {
+      "field_vmin": -0.5033344030380249,
+      "field_vmax": 0.4904017746448517,
+      "error_vmax": 0.13158875703811646
+    },
+    "h10": {
+      "field_vmin": -0.5424544215202332,
+      "field_vmax": 0.5432047843933105,
+      "error_vmax": 0.5840946435928345
+    },
+    "h20": {
+      "field_vmin": -0.5859540700912476,
+      "field_vmax": 0.598834216594696,
+      "error_vmax": 0.7642772197723389
+    },
+    "h30": {
+      "field_vmin": -0.6331894397735596,
+      "field_vmax": 0.6171622276306152,
+      "error_vmax": 0.8317642211914062
+    }
+  },
+  "models_evaluated": {
+    "parent_h8_ep11": {
+      "title": "Parent H8 Saved Long-Best (Ep 11)",
+      "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r1/seed_42/E4_H8/latent_transformer/checkpoint_step_11_vrmse_mean_0.2186.pt",
+      "full_sha256": "ea038c7af0f3a0fa5d851f25dd1ea224371b8c44ab2a80b8314f5c286c224147",
+      "expected_horizon": 8,
+      "selection_criterion": "diagnostic_long_best_step_11"
+    },
+    "h12_long_best": {
+      "title": "H12 Long-Best",
+      "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H12/latent_transformer/best_long_vrmse.pt",
+      "full_sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6",
+      "expected_horizon": 12,
+      "selection_criterion": "best_long_vrmse_j_long"
+    },
+    "h16_long_best_ep12": {
+      "title": "H16 Long-Best (Ep 12)",
+      "checkpoint_path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H16/latent_transformer/best_long_vrmse.pt",
+      "full_sha256": "959615be88dcd9e3328f6cc8063ce2ed3136e29d0e678e5d9df91ea45ded2c1e",
+      "expected_horizon": 16,
+      "selection_criterion": "best_long_vrmse_j_long"
+    }
+  }
+}

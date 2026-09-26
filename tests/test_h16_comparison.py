@@ -154,16 +154,26 @@ def test_visualize_h16_targets_isolated_from_h12():
     assert "h12_long_best" not in H16_COMPARISON_TARGET_KEYS
 
 
-def test_visualize_h16_does_not_load_h12_when_h12_missing():
+def test_visualize_h16_does_not_load_h12_when_h12_missing(monkeypatch, tmp_path):
     """When H12 checkpoints do not exist, the visualizer default target keys must not touch H12 paths."""
     from scripts.visualize_h16_comparison import H16_COMPARISON_TARGET_KEYS
-    # Ensure H12 checkpoint paths are non-existent
-    for k in ["h12_short_best", "h12_long_best"]:
-        assert not Path(BENCHMARK_EVAL_TARGETS[k]["path"]).exists()
+    import scripts.visualize_h16_comparison as vmod
 
-    # The default target keys must all be in H16_COMPARISON_TARGET_KEYS
+    # Isolate from local environment by mocking H12 targets with guaranteed non-existent paths
+    mocked_eval_targets = dict(BENCHMARK_EVAL_TARGETS)
+    for k in ["h12_short_best", "h12_long_best"]:
+        non_existent_path = tmp_path / f"isolated_missing_{k}.pt"
+        mocked_eval_targets[k] = {**mocked_eval_targets[k], "path": str(non_existent_path)}
+        # Verify that under isolated test fixture, the simulated path strictly does not exist
+        assert not Path(mocked_eval_targets[k]["path"]).exists()
+
+    monkeypatch.setattr(vmod, "ALL_BENCHMARK_TARGETS", mocked_eval_targets)
+
+    # The default target keys must all be in H16_COMPARISON_TARGET_KEYS and exclude H12
     for target_key in H16_COMPARISON_TARGET_KEYS:
         assert target_key in ["parent_h8_ep11", "h16_short_best_ep8", "h16_long_best_ep12"]
+    assert "h12_short_best" not in H16_COMPARISON_TARGET_KEYS
+    assert "h12_long_best" not in H16_COMPARISON_TARGET_KEYS
 
 
 def test_generate_comparison_grid_metadata_matches_visualized_models(tmp_path):
