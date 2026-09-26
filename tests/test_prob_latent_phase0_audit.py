@@ -528,56 +528,192 @@ class TestArchivedLatentResidualStatsIntegrity:
         assert coverage["stride"] == 8
 
 
+@pytest.fixture
+def synthetic_audit_environment(tmp_path):
+    """Create a fully self-contained, cryptographically valid audit environment with real files on disk.
+
+    Generates:
+    - Real temporary split JSON with 33 trajectories and 27 clusters matching contract topology
+    - Real temporary FieldNormalizer state_dict file with valid normalizer_hash
+    - Real temporary D0 checkpoint file with resolved use_spatial_pos=True and bound hashes
+    - Real temporary latent residual statistics JSON satisfying all 64-channel and summary invariants
+    """
+    from src.data.normalization import FieldNormalizer
+    from src.utils.provenance import (
+        compute_file_sha256,
+        compute_normalizer_hash,
+        compute_split_hash_from_file,
+    )
+
+    env_dir = tmp_path / "synthetic_audit_env"
+    env_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Real split file with exact topology (33 trajectories, 27 clusters)
+    split_file = env_dir / "grouped_split.json"
+    train_trajs = [
+        {"trajectory_id": f"traj_{i:03d}", "cluster_id": f"cluster_{i % 27:02d}"}
+        for i in range(33)
+    ]
+    split_data = {
+        "train": train_trajs,
+        "valid": [],
+        "test": [],
+    }
+    with open(split_file, "w") as f:
+        json.dump(split_data, f, indent=2)
+    split_hash = compute_split_hash_from_file(str(split_file))
+
+    # 2. Real normalizer file
+    norm_file = env_dir / "stats_grouped.pt"
+    norm_state = {
+        "mean": torch.tensor([0.1, -0.2, 0.05, 0.0], dtype=torch.float32),
+        "std": torch.tensor([1.0, 1.2, 0.9, 1.1], dtype=torch.float32),
+    }
+    torch.save(norm_state, norm_file)
+    norm_obj = FieldNormalizer()
+    norm_obj.load_state_dict(torch.load(norm_file, weights_only=True, map_location="cpu"))
+    norm_hash = compute_normalizer_hash(norm_obj)
+
+    # 3. Real D0 checkpoint file with bound hashes and use_spatial_pos=True
+    d0_file = env_dir / "synthetic_d0.pt"
+    d0_data = {
+        "config": {
+            "use_spatial_pos": True,
+            "split_hash": split_hash,
+            "normalizer_hash": norm_hash,
+        },
+        "split_hash": split_hash,
+        "normalizer_hash": norm_hash,
+        "model_state_dict": {},
+    }
+    torch.save(d0_data, d0_file)
+    d0_sha256 = compute_file_sha256(str(d0_file))
+
+    # 4. Mathematically valid statistical invariants for 64 channels
+    means = [0.1 * (i % 5 - 2) for i in range(64)]
+    second_moments = [0.5 + 0.02 * (i % 7) for i in range(64)]
+    vars_c = [m2 - m ** 2 for m, m2 in zip(means, second_moments)]
+
+    mean_ch_centered_var = float(sum(vars_c) / 64.0)
+    mean_ch_sq_bias = float(sum(m ** 2 for m in means) / 64.0)
+    mean_ch_second_moment = float(sum(second_moments) / 64.0)
+    pooled_mean = float(sum(means) / 64.0)
+    pooled_var = float(mean_ch_second_moment - pooled_mean ** 2)
+
+    stats_file = env_dir / "latent_residual_stats.json"
+    stats_data = {
+        "d0_checkpoint": {
+            "path": str(d0_file),
+            "sha256": d0_sha256,
+        },
+        "data_protocol": {
+            "split_file": str(split_file),
+            "split_hash": split_hash,
+            "normalizer_file": str(norm_file),
+            "normalizer_hash": norm_hash,
+            "dataset_coverage": {
+                "num_trajectories": 33,
+                "num_initial_condition_clusters": 27,
+                "num_windows": 825,
+                "stride": 8,
+            },
+        },
+        "statistics": {
+            "channel_residual_mean": means,
+            "channel_residual_centered_variance": vars_c,
+            "channel_residual_second_moment_g0": second_moments,
+            "summary": {
+                "mean_channel_centered_variance": mean_ch_centered_var,
+                "mean_channel_squared_bias": mean_ch_sq_bias,
+                "mean_channel_second_moment": mean_ch_second_moment,
+                "pooled_residual_mean": pooled_mean,
+                "pooled_residual_variance": pooled_var,
+            },
+        },
+    }
+    with open(stats_file, "w") as f:
+        json.dump(stats_data, f, indent=2)
+
+    return {
+        "env_dir": env_dir,
+        "split_file": str(split_file),
+        "split_hash": split_hash,
+        "normalizer_file": str(norm_file),
+        "normalizer_hash": norm_hash,
+        "d0_file": str(d0_file),
+        "d0_sha256": d0_sha256,
+        "stats_file": str(stats_file),
+        "stats_data": stats_data,
+    }
+
+
 class TestVerifyLatentAuditContract:
     """Verify runtime verification contract with real objects and fail-closed security on tampering."""
 
-    def test_verify_contract_passes_on_canonical_state(self):
+    def test_verify_contract_passes_on_canonical_state(self, synthetic_audit_environment, tmp_path):
         from scripts.verify_latent_audit_contract import verify_latent_audit_contract
 
-        stats_path = "outputs/normalization/latent_residual_stats.json"
-        norm_path = "outputs/normalization/stats_grouped.pt"
-        if not os.path.exists(stats_path) or not os.path.exists(norm_path):
-            pytest.skip("Required audit files not available on machine.")
-
-        record = verify_latent_audit_contract(record_output_path="")
+        record_out = tmp_path / "verification_record.json"
+        record = verify_latent_audit_contract(
+            stats_path=synthetic_audit_environment["stats_file"],
+            normalizer_path=synthetic_audit_environment["normalizer_file"],
+            record_output_path=str(record_out),
+        )
         assert record["status"] == "AUDIT_VERIFIED_PASS"
         assert "stats_file" in record
         assert len(record["stats_file"]["sha256"]) == 64
-        assert record["data_protocol"]["normalizer_hash"].startswith("3a0fe52689657618")
-        assert record["d0_checkpoint"]["sha256"].startswith("edddbe8a2528f848")
+        assert record["data_protocol"]["normalizer_hash"] == synthetic_audit_environment["normalizer_hash"]
+        assert record["d0_checkpoint"]["sha256"] == synthetic_audit_environment["d0_sha256"]
         assert record["data_protocol"]["dataset_coverage_provenance"] == "sourced_from_frozen_stats_metadata"
+        assert record_out.exists()
 
-    def test_mutated_normalizer_fails_closed(self, tmp_path):
+    def test_mutated_normalizer_fails_closed(self, synthetic_audit_environment, tmp_path):
         from scripts.verify_latent_audit_contract import verify_latent_audit_contract
 
-        norm_path = "outputs/normalization/stats_grouped.pt"
-        if not os.path.exists(norm_path):
-            pytest.skip("Required stats_grouped.pt not available on machine.")
-
+        norm_path = synthetic_audit_environment["normalizer_file"]
         orig_norm = torch.load(norm_path, weights_only=True, map_location="cpu")
         tampered_norm = {k: (v.clone() if torch.is_tensor(v) else v) for k, v in orig_norm.items()}
         tampered_norm["mean"] = tampered_norm["mean"] + 0.1
-        tampered_path = tmp_path / "tampered_stats.pt"
+        tampered_path = tmp_path / "tampered_norm.pt"
         torch.save(tampered_norm, tampered_path)
 
         with pytest.raises(ValueError, match="Normalizer hash mismatch"):
-            verify_latent_audit_contract(normalizer_path=str(tampered_path), record_output_path="")
+            verify_latent_audit_contract(
+                stats_path=synthetic_audit_environment["stats_file"],
+                normalizer_path=str(tampered_path),
+                record_output_path="",
+            )
 
-    def test_tampered_stats_file_fails_closed(self, tmp_path):
+    def test_tampered_stats_file_fails_closed(self, synthetic_audit_environment, tmp_path):
+        import copy
+        from scripts.verify_latent_audit_contract import verify_latent_audit_contract
+
+        tampered_data = copy.deepcopy(synthetic_audit_environment["stats_data"])
+        # Alter mean to violate channel identity: max_c |m2,c - v_c - m_c^2| < 1e-14
+        tampered_data["statistics"]["channel_residual_mean"][0] += 1.0
+
+        tampered_stats = tmp_path / "tampered_stats.json"
+        with open(tampered_stats, "w") as f:
+            json.dump(tampered_data, f, indent=2)
+
+        with pytest.raises(AssertionError, match="Channel statistical identity violated"):
+            verify_latent_audit_contract(
+                stats_path=str(tampered_stats),
+                normalizer_path=synthetic_audit_environment["normalizer_file"],
+                record_output_path="",
+            )
+
+    def test_verify_contract_passes_on_canonical_repo_artifacts_if_present(self):
+        """Regression check against canonical repository checkpoint when available locally."""
         from scripts.verify_latent_audit_contract import verify_latent_audit_contract
 
         stats_path = "outputs/normalization/latent_residual_stats.json"
-        if not os.path.exists(stats_path):
-            pytest.skip("Required latent_residual_stats.json not available on machine.")
+        norm_path = "outputs/normalization/stats_grouped.pt"
+        canonical_d0 = "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H12/latent_transformer/best_long_vrmse.pt"
+        if not (os.path.exists(stats_path) and os.path.exists(norm_path) and os.path.exists(canonical_d0)):
+            pytest.skip("Canonical D0 checkpoint or audit files not present on machine.")
 
-        with open(stats_path, "r") as f:
-            stats_data = json.load(f)
-
-        # Alter mean to violate channel identity m2 - v - m^2 = 0
-        stats_data["statistics"]["channel_residual_mean"][0] += 1.0
-        tampered_stats = tmp_path / "tampered_stats.json"
-        with open(tampered_stats, "w") as f:
-            json.dump(stats_data, f)
-
-        with pytest.raises(AssertionError, match="Channel statistical identity violated"):
-            verify_latent_audit_contract(stats_path=str(tampered_stats), record_output_path="")
+        record = verify_latent_audit_contract(record_output_path="")
+        assert record["status"] == "AUDIT_VERIFIED_PASS"
+        assert record["data_protocol"]["normalizer_hash"].startswith("3a0fe52689657618")
+        assert record["d0_checkpoint"]["sha256"].startswith("edddbe8a2528f848")
