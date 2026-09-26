@@ -1,7 +1,7 @@
 """PyTorch Dataset implementation for The Well periodic shear_flow data."""
 
 import os
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import h5py
 import numpy as np
 import torch
@@ -57,10 +57,12 @@ class ShearFlowDataset(Dataset):
                 resolved_trajs.append(item)
             self.trajectories = resolved_trajs
             self.allowed_set = {(t["file_path"], t["traj_idx"]) for t in resolved_trajs}
+            self.traj_metadata = {(t["file_path"], t["traj_idx"]): t for t in resolved_trajs}
             file_paths = sorted(list(set(t["file_path"] for t in resolved_trajs)))
         else:
             self.trajectories = None
             self.allowed_set = None
+            self.traj_metadata = {}
             file_paths = [_resolve_path(p) for p in file_paths]
 
         self.file_paths = sorted(file_paths)
@@ -195,14 +197,32 @@ class ShearFlowDataset(Dataset):
     def __len__(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, idx: int) -> Dict[str, Union[torch.Tensor, float]]:
+    def get_window_metadata(self, idx: int) -> Dict[str, Any]:
         f_idx, sim_idx, start_t, split_t, end_t, re_val, sc_val = self.samples[idx]
+        path = self.file_paths[f_idx]
+        meta = self.traj_metadata.get((path, sim_idx), {}) if hasattr(self, "traj_metadata") and self.traj_metadata else {}
+        cluster_id = int(meta.get("cluster_id", -1))
+        return {
+            "source_file": path,
+            "traj_idx": sim_idx,
+            "start_t": start_t,
+            "split_t": split_t,
+            "end_t": end_t,
+            "re": re_val,
+            "sc": sc_val,
+            "cluster_id": cluster_id,
+        }
+
+    def __getitem__(self, idx: int) -> Dict[str, Union[torch.Tensor, float, str, int]]:
+        f_idx, sim_idx, start_t, split_t, end_t, re_val, sc_val = self.samples[idx]
+        path = self.file_paths[f_idx]
+        meta = self.traj_metadata.get((path, sim_idx), {}) if hasattr(self, "traj_metadata") and self.traj_metadata else {}
+        cluster_id = int(meta.get("cluster_id", -1))
 
         if self.preload_to_memory and f_idx in self._cached_data:
             full_data = self._cached_data[f_idx]
             traj_slice = full_data[sim_idx, start_t:end_t]  # (L + H, 4, Ny, Nx)
         else:
-            path = self.file_paths[f_idx]
             h5 = self._get_h5_handle(path)
             vel_ds = self._find_dset(h5, ["t1_fields/velocity", "velocity"])
             if vel_ds is not None:
@@ -251,4 +271,8 @@ class ShearFlowDataset(Dataset):
             "future": future,  # (H, 4, Ny, Nx)
             "re": torch.tensor(re_val, dtype=torch.float32),
             "sc": torch.tensor(sc_val, dtype=torch.float32),
+            "source_file": path,
+            "traj_idx": torch.tensor(sim_idx, dtype=torch.long),
+            "start_t": torch.tensor(start_t, dtype=torch.long),
+            "cluster_id": torch.tensor(cluster_id, dtype=torch.long),
         }
