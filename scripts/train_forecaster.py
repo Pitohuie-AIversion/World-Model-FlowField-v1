@@ -204,6 +204,7 @@ def _build_model(
     local_rank: int,
     global_rank: int,
     compile_model: bool = False,
+    use_spatial_pos: bool = True,
 ) -> Tuple[nn.Module, Optional[str], Optional[str]]:
     """Construct neural model architecture, load representation/warm-start checkpoints."""
     if model_type == "latent_transformer":
@@ -834,6 +835,7 @@ def train_forecaster(
         lambda_div=lambda_div,
         lambda_vort=lambda_vort,
         use_condition=use_condition,
+        use_spatial_pos=use_spatial_pos,
         device=device,
         is_distributed=is_distributed,
         local_rank=local_rank,

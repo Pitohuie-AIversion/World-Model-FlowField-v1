@@ -177,22 +177,31 @@ KNOWN_SPATIAL_POS_POST_COMMITS = {
 }
 
 
-def resolve_spatial_pos_config(checkpoint_data: Dict[str, Any]) -> bool:
+def resolve_spatial_pos_config(
+    checkpoint_data: Dict[str, Any],
+    allow_unverified_fallback: bool = False,
+    default_if_unverified: bool = False,
+) -> bool:
     """Resolve whether spatial positional encoding was active during model training.
 
-    Ensures strict backward compatibility:
-    1. If `use_spatial_pos` is explicitly specified in `config`, honor that boolean setting.
+    Ensures strict backward compatibility and fail-closed validation:
+    1. If `use_spatial_pos` is explicitly specified in `config` as a boolean, return it.
     2. If absent from `config`:
        - Check `training_git_commit` / `commit_sha`.
-       - Commit `0f2ed24` introduced 2D spatial sincos position embedding.
-       - If commit is in known pre-commit list or prior to 0f2ed24 -> return False.
-       - If commit is in known post-commit list or descendant of 0f2ed24 -> return True.
-       - Fallback: for legacy checkpoints without explicit config, safely default to False
-         to avoid corrupting representations trained without spatial position embeddings.
+       - If commit is in KNOWN_SPATIAL_POS_PRE_COMMITS -> return False.
+       - If commit is in KNOWN_SPATIAL_POS_POST_COMMITS -> return True.
+       - Otherwise, attempt `git merge-base --is-ancestor 0f2ed24 <commit>`:
+         * returncode == 0: strictly descendant -> return True.
+         * returncode == 1: strictly NOT descendant (prior commit) -> return False.
+         * other non-zero (returncode > 1 or error): git error or missing commit object.
+           Must raise RuntimeError rather than guessing!
+    3. If commit is missing and no explicit config:
+       - If allow_unverified_fallback is True, return default_if_unverified.
+       - Otherwise, raise ValueError to fail closed against silent inductive bias drift.
     """
     cfg = checkpoint_data.get("config", {}) if isinstance(checkpoint_data, dict) else {}
-    if "use_spatial_pos" in cfg:
-        return bool(cfg["use_spatial_pos"])
+    if "use_spatial_pos" in cfg and isinstance(cfg["use_spatial_pos"], bool):
+        return cfg["use_spatial_pos"]
 
     # Fallback to commit-based inference
     commit = (
@@ -207,17 +216,67 @@ def resolve_spatial_pos_config(checkpoint_data: Dict[str, Any]) -> bool:
             return False
         if any(commit_str.startswith(c) for c in KNOWN_SPATIAL_POS_POST_COMMITS):
             return True
+
+        # Rigorous git ancestry query with strict return code interpretation:
+        # 0 = ancestor, 1 = not ancestor, >1 = git error (object missing, corrupted, etc.)
         try:
             import subprocess
             res = subprocess.run(
                 ["git", "merge-base", "--is-ancestor", POST_SPATIAL_POS_INTRO_COMMIT, commit_str],
                 capture_output=True,
-                timeout=2,
+                text=True,
+                timeout=5,
             )
             if res.returncode == 0:
                 return True
-        except Exception:
-            pass
+            elif res.returncode == 1:
+                return False
+            else:
+                stderr_msg = res.stderr.strip() if res.stderr else f"exit code {res.returncode}"
+                raise RuntimeError(
+                    f"Git ancestry check failed for commit '{commit_str}' against introduction commit "
+                    f"'{POST_SPATIAL_POS_INTRO_COMMIT[:8]}': {stderr_msg}. Cannot verify spatial position encoding."
+                )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"Git ancestry check timed out for commit '{commit_str}'.")
 
-    # Safe default for legacy checkpoints: False
-    return False
+    # If provenance is completely absent or unverified:
+    if allow_unverified_fallback:
+        return default_if_unverified
+
+    raise ValueError(
+        "Cannot resolve 'use_spatial_pos' for checkpoint: explicit 'use_spatial_pos' is missing from config "
+        "and no verifiable git commit provenance is present. Formal model evaluation cannot proceed by guessing."
+    )
+
+
+def inverse_softplus(x: torch.Tensor) -> torch.Tensor:
+    """Numerically stable inverse softplus: y = softplus^{-1}(x) = log(exp(x) - 1)."""
+    # For large x (x >= 20.0), softplus(x) ~= x, so inverse_softplus(x) ~= x
+    # For smaller x, use log(expm1(x))
+    threshold = 20.0
+    return torch.where(x >= threshold, x, torch.log(torch.expm1(torch.clamp(x, min=1e-12))))
+
+
+def compute_g1_bias_init_from_g0(
+    v_g0: torch.Tensor,
+    variance_floor: float = 1e-4,
+    min_margin: float = 1e-5,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Compute numerically stable bias initialization for G1 variance head matching G0.
+
+    Ensures that for sigma^2 = softplus(a) + variance_floor:
+    When linear weights W_var = 0, a = b_c:
+    pred_variance = softplus(b_c) + variance_floor == effective_g0.
+
+    Handles boundary condition where v_g0 <= variance_floor:
+    Clamps effective_g0 = max(v_g0, variance_floor + min_margin), ensuring
+    argument to inverse_softplus is strictly positive, eliminating NaN and -inf.
+
+    Returns:
+        (b_init, effective_g0): The bias vector and the effective G0 variance vector.
+    """
+    effective_g0 = torch.clamp(v_g0, min=variance_floor + min_margin)
+    target_softplus = effective_g0 - variance_floor
+    b_init = inverse_softplus(target_softplus)
+    return b_init, effective_g0

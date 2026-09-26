@@ -156,7 +156,7 @@ def compute_latent_statistics_and_diagnostics(
 
     with torch.no_grad():
         for b_idx, batch in enumerate(dataloader):
-            if max_batches is not None and b_idx >= max_batches:
+            if max_batches is not None and max_batches > 0 and b_idx >= max_batches:
                 break
 
             q_hist = batch["history"].to(device)       # (B, L, 4, Ny, Nx)
@@ -220,9 +220,10 @@ def compute_latent_statistics_and_diagnostics(
     return {
         "sample_count": total_samples,
         "token_count_per_channel": total_tokens_per_channel,
+        "token_count_total_across_channels": total_tokens_per_channel * num_channels,
         "channel_residual_mean": mean_r,
         "channel_residual_centered_variance": var_r,
-        "channel_residual_second_moment": second_moment_r,
+        "channel_residual_second_moment_g0": second_moment_r,
         "summary": {
             "global_residual_mean": float(sum(mean_r) / num_channels),
             "global_centered_variance": float(sum(var_r) / num_channels),
@@ -230,12 +231,13 @@ def compute_latent_statistics_and_diagnostics(
             "min_channel_second_moment": float(min(second_moment_r)),
             "max_channel_second_moment": float(max(second_moment_r)),
         },
-        "physical_error_decomposition": {
-            "ae_reconstruction_rmse": float(ae_recon_error_sum / total_samples),
-            "latent_predicted_physical_rmse": float(forecaster_phys_error_sum / total_samples),
+        "diagnostic_errors_note": "Diagnostic metrics computed in their respective spaces; not an additive decomposition.",
+        "diagnostic_errors": {
+            "ae_reconstruction_rmse_physical": float(ae_recon_error_sum / total_samples),
+            "forecaster_predicted_physical_rmse": float(forecaster_phys_error_sum / total_samples),
             "latent_space_rms_error": float(latent_diff_error_sum / total_samples),
         },
-        "decoder_local_amplification": mean_sensitivity,
+        "decoder_local_amplification_around_mu": mean_sensitivity,
     }
 
 
@@ -271,8 +273,8 @@ def main():
     parser.add_argument(
         "--max_batches",
         type=int,
-        default=25,
-        help="Number of training batches to audit (default: 25 for fast representative audit, None for full set).",
+        default=0,
+        help="Number of training batches to audit (0 for full training set, positive int for fixed subset).",
     )
     parser.add_argument(
         "--output_path",
