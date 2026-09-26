@@ -11,10 +11,13 @@ from scripts.evaluate_prob_latent_phase3 import (
     compute_gaussian_crps,
     compute_prediction_intervals,
     compute_ensemble_spread_skill,
+    compute_pooled_spread_skill,
     compute_physical_quantiles_coverage,
     apply_pressure_gauge,
+    format_trajectory_key,
     verify_phase3_preflight_gate,
     evaluate_single_step_probability,
+    evaluate_autoregressive_rollouts,
     validate_phase3_metrics_finite,
 )
 
@@ -163,11 +166,51 @@ class TestSpreadSkillAndPhysicalMetrics:
         assert 0.0 <= cov["overall"]["picp_90"] <= 1.0
         assert cov["overall"]["mpiw_80"] < cov["overall"]["mpiw_90"]
 
+    def test_cross_window_pooled_spread_skill_counterexample(self):
+        """Verify pooled RMS SSR differs from mean of window ratios on non-trivial counterexample.
+
+        Window A: Spread=1.5, RMSE=1.0 -> SSR=1.5
+        Window B: Spread=5.0, RMSE=10.0 -> SSR=0.5
+        Arithmetic mean of window SSRs = 1.0
+        True pooled RMS SSR = sqrt((1.5^2 + 5.0^2) / (1.0^2 + 10.0^2)) = sqrt(27.25 / 101) = 0.519409...
+        """
+        variances = [1.5 ** 2, 5.0 ** 2]
+        squared_errors = [1.0 ** 2, 10.0 ** 2]
+        K = 32
+
+        res = compute_pooled_spread_skill(variances, squared_errors, K=K)
+
+        # Auxiliary mean window SSR is 1.0
+        assert res["mean_window_ssr"] == pytest.approx(1.0, abs=1e-5)
+
+        # True pooled RMS spread and pooled RMSE
+        expected_spread = math.sqrt((2.25 + 25.0) / 2.0)
+        expected_rmse = math.sqrt((1.0 + 100.0) / 2.0)
+        expected_ssr_raw = math.sqrt(27.25 / 101.0)
+        finite_k_factor = math.sqrt((K + 1.0) / K)
+        expected_ssr_adj = expected_ssr_raw * finite_k_factor
+
+        assert res["pooled_rms_spread"] == pytest.approx(expected_spread, rel=1e-5)
+        assert res["pooled_rmse"] == pytest.approx(expected_rmse, rel=1e-5)
+        assert res["pooled_ssr_raw"] == pytest.approx(expected_ssr_raw, rel=1e-5)
+        assert res["pooled_ssr_finite_k_adjusted"] == pytest.approx(expected_ssr_adj, rel=1e-5)
+        assert res["pooled_ssr_adjusted"] == pytest.approx(expected_ssr_adj, rel=1e-5)
+
+        # Confirm non-equivalence: pooled SSR (~0.5194) is drastically different from mean SSR (1.0)
+        assert abs(res["pooled_ssr_raw"] - res["mean_window_ssr"]) > 0.45
+
+        # Empty or mismatched input validation
+        with pytest.raises(ValueError, match="Cannot pool over empty"):
+            compute_pooled_spread_skill([], [], K=K)
+        with pytest.raises(ValueError, match="Mismatched window counts"):
+            compute_pooled_spread_skill([1.0], [1.0, 2.0], K=K)
+
 
 class MockIdentifiedDataset(Dataset):
     """Synthetic dataset producing full cryptographic identity fields conforming to ShearFlowDataset."""
-    def __init__(self, entries):
+    def __init__(self, entries, future_horizon: int = 1):
         self.entries = entries
+        self.future_horizon = future_horizon
 
     def __len__(self):
         return len(self.entries)
@@ -176,7 +219,7 @@ class MockIdentifiedDataset(Dataset):
         item = self.entries[idx]
         return {
             "history": torch.zeros(4, 4, 16, 16),
-            "future": torch.zeros(1, 4, 16, 16),
+            "future": torch.zeros(self.future_horizon, 4, 16, 16),
             "re": torch.tensor(10000.0),
             "sc": torch.tensor(0.1),
             "source_file": item["source_file"],
@@ -229,6 +272,68 @@ class TestIdentityAndGroupingFailClosed:
         assert "data/train/shear_flow_B.hdf5::sim_01" in traj_ids
         for t in trajs:
             assert t["windows"] == 2
+
+    def test_different_dirs_identical_filename_same_traj_idx_not_merged(self):
+        """CRITICAL: Two files with IDENTICAL basename in different dirs (data/test vs data/train)
+
+        and identical traj_idx=1 must NOT collide into 1 trajectory.
+        This reproduces the exact production split condition.
+        """
+        entries = [
+            {"source_file": "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5", "traj_idx": 1, "start_t": 0, "cluster_id": 1},
+            {"source_file": "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5", "traj_idx": 1, "start_t": 8, "cluster_id": 1},
+            {"source_file": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5", "traj_idx": 1, "start_t": 0, "cluster_id": 1},
+            {"source_file": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5", "traj_idx": 1, "start_t": 8, "cluster_id": 1},
+        ]
+        loader = DataLoader(MockIdentifiedDataset(entries), batch_size=2)
+
+        class MockG0Head(nn.Module):
+            def forward(self, x):
+                return torch.ones(x.shape[0], 1, 64, 4, 4)
+
+        class MockForecaster(nn.Module):
+            def eval(self):
+                pass
+            def predict_distribution_single_step(self, q, re=None, sc=None, variance_head=None):
+                b = q.shape[0]
+                mu = torch.zeros(b, 1, 64, 4, 4)
+                var = torch.ones(b, 1, 64, 4, 4)
+                return mu, var
+            def encoder(self, q):
+                b = q.shape[0]
+                return torch.zeros(b, 1, 64, 4, 4)
+
+        res = evaluate_single_step_probability(
+            forecaster=MockForecaster(),
+            g0_head=MockG0Head(),
+            test_loader=loader,
+            device=torch.device("cpu"),
+        )
+
+        trajs = res["trajectory_diagnostics"]
+        assert len(trajs) == 2, f"Expected 2 distinct trajectories, got {len(trajs)}"
+        traj_ids = {t["trajectory_id"] for t in trajs}
+        expected_test = "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5::sim_01"
+        expected_train = "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5::sim_01"
+        assert expected_test in traj_ids
+        assert expected_train in traj_ids
+        for t in trajs:
+            assert t["windows"] == 2
+
+    def test_format_trajectory_key_collision_resistance(self):
+        """format_trajectory_key must produce distinct keys for identical basenames across splits."""
+        key_test = format_trajectory_key("data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5", 1)
+        key_train = format_trajectory_key("data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5", 1)
+        assert key_test != key_train
+        assert key_test == "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5::sim_01"
+        assert key_train == "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5::sim_01"
+
+        # Absolute paths also normalize consistently without collision
+        abs_test = format_trajectory_key("/home/user/repo/data/test/shear_flow.hdf5", 5)
+        abs_train = format_trajectory_key("/home/user/repo/data/train/shear_flow.hdf5", 5)
+        assert abs_test != abs_train
+        assert abs_test == "data/test/shear_flow.hdf5::sim_05"
+        assert abs_train == "data/train/shear_flow.hdf5::sim_05"
 
     def test_missing_identity_fields_fails_closed(self):
         """If any identity field is missing from the batch, evaluate_single_step_probability fails closed."""
@@ -419,3 +524,97 @@ class TestMetricsFinitenessValidation:
         }
         with pytest.raises(ValueError, match="non-finite float at root.metrics.nested\\[1\\].val = nan"):
             validate_phase3_metrics_finite(invalid_dict)
+
+
+class TestAutoregressiveRolloutCompleteness:
+    """Verify autoregressive rollout outputs, pooled metrics, and per-variable retention."""
+
+    def test_rollout_preserves_per_variable_spread_skill_and_vorticity(self):
+        H = 2
+        K = 4
+        entries = [
+            {"source_file": "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5", "traj_idx": 1, "start_t": 0, "cluster_id": 1},
+            {"source_file": "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5", "traj_idx": 1, "start_t": 8, "cluster_id": 1},
+        ]
+        loader = DataLoader(MockIdentifiedDataset(entries, future_horizon=H), batch_size=1)
+
+        class MockForecaster(nn.Module):
+            def eval(self):
+                pass
+            def sample_rollout(self, q_hist, re, sc, horizon, num_samples, seed, variance_head=None, decode_samples=False):
+                if decode_samples:
+                    return {
+                        "deterministic_rollout": torch.zeros(1, horizon, 4, 16, 16),
+                        "sample_trajectories": torch.randn(1, num_samples, horizon, 4, 16, 16) * 0.1,
+                        "ensemble_mean": torch.zeros(1, horizon, 4, 16, 16),
+                    }
+                else:
+                    return {
+                        "deterministic_rollout": torch.zeros(1, horizon, 4, 16, 16),
+                    }
+
+        class MockNormalizer:
+            def denormalize(self, x):
+                return x
+
+        res = evaluate_autoregressive_rollouts(
+            forecaster=MockForecaster(),
+            g0_head=nn.Identity(),
+            test_loader=loader,
+            normalizer=MockNormalizer(),
+            device=torch.device("cpu"),
+            horizon=H,
+            num_samples=K,
+            eval_horizons=(1, 2),
+            seed=42,
+            max_rollout_windows=2,
+        )
+
+        cfg = res["configuration"]
+        assert cfg["evaluation_mode"] == "diagnostic_sampling"
+        assert cfg["windows_evaluated"] == 2
+        assert cfg["unique_trajectories_count"] == 2
+        assert len(cfg["unique_trajectories"]) == 2
+        assert "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5::sim_01" in cfg["unique_trajectories"]
+        assert "data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5::sim_01" in cfg["unique_trajectories"]
+
+        # Check window manifest has trajectory_id
+        for w in cfg["window_manifest"]:
+            assert "trajectory_id" in w
+
+        metrics = res["per_horizon_metrics"]
+        assert "horizon_1" in metrics and "horizon_2" in metrics
+
+        for h_key in ("horizon_1", "horizon_2"):
+            h_res = metrics[h_key]
+            # Ground truth references
+            assert "ground_truth_references" in h_res
+            assert "rms_divergence" in h_res["ground_truth_references"]
+            assert "vorticity_rms" in h_res["ground_truth_references"]
+
+            for model in ("G0", "G1"):
+                m_res = h_res[model]
+                # Velocity pooled spread skill
+                assert "spread_skill_velocity" in m_res
+                ss_vel = m_res["spread_skill_velocity"]
+                assert "pooled_rms_spread" in ss_vel
+                assert "pooled_rmse" in ss_vel
+                assert "pooled_ssr_raw" in ss_vel
+                assert "pooled_ssr_finite_k_adjusted" in ss_vel
+                assert "mean_window_ssr" in ss_vel
+
+                # Per-variable spread skill
+                assert "spread_skill_per_variable" in m_res
+                ss_vars = m_res["spread_skill_per_variable"]
+                for v in ("u", "v", "p", "s"):
+                    assert v in ss_vars
+                    assert "pooled_rms_spread" in ss_vars[v]
+                    assert "pooled_rmse" in ss_vars[v]
+                    assert "pooled_ssr_raw" in ss_vars[v]
+                    assert "pooled_ssr_finite_k_adjusted" in ss_vars[v]
+                    assert "mean_window_ssr" in ss_vars[v]
+
+                # Vorticity distinctions
+                assert "vorticity_rmse_ensemble_mean" in m_res
+                assert "vorticity_rmse_individual_samples" in m_res
+                assert "vorticity_rms_individual_samples" in m_res

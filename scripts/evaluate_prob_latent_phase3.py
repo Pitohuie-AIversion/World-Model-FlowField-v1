@@ -20,17 +20,22 @@ Protocol:
    - Verifies deterministic mean parity (mu_D0 == mu_G0 == mu_G1).
    - Generates per-channel (64 channels) and per-trajectory breakdowns with cryptographic/path identity
      (source_file, traj_idx, start_t, cluster_id), failing closed if identity fields are missing.
+     Preserves relative directory path in trajectory keys so that identical filenames across directories
+     (e.g. data/test/... vs data/train/...) do not collide.
 3. Step 2: 30-Step Autonomous Autoregressive Rollout Evaluation (H=30, K=32):
    - Multi-trajectory autoregressive simulation without ground-truth feedback.
    - Complete test window coverage (105 windows under T=200, L=4, H=30, stride=8 across 5 test trajectories).
    - Applies zero-mean gauge to physical pressure channel before metric computation.
    - Non-parametric empirical quantiles in physical space from K=32 decoded samples (80% and 90% coverage and width).
    - Ensemble Mean VRMSE vs D0 vs G0.
-   - Proper Spread-Skill alignment:
-     RMS spread = sqrt(mean(var_k)) with Bessel's correction (ddof=1)
-     RMSE = sqrt(mean((p_mean - target)^2))
-     Spread-Skill Ratio = RMS spread / RMSE (raw and finite-K adjusted with sqrt((K+1)/K)).
-   - Physical invariant checks: RMS divergence, vorticity RMSE, and radially integrated kinetic energy spectra E(k)
+   - Cross-window pooled Spread-Skill alignment:
+     Pooled RMS spread = sqrt(mean(var_k)) with Bessel's correction (ddof=1)
+     Pooled RMSE = sqrt(mean((p_mean - target)^2))
+     Pooled Spread-Skill Ratio = Pooled Spread / Pooled RMSE (raw and finite-K adjusted with sqrt((K+1)/K)).
+     Auxiliary mean window SSR recorded as mean_window_ssr.
+     Per-variable (u, v, p, s) spread-skill metrics cleanly retained and output.
+   - Physical invariant checks: RMS divergence, vorticity RMSE (ensemble mean and individual sample errors),
+     sample vorticity intensity, and radially integrated kinetic energy spectra E(k)
      for individual sample trajectories (averaged over all K=32 members) vs ensemble mean vs ground truth.
 """
 
@@ -79,16 +84,24 @@ from src.utils.provenance import (
 )
 
 
-def format_trajectory_key(file_path: str, sim_idx: int) -> str:
+def format_trajectory_key(file_path: Union[str, Path], sim_idx: int) -> str:
     """Format collision-free trajectory identifier preserving dataset folder and simulation index."""
-    norm_path = file_path.replace("\\", "/")
+    norm_path = str(file_path).replace("\\", "/")
     if "/data/" in norm_path:
         sub_path = "data/" + norm_path.split("/data/", 1)[1]
     elif norm_path.startswith("data/"):
         sub_path = norm_path
     else:
-        p = Path(norm_path)
-        sub_path = f"{p.parent.name}/{p.name}"
+        try:
+            p = Path(file_path).resolve()
+            proj = PROJECT_ROOT.resolve()
+            if p.is_relative_to(proj):
+                sub_path = str(p.relative_to(proj)).replace("\\", "/")
+            else:
+                sub_path = f"{p.parent.name}/{p.name}"
+        except Exception:
+            p = Path(norm_path)
+            sub_path = f"{p.parent.name}/{p.name}"
     return f"{sub_path}::sim_{sim_idx:02d}"
 
 
@@ -168,7 +181,7 @@ def compute_ensemble_spread_skill(
     target: torch.Tensor,
     eps: float = 1e-8,
 ) -> Dict[str, Any]:
-    """Compute mathematically rigorous Ensemble Spread-Skill metrics.
+    """Compute mathematically rigorous Ensemble Spread-Skill metrics for a single window.
 
     Args:
         samps: Ensemble samples tensor of shape (K, C=4, Ny, Nx).
@@ -176,7 +189,8 @@ def compute_ensemble_spread_skill(
         eps: Small floor to prevent division by zero.
 
     Returns:
-        Dict containing RMS spread, RMSE, raw Spread-Skill Ratio, and finite-K adjusted SSR.
+        Dict containing RMS spread, RMSE, raw Spread-Skill Ratio, finite-K adjusted SSR,
+        mean spatial variance, and MSE for velocity and per physical variable.
     """
     K = samps.shape[0]
     if K < 2:
@@ -187,12 +201,12 @@ def compute_ensemble_spread_skill(
     var_k = samps.var(dim=0, unbiased=True)  # (4, Ny, Nx)
 
     # 1. Velocity vector field (u=0, v=1)
-    # Variance is sum of u and v variances
     var_vel = (var_k[0] + var_k[1]).mean()
     rms_spread_vel = float(torch.sqrt(var_vel).item())
     finite_k_factor = math.sqrt((K + 1.0) / K)
     rms_spread_adj_vel = float(rms_spread_vel * finite_k_factor)
-    rmse_vel = float(torch.sqrt(((p_mean[0:2] - target[0:2]) ** 2).mean() * 2.0).item())
+    mse_vel = float(((p_mean[0:2] - target[0:2]) ** 2).mean().item() * 2.0)
+    rmse_vel = float(math.sqrt(mse_vel))
     vrmse = float(compute_vrmse(p_mean, target).item())
     ssr_vel = float(rms_spread_vel / (rmse_vel + eps))
     ssr_adj_vel = float(rms_spread_adj_vel / (rmse_vel + eps))
@@ -204,10 +218,13 @@ def compute_ensemble_spread_skill(
         mean_var_c = var_k[c_idx].mean()
         spread_c = float(torch.sqrt(mean_var_c).item())
         spread_adj_c = float(spread_c * finite_k_factor)
-        rmse_c = float(torch.sqrt(((p_mean[c_idx] - target[c_idx]) ** 2).mean()).item())
+        mse_c = float(((p_mean[c_idx] - target[c_idx]) ** 2).mean().item())
+        rmse_c = float(math.sqrt(mse_c))
         ssr_c = float(spread_c / (rmse_c + eps))
         ssr_adj_c = float(spread_adj_c / (rmse_c + eps))
         per_channel[name] = {
+            "mean_var": float(mean_var_c.item()),
+            "mse": mse_c,
             "rms_spread": spread_c,
             "finite_k_adjusted_spread": spread_adj_c,
             "rmse": rmse_c,
@@ -221,6 +238,8 @@ def compute_ensemble_spread_skill(
         "finite_k_inflation_factor": finite_k_factor,
         "velocity": {
             "vrmse": vrmse,
+            "mean_var": float(var_vel.item()),
+            "mse": mse_vel,
             "rmse_velocity": rmse_vel,
             "rms_spread": rms_spread_vel,
             "finite_k_adjusted_spread": rms_spread_adj_vel,
@@ -228,6 +247,55 @@ def compute_ensemble_spread_skill(
             "finite_k_adjusted_ssr": ssr_adj_vel,
         },
         "per_variable": per_channel,
+    }
+
+
+def compute_pooled_spread_skill(
+    variances: List[float],
+    squared_errors: List[float],
+    K: int,
+    eps: float = 1e-8,
+) -> Dict[str, float]:
+    """Compute cross-window pooled RMS Spread, pooled RMSE, and pooled SSR.
+
+    Pooled Spread = sqrt(mean(S_w^2)) = sqrt(mean(var_w))
+    Pooled RMSE = sqrt(mean(R_w^2)) = sqrt(mean(mse_w))
+    Pooled SSR = Pooled Spread / (Pooled RMSE + eps)
+    Pooled SSR (Finite-K) = Pooled Spread * sqrt((K+1)/K) / (Pooled RMSE + eps)
+    Auxiliary Mean Window SSR = mean(S_w / R_w)
+    """
+    if len(variances) == 0 or len(squared_errors) == 0:
+        raise ValueError("Cannot pool over empty window lists.")
+    if len(variances) != len(squared_errors):
+        raise ValueError("Mismatched window counts for variances and squared errors.")
+
+    pooled_var = float(np.mean(variances))
+    pooled_mse = float(np.mean(squared_errors))
+    pooled_spread = float(math.sqrt(max(0.0, pooled_var)))
+    pooled_rmse = float(math.sqrt(max(0.0, pooled_mse)))
+
+    finite_k_factor = float(math.sqrt((K + 1.0) / K))
+    pooled_spread_adj = float(pooled_spread * finite_k_factor)
+
+    pooled_ssr_raw = float(pooled_spread / (pooled_rmse + eps))
+    pooled_ssr_adj = float(pooled_spread_adj / (pooled_rmse + eps))
+
+    window_ssrs = [
+        math.sqrt(max(0.0, v)) / (math.sqrt(max(0.0, m)) + eps)
+        for v, m in zip(variances, squared_errors)
+    ]
+    mean_window_ssr = float(np.mean(window_ssrs))
+
+    return {
+        "pooled_rms_spread": pooled_spread,
+        "pooled_rms_spread_raw": pooled_spread,
+        "pooled_rms_spread_adjusted": pooled_spread_adj,
+        "pooled_rms_spread_finite_k_adjusted": pooled_spread_adj,
+        "pooled_rmse": pooled_rmse,
+        "pooled_ssr_raw": pooled_ssr_raw,
+        "pooled_ssr_adjusted": pooled_ssr_adj,
+        "pooled_ssr_finite_k_adjusted": pooled_ssr_adj,
+        "mean_window_ssr": mean_window_ssr,
     }
 
 
@@ -455,7 +523,7 @@ def evaluate_single_step_probability(
     ch_g0_var_sum = [0.0] * num_channels
     ch_g1_var_sum = [0.0] * num_channels
 
-    # Per-trajectory accumulators keyed by (source_file, traj_idx)
+    # Per-trajectory accumulators keyed by collision-free format_trajectory_key
     traj_records: Dict[str, Dict[str, Any]] = {}
     max_mean_discrepancy = 0.0
 
@@ -797,9 +865,11 @@ def evaluate_autoregressive_rollouts(
     - Complete test window coverage with true window identity manifest
     - Non-parametric empirical quantiles in physical space from K=32 decoded samples
     - Ensemble Mean VRMSE vs D0 vs G0
-    - Mathematically rigorous Spread-Skill alignment (RMS spread / RMSE, raw & finite-K adjusted)
+    - Cross-window pooled Spread-Skill metrics: pooled RMS spread, pooled RMSE, pooled SSR (raw & finite-K adjusted)
+    - Per-variable (u, v, p, s) spread-skill metrics cleanly retained
     - Zero-mean pressure gauge normalization on physical fields
-    - Physical invariant checks: RMS divergence, vorticity RMSE, and energy spectrum E(k) across all K members
+    - Physical invariant checks: RMS divergence, vorticity RMSE (ensemble mean and individual sample errors),
+      sample vorticity intensity, and energy spectrum E(k) across all K members
     """
     forecaster.eval()
     g0_head.eval()
@@ -807,34 +877,42 @@ def evaluate_autoregressive_rollouts(
     # Track metrics per horizon
     horizon_results: Dict[str, Dict[str, Any]] = {
         f"h_{h}": {
-            "D0": {"vrmse_list": [], "div_rms_list": [], "vort_rmse_list": []},
+            "GT": {
+                "div_sq_list": [],
+                "vort_sq_list": [],
+            },
+            "D0": {
+                "vrmse_sq_list": [],
+                "div_sq_list": [],
+                "vort_mse_list": [],
+            },
             "G0": {
-                "vrmse_list": [],
-                "spread_raw_list": [],
-                "spread_adj_list": [],
-                "rmse_vel_list": [],
-                "ssr_raw_list": [],
-                "ssr_adj_list": [],
+                "vrmse_sq_list": [],
+                "var_vel_list": [],
+                "mse_vel_list": [],
+                "var_vars": {c: [] for c in ("u", "v", "p", "s")},
+                "mse_vars": {c: [] for c in ("u", "v", "p", "s")},
+                "div_mean_sq_list": [],
                 "div_sample_rms_list": [],
-                "div_mean_rms_list": [],
-                "vort_rmse_list": [],
-                "vort_samp_rms_list": [],
+                "vort_mean_mse_list": [],
+                "vort_sample_rmse_list": [],
+                "vort_sample_intensity_list": [],
                 "picp_80_list": [],
                 "picp_90_list": [],
                 "mpiw_80_list": [],
                 "mpiw_90_list": [],
             },
             "G1": {
-                "vrmse_list": [],
-                "spread_raw_list": [],
-                "spread_adj_list": [],
-                "rmse_vel_list": [],
-                "ssr_raw_list": [],
-                "ssr_adj_list": [],
+                "vrmse_sq_list": [],
+                "var_vel_list": [],
+                "mse_vel_list": [],
+                "var_vars": {c: [] for c in ("u", "v", "p", "s")},
+                "mse_vars": {c: [] for c in ("u", "v", "p", "s")},
+                "div_mean_sq_list": [],
                 "div_sample_rms_list": [],
-                "div_mean_rms_list": [],
-                "vort_rmse_list": [],
-                "vort_samp_rms_list": [],
+                "vort_mean_mse_list": [],
+                "vort_sample_rmse_list": [],
+                "vort_sample_intensity_list": [],
                 "picp_80_list": [],
                 "picp_90_list": [],
                 "mpiw_80_list": [],
@@ -902,6 +980,7 @@ def evaluate_autoregressive_rollouts(
 
                 window_manifest.append({
                     "window_index": window_count - 1,
+                    "trajectory_id": traj_key,
                     "source_file": src_file,
                     "traj_idx": sim_idx,
                     "cluster_id": c_id,
@@ -976,48 +1055,55 @@ def evaluate_autoregressive_rollouts(
                     step_idx = h - 1
                     t_gt = q_gt_phys[step_idx]  # (4, Ny, Nx)
                     vort_gt = compute_vorticity(t_gt[0:1], t_gt[1:2])
+                    div_gt = compute_divergence(t_gt[0:1], t_gt[1:2])
+
+                    # GT references
+                    horizon_results[f"h_{h}"]["GT"]["div_sq_list"].append(float((div_gt ** 2).mean().item()))
+                    horizon_results[f"h_{h}"]["GT"]["vort_sq_list"].append(float((vort_gt ** 2).mean().item()))
 
                     # D0 metrics
                     p_d0 = q_d0_phys[step_idx]
                     vrmse_d0 = float(compute_vrmse(p_d0, t_gt).item())
                     div_d0 = compute_divergence(p_d0[0:1], p_d0[1:2])
-                    div_rms_d0 = float(torch.sqrt(torch.mean(div_d0**2)).item())
                     vort_d0 = compute_vorticity(p_d0[0:1], p_d0[1:2])
-                    vort_rmse_d0 = float(torch.sqrt(((vort_d0 - vort_gt) ** 2).mean()).item())
 
-                    horizon_results[f"h_{h}"]["D0"]["vrmse_list"].append(vrmse_d0)
-                    horizon_results[f"h_{h}"]["D0"]["div_rms_list"].append(div_rms_d0)
-                    horizon_results[f"h_{h}"]["D0"]["vort_rmse_list"].append(vort_rmse_d0)
+                    horizon_results[f"h_{h}"]["D0"]["vrmse_sq_list"].append(vrmse_d0 ** 2)
+                    horizon_results[f"h_{h}"]["D0"]["div_sq_list"].append(float((div_d0 ** 2).mean().item()))
+                    horizon_results[f"h_{h}"]["D0"]["vort_mse_list"].append(float(((vort_d0 - vort_gt) ** 2).mean().item()))
 
                     # G0 metrics
                     p_g0_mean = q_g0_mean_phys[step_idx]
                     samps_g0 = q_g0_samp_phys[:, step_idx]  # (K, 4, Ny, Nx)
                     vrmse_g0 = float(compute_vrmse(p_g0_mean, t_gt).item())
                     div_g0_mean = compute_divergence(p_g0_mean[0:1], p_g0_mean[1:2])
-                    div_rms_g0_mean = float(torch.sqrt(torch.mean(div_g0_mean**2)).item())
                     vort_g0_mean = compute_vorticity(p_g0_mean[0:1], p_g0_mean[1:2])
-                    vort_rmse_g0 = float(torch.sqrt(((vort_g0_mean - vort_gt) ** 2).mean()).item())
 
-                    # G0 sample divergence and vorticity
                     div_samps_g0 = compute_divergence(samps_g0[:, 0], samps_g0[:, 1])
-                    div_rms_g0_samp = float(torch.sqrt(torch.mean(div_samps_g0**2, dim=(-2, -1))).mean().item())
                     vort_samps_g0 = compute_vorticity(samps_g0[:, 0], samps_g0[:, 1])
-                    vort_rms_g0_samp = float(torch.sqrt((vort_samps_g0 ** 2).mean(dim=(-2, -1))).mean().item())
 
-                    # G0 Spread-Skill & Quantiles
                     ss_g0 = compute_ensemble_spread_skill(samps_g0, t_gt)
                     q_cov_g0 = compute_physical_quantiles_coverage(samps_g0, t_gt)
 
-                    horizon_results[f"h_{h}"]["G0"]["vrmse_list"].append(vrmse_g0)
-                    horizon_results[f"h_{h}"]["G0"]["spread_raw_list"].append(ss_g0["velocity"]["rms_spread"])
-                    horizon_results[f"h_{h}"]["G0"]["spread_adj_list"].append(ss_g0["velocity"]["finite_k_adjusted_spread"])
-                    horizon_results[f"h_{h}"]["G0"]["rmse_vel_list"].append(ss_g0["velocity"]["rmse_velocity"])
-                    horizon_results[f"h_{h}"]["G0"]["ssr_raw_list"].append(ss_g0["velocity"]["spread_skill_ratio"])
-                    horizon_results[f"h_{h}"]["G0"]["ssr_adj_list"].append(ss_g0["velocity"]["finite_k_adjusted_ssr"])
-                    horizon_results[f"h_{h}"]["G0"]["div_mean_rms_list"].append(div_rms_g0_mean)
-                    horizon_results[f"h_{h}"]["G0"]["div_sample_rms_list"].append(div_rms_g0_samp)
-                    horizon_results[f"h_{h}"]["G0"]["vort_rmse_list"].append(vort_rmse_g0)
-                    horizon_results[f"h_{h}"]["G0"]["vort_samp_rms_list"].append(vort_rms_g0_samp)
+                    horizon_results[f"h_{h}"]["G0"]["vrmse_sq_list"].append(vrmse_g0 ** 2)
+                    horizon_results[f"h_{h}"]["G0"]["var_vel_list"].append(ss_g0["velocity"]["mean_var"])
+                    horizon_results[f"h_{h}"]["G0"]["mse_vel_list"].append(ss_g0["velocity"]["mse"])
+                    for name in ("u", "v", "p", "s"):
+                        horizon_results[f"h_{h}"]["G0"]["var_vars"][name].append(ss_g0["per_variable"][name]["mean_var"])
+                        horizon_results[f"h_{h}"]["G0"]["mse_vars"][name].append(ss_g0["per_variable"][name]["mse"])
+
+                    horizon_results[f"h_{h}"]["G0"]["div_mean_sq_list"].append(float((div_g0_mean ** 2).mean().item()))
+                    horizon_results[f"h_{h}"]["G0"]["div_sample_rms_list"].append(
+                        float(torch.sqrt(torch.mean(div_samps_g0 ** 2, dim=(-2, -1))).mean().item())
+                    )
+                    horizon_results[f"h_{h}"]["G0"]["vort_mean_mse_list"].append(
+                        float(((vort_g0_mean - vort_gt) ** 2).mean().item())
+                    )
+                    horizon_results[f"h_{h}"]["G0"]["vort_sample_rmse_list"].append(
+                        float(torch.sqrt(((vort_samps_g0 - vort_gt) ** 2).mean(dim=(-2, -1))).mean().item())
+                    )
+                    horizon_results[f"h_{h}"]["G0"]["vort_sample_intensity_list"].append(
+                        float(torch.sqrt((vort_samps_g0 ** 2).mean(dim=(-2, -1))).mean().item())
+                    )
                     horizon_results[f"h_{h}"]["G0"]["picp_80_list"].append(q_cov_g0["velocity"]["picp_80"])
                     horizon_results[f"h_{h}"]["G0"]["picp_90_list"].append(q_cov_g0["velocity"]["picp_90"])
                     horizon_results[f"h_{h}"]["G0"]["mpiw_80_list"].append(q_cov_g0["velocity"]["mpiw_80"])
@@ -1028,30 +1114,34 @@ def evaluate_autoregressive_rollouts(
                     samps_g1 = q_g1_samp_phys[:, step_idx]  # (K, 4, Ny, Nx)
                     vrmse_g1 = float(compute_vrmse(p_g1_mean, t_gt).item())
                     div_g1_mean = compute_divergence(p_g1_mean[0:1], p_g1_mean[1:2])
-                    div_rms_g1_mean = float(torch.sqrt(torch.mean(div_g1_mean**2)).item())
                     vort_g1_mean = compute_vorticity(p_g1_mean[0:1], p_g1_mean[1:2])
-                    vort_rmse_g1 = float(torch.sqrt(((vort_g1_mean - vort_gt) ** 2).mean()).item())
 
-                    # G1 sample divergence and vorticity
                     div_samps_g1 = compute_divergence(samps_g1[:, 0], samps_g1[:, 1])
-                    div_rms_g1_samp = float(torch.sqrt(torch.mean(div_samps_g1**2, dim=(-2, -1))).mean().item())
                     vort_samps_g1 = compute_vorticity(samps_g1[:, 0], samps_g1[:, 1])
-                    vort_rms_g1_samp = float(torch.sqrt((vort_samps_g1 ** 2).mean(dim=(-2, -1))).mean().item())
 
-                    # G1 Spread-Skill & Quantiles
                     ss_g1 = compute_ensemble_spread_skill(samps_g1, t_gt)
                     q_cov_g1 = compute_physical_quantiles_coverage(samps_g1, t_gt)
 
-                    horizon_results[f"h_{h}"]["G1"]["vrmse_list"].append(vrmse_g1)
-                    horizon_results[f"h_{h}"]["G1"]["spread_raw_list"].append(ss_g1["velocity"]["rms_spread"])
-                    horizon_results[f"h_{h}"]["G1"]["spread_adj_list"].append(ss_g1["velocity"]["finite_k_adjusted_spread"])
-                    horizon_results[f"h_{h}"]["G1"]["rmse_vel_list"].append(ss_g1["velocity"]["rmse_velocity"])
-                    horizon_results[f"h_{h}"]["G1"]["ssr_raw_list"].append(ss_g1["velocity"]["spread_skill_ratio"])
-                    horizon_results[f"h_{h}"]["G1"]["ssr_adj_list"].append(ss_g1["velocity"]["finite_k_adjusted_ssr"])
-                    horizon_results[f"h_{h}"]["G1"]["div_mean_rms_list"].append(div_rms_g1_mean)
-                    horizon_results[f"h_{h}"]["G1"]["div_sample_rms_list"].append(div_rms_g1_samp)
-                    horizon_results[f"h_{h}"]["G1"]["vort_rmse_list"].append(vort_rmse_g1)
-                    horizon_results[f"h_{h}"]["G1"]["vort_samp_rms_list"].append(vort_rms_g1_samp)
+                    horizon_results[f"h_{h}"]["G1"]["vrmse_sq_list"].append(vrmse_g1 ** 2)
+                    horizon_results[f"h_{h}"]["G1"]["var_vel_list"].append(ss_g1["velocity"]["mean_var"])
+                    horizon_results[f"h_{h}"]["G1"]["mse_vel_list"].append(ss_g1["velocity"]["mse"])
+                    for name in ("u", "v", "p", "s"):
+                        horizon_results[f"h_{h}"]["G1"]["var_vars"][name].append(ss_g1["per_variable"][name]["mean_var"])
+                        horizon_results[f"h_{h}"]["G1"]["mse_vars"][name].append(ss_g1["per_variable"][name]["mse"])
+
+                    horizon_results[f"h_{h}"]["G1"]["div_mean_sq_list"].append(float((div_g1_mean ** 2).mean().item()))
+                    horizon_results[f"h_{h}"]["G1"]["div_sample_rms_list"].append(
+                        float(torch.sqrt(torch.mean(div_samps_g1 ** 2, dim=(-2, -1))).mean().item())
+                    )
+                    horizon_results[f"h_{h}"]["G1"]["vort_mean_mse_list"].append(
+                        float(((vort_g1_mean - vort_gt) ** 2).mean().item())
+                    )
+                    horizon_results[f"h_{h}"]["G1"]["vort_sample_rmse_list"].append(
+                        float(torch.sqrt(((vort_samps_g1 - vort_gt) ** 2).mean(dim=(-2, -1))).mean().item())
+                    )
+                    horizon_results[f"h_{h}"]["G1"]["vort_sample_intensity_list"].append(
+                        float(torch.sqrt((vort_samps_g1 ** 2).mean(dim=(-2, -1))).mean().item())
+                    )
                     horizon_results[f"h_{h}"]["G1"]["picp_80_list"].append(q_cov_g1["velocity"]["picp_80"])
                     horizon_results[f"h_{h}"]["G1"]["picp_90_list"].append(q_cov_g1["velocity"]["picp_90"])
                     horizon_results[f"h_{h}"]["G1"]["mpiw_80_list"].append(q_cov_g1["velocity"]["mpiw_80"])
@@ -1091,40 +1181,63 @@ def evaluate_autoregressive_rollouts(
                 spectrum_data["g1_sample_spectrum"].append(e_g1_s.cpu().numpy().tolist())
                 spectrum_data["g1_mean_spectrum"].append(e_g1_m.cpu().numpy().tolist())
 
-    # Formulate summary per horizon
+    # Formulate summary per horizon with mathematically pooled RMS metrics
     rollout_summary = {}
     for h in eval_horizons:
-        d0_vrmse = float(np.mean(horizon_results[f"h_{h}"]["D0"]["vrmse_list"]))
-        d0_div = float(np.mean(horizon_results[f"h_{h}"]["D0"]["div_rms_list"]))
-        d0_vort = float(np.mean(horizon_results[f"h_{h}"]["D0"]["vort_rmse_list"]))
+        d0_vrmse = float(math.sqrt(np.mean(horizon_results[f"h_{h}"]["D0"]["vrmse_sq_list"])))
+        d0_div = float(math.sqrt(np.mean(horizon_results[f"h_{h}"]["D0"]["div_sq_list"])))
+        d0_vort = float(math.sqrt(np.mean(horizon_results[f"h_{h}"]["D0"]["vort_mse_list"])))
+
+        gt_div = float(math.sqrt(np.mean(horizon_results[f"h_{h}"]["GT"]["div_sq_list"])))
+        gt_vort = float(math.sqrt(np.mean(horizon_results[f"h_{h}"]["GT"]["vort_sq_list"])))
 
         # G0 metrics
-        g0_vrmse = float(np.mean(horizon_results[f"h_{h}"]["G0"]["vrmse_list"]))
-        g0_spread_raw = float(np.mean(horizon_results[f"h_{h}"]["G0"]["spread_raw_list"]))
-        g0_spread_adj = float(np.mean(horizon_results[f"h_{h}"]["G0"]["spread_adj_list"]))
-        g0_rmse_vel = float(np.mean(horizon_results[f"h_{h}"]["G0"]["rmse_vel_list"]))
-        g0_ssr_raw = float(np.mean(horizon_results[f"h_{h}"]["G0"]["ssr_raw_list"]))
-        g0_ssr_adj = float(np.mean(horizon_results[f"h_{h}"]["G0"]["ssr_adj_list"]))
+        g0_vrmse = float(math.sqrt(np.mean(horizon_results[f"h_{h}"]["G0"]["vrmse_sq_list"])))
+        g0_ss_vel = compute_pooled_spread_skill(
+            horizon_results[f"h_{h}"]["G0"]["var_vel_list"],
+            horizon_results[f"h_{h}"]["G0"]["mse_vel_list"],
+            K=num_samples,
+        )
+        g0_ss_vars = {
+            name: compute_pooled_spread_skill(
+                horizon_results[f"h_{h}"]["G0"]["var_vars"][name],
+                horizon_results[f"h_{h}"]["G0"]["mse_vars"][name],
+                K=num_samples,
+            )
+            for name in ("u", "v", "p", "s")
+        }
+        g0_div_mean = float(math.sqrt(np.mean(horizon_results[f"h_{h}"]["G0"]["div_mean_sq_list"])))
         g0_div_samp = float(np.mean(horizon_results[f"h_{h}"]["G0"]["div_sample_rms_list"]))
-        g0_div_mean = float(np.mean(horizon_results[f"h_{h}"]["G0"]["div_mean_rms_list"]))
-        g0_vort_rmse = float(np.mean(horizon_results[f"h_{h}"]["G0"]["vort_rmse_list"]))
-        g0_vort_samp = float(np.mean(horizon_results[f"h_{h}"]["G0"]["vort_samp_rms_list"]))
+        g0_vort_mean = float(math.sqrt(np.mean(horizon_results[f"h_{h}"]["G0"]["vort_mean_mse_list"])))
+        g0_vort_samp_err = float(np.mean(horizon_results[f"h_{h}"]["G0"]["vort_sample_rmse_list"]))
+        g0_vort_samp_int = float(np.mean(horizon_results[f"h_{h}"]["G0"]["vort_sample_intensity_list"]))
+
         g0_picp_80 = float(np.mean(horizon_results[f"h_{h}"]["G0"]["picp_80_list"]))
         g0_picp_90 = float(np.mean(horizon_results[f"h_{h}"]["G0"]["picp_90_list"]))
         g0_mpiw_80 = float(np.mean(horizon_results[f"h_{h}"]["G0"]["mpiw_80_list"]))
         g0_mpiw_90 = float(np.mean(horizon_results[f"h_{h}"]["G0"]["mpiw_90_list"]))
 
         # G1 metrics
-        g1_vrmse = float(np.mean(horizon_results[f"h_{h}"]["G1"]["vrmse_list"]))
-        g1_spread_raw = float(np.mean(horizon_results[f"h_{h}"]["G1"]["spread_raw_list"]))
-        g1_spread_adj = float(np.mean(horizon_results[f"h_{h}"]["G1"]["spread_adj_list"]))
-        g1_rmse_vel = float(np.mean(horizon_results[f"h_{h}"]["G1"]["rmse_vel_list"]))
-        g1_ssr_raw = float(np.mean(horizon_results[f"h_{h}"]["G1"]["ssr_raw_list"]))
-        g1_ssr_adj = float(np.mean(horizon_results[f"h_{h}"]["G1"]["ssr_adj_list"]))
+        g1_vrmse = float(math.sqrt(np.mean(horizon_results[f"h_{h}"]["G1"]["vrmse_sq_list"])))
+        g1_ss_vel = compute_pooled_spread_skill(
+            horizon_results[f"h_{h}"]["G1"]["var_vel_list"],
+            horizon_results[f"h_{h}"]["G1"]["mse_vel_list"],
+            K=num_samples,
+        )
+        g1_ss_vars = {
+            name: compute_pooled_spread_skill(
+                horizon_results[f"h_{h}"]["G1"]["var_vars"][name],
+                horizon_results[f"h_{h}"]["G1"]["mse_vars"][name],
+                K=num_samples,
+            )
+            for name in ("u", "v", "p", "s")
+        }
+        g1_div_mean = float(math.sqrt(np.mean(horizon_results[f"h_{h}"]["G1"]["div_mean_sq_list"])))
         g1_div_samp = float(np.mean(horizon_results[f"h_{h}"]["G1"]["div_sample_rms_list"]))
-        g1_div_mean = float(np.mean(horizon_results[f"h_{h}"]["G1"]["div_mean_rms_list"]))
-        g1_vort_rmse = float(np.mean(horizon_results[f"h_{h}"]["G1"]["vort_rmse_list"]))
-        g1_vort_samp = float(np.mean(horizon_results[f"h_{h}"]["G1"]["vort_samp_rms_list"]))
+        g1_vort_mean = float(math.sqrt(np.mean(horizon_results[f"h_{h}"]["G1"]["vort_mean_mse_list"])))
+        g1_vort_samp_err = float(np.mean(horizon_results[f"h_{h}"]["G1"]["vort_sample_rmse_list"]))
+        g1_vort_samp_int = float(np.mean(horizon_results[f"h_{h}"]["G1"]["vort_sample_intensity_list"]))
+
         g1_picp_80 = float(np.mean(horizon_results[f"h_{h}"]["G1"]["picp_80_list"]))
         g1_picp_90 = float(np.mean(horizon_results[f"h_{h}"]["G1"]["picp_90_list"]))
         g1_mpiw_80 = float(np.mean(horizon_results[f"h_{h}"]["G1"]["mpiw_80_list"]))
@@ -1132,6 +1245,10 @@ def evaluate_autoregressive_rollouts(
 
         rollout_summary[f"horizon_{h}"] = {
             "horizon_step": h,
+            "ground_truth_references": {
+                "rms_divergence": gt_div,
+                "vorticity_rms": gt_vort,
+            },
             "D0": {
                 "ensemble_mean_vrmse": d0_vrmse,
                 "rms_divergence": d0_div,
@@ -1139,15 +1256,13 @@ def evaluate_autoregressive_rollouts(
             },
             "G0": {
                 "ensemble_mean_vrmse": g0_vrmse,
-                "velocity_rmse": g0_rmse_vel,
-                "rms_spread_raw": g0_spread_raw,
-                "rms_spread_adjusted": g0_spread_adj,
-                "spread_skill_ratio_raw": g0_ssr_raw,
-                "spread_skill_ratio_adjusted": g0_ssr_adj,
-                "rms_divergence_individual_samples": g0_div_samp,
+                "spread_skill_velocity": g0_ss_vel,
+                "spread_skill_per_variable": g0_ss_vars,
                 "rms_divergence_ensemble_mean": g0_div_mean,
-                "vorticity_rmse": g0_vort_rmse,
-                "vorticity_rms_individual_samples": g0_vort_samp,
+                "rms_divergence_individual_samples": g0_div_samp,
+                "vorticity_rmse_ensemble_mean": g0_vort_mean,
+                "vorticity_rmse_individual_samples": g0_vort_samp_err,
+                "vorticity_rms_individual_samples": g0_vort_samp_int,
                 "velocity_physical_quantiles": {
                     "picp_80": g0_picp_80,
                     "picp_90": g0_picp_90,
@@ -1159,15 +1274,13 @@ def evaluate_autoregressive_rollouts(
             },
             "G1": {
                 "ensemble_mean_vrmse": g1_vrmse,
-                "velocity_rmse": g1_rmse_vel,
-                "rms_spread_raw": g1_spread_raw,
-                "rms_spread_adjusted": g1_spread_adj,
-                "spread_skill_ratio_raw": g1_ssr_raw,
-                "spread_skill_ratio_adjusted": g1_ssr_adj,
-                "rms_divergence_individual_samples": g1_div_samp,
+                "spread_skill_velocity": g1_ss_vel,
+                "spread_skill_per_variable": g1_ss_vars,
                 "rms_divergence_ensemble_mean": g1_div_mean,
-                "vorticity_rmse": g1_vort_rmse,
-                "vorticity_rms_individual_samples": g1_vort_samp,
+                "rms_divergence_individual_samples": g1_div_samp,
+                "vorticity_rmse_ensemble_mean": g1_vort_mean,
+                "vorticity_rmse_individual_samples": g1_vort_samp_err,
+                "vorticity_rms_individual_samples": g1_vort_samp_int,
                 "velocity_physical_quantiles": {
                     "picp_80": g1_picp_80,
                     "picp_90": g1_picp_90,
@@ -1194,7 +1307,7 @@ def evaluate_autoregressive_rollouts(
 
     evaluation_mode = (
         "full_test_set"
-        if max_rollout_windows is None or window_count >= total_windows_in_loader
+        if max_rollout_windows is None and window_count >= total_windows_in_loader
         else "diagnostic_sampling"
     )
 
@@ -1211,8 +1324,8 @@ def evaluate_autoregressive_rollouts(
             "num_samples": num_samples,
             "eval_horizons": list(eval_horizons),
             "seed": seed,
-            "spread_formula": "RMS spread = sqrt(mean(var_k)) with Bessel correction (ddof=1)",
-            "rmse_formula": "RMSE = sqrt(mean((ensemble_mean - target)^2))",
+            "spread_formula": "Pooled RMS spread = sqrt(mean(var_k)) with Bessel correction (ddof=1)",
+            "rmse_formula": "Pooled RMSE = sqrt(mean((ensemble_mean - target)^2))",
             "finite_k_inflation_factor": float(math.sqrt((num_samples + 1.0) / num_samples)),
             "window_manifest": window_manifest,
         },
@@ -1512,10 +1625,12 @@ def main():
         print("  Autoregressive Rollout VRMSE Summary across Horizons:")
         for h in (1, 5, 10, 20, 30):
             res_h = step2_results["per_horizon_metrics"][f"horizon_{h}"]
+            g0_ss = res_h["G0"]["spread_skill_velocity"]
+            g1_ss = res_h["G1"]["spread_skill_velocity"]
             print(
                 f"    Step {h:02d} | D0 VRMSE: {res_h['D0']['ensemble_mean_vrmse']:.4f} | "
-                f"G0 VRMSE: {res_h['G0']['ensemble_mean_vrmse']:.4f} (RMS Spread: {res_h['G0']['rms_spread_raw']:.4f}, SSR: {res_h['G0']['spread_skill_ratio_raw']:.3f}) | "
-                f"G1 VRMSE: {res_h['G1']['ensemble_mean_vrmse']:.4f} (RMS Spread: {res_h['G1']['rms_spread_raw']:.4f}, SSR: {res_h['G1']['spread_skill_ratio_raw']:.3f})"
+                f"G0 VRMSE: {res_h['G0']['ensemble_mean_vrmse']:.4f} (Pooled Spread: {g0_ss['pooled_rms_spread_raw']:.4f}, Pooled SSR: {g0_ss['pooled_ssr_raw']:.3f}, Mean Window SSR: {g0_ss['mean_window_ssr']:.3f}) | "
+                f"G1 VRMSE: {res_h['G1']['ensemble_mean_vrmse']:.4f} (Pooled Spread: {g1_ss['pooled_rms_spread_raw']:.4f}, Pooled SSR: {g1_ss['pooled_ssr_raw']:.3f}, Mean Window SSR: {g1_ss['mean_window_ssr']:.3f})"
             )
 
     # 7. Formulate Final JSON Report and Validate Finiteness
