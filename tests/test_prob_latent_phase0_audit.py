@@ -13,6 +13,8 @@ Covers all required acceptance scenarios:
 7. Atomic D0 forecaster parity check and rejection of mismatched representation weights.
 """
 
+import os
+import json
 from pathlib import Path
 import subprocess
 import pytest
@@ -524,3 +526,58 @@ class TestArchivedLatentResidualStatsIntegrity:
         assert coverage["num_initial_condition_clusters"] == 27
         assert coverage["num_windows"] == 825
         assert coverage["stride"] == 8
+
+
+class TestVerifyLatentAuditContract:
+    """Verify runtime verification contract with real objects and fail-closed security on tampering."""
+
+    def test_verify_contract_passes_on_canonical_state(self):
+        from scripts.verify_latent_audit_contract import verify_latent_audit_contract
+
+        stats_path = "outputs/normalization/latent_residual_stats.json"
+        norm_path = "outputs/normalization/stats_grouped.pt"
+        if not os.path.exists(stats_path) or not os.path.exists(norm_path):
+            pytest.skip("Required audit files not available on machine.")
+
+        record = verify_latent_audit_contract(record_output_path="")
+        assert record["status"] == "AUDIT_VERIFIED_PASS"
+        assert "stats_file" in record
+        assert len(record["stats_file"]["sha256"]) == 64
+        assert record["data_protocol"]["normalizer_hash"].startswith("3a0fe52689657618")
+        assert record["d0_checkpoint"]["sha256"].startswith("edddbe8a2528f848")
+        assert record["data_protocol"]["dataset_coverage_provenance"] == "sourced_from_frozen_stats_metadata"
+
+    def test_mutated_normalizer_fails_closed(self, tmp_path):
+        from scripts.verify_latent_audit_contract import verify_latent_audit_contract
+
+        norm_path = "outputs/normalization/stats_grouped.pt"
+        if not os.path.exists(norm_path):
+            pytest.skip("Required stats_grouped.pt not available on machine.")
+
+        orig_norm = torch.load(norm_path, weights_only=True, map_location="cpu")
+        tampered_norm = {k: (v.clone() if torch.is_tensor(v) else v) for k, v in orig_norm.items()}
+        tampered_norm["mean"] = tampered_norm["mean"] + 0.1
+        tampered_path = tmp_path / "tampered_stats.pt"
+        torch.save(tampered_norm, tampered_path)
+
+        with pytest.raises(ValueError, match="Normalizer hash mismatch"):
+            verify_latent_audit_contract(normalizer_path=str(tampered_path), record_output_path="")
+
+    def test_tampered_stats_file_fails_closed(self, tmp_path):
+        from scripts.verify_latent_audit_contract import verify_latent_audit_contract
+
+        stats_path = "outputs/normalization/latent_residual_stats.json"
+        if not os.path.exists(stats_path):
+            pytest.skip("Required latent_residual_stats.json not available on machine.")
+
+        with open(stats_path, "r") as f:
+            stats_data = json.load(f)
+
+        # Alter mean to violate channel identity m2 - v - m^2 = 0
+        stats_data["statistics"]["channel_residual_mean"][0] += 1.0
+        tampered_stats = tmp_path / "tampered_stats.json"
+        with open(tampered_stats, "w") as f:
+            json.dump(stats_data, f)
+
+        with pytest.raises(AssertionError, match="Channel statistical identity violated"):
+            verify_latent_audit_contract(stats_path=str(tampered_stats), record_output_path="")

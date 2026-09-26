@@ -1,8 +1,12 @@
 {
-  "verification_version": "ProbLatent-R1-Audit-Verification-v1",
-  "verification_timestamp_utc": "2026-09-26T11:36:22.473964+00:00",
-  "git_commit": "c54afa52c20e53fff4ec7095383e2f6e9c172fe3",
+  "verification_version": "ProbLatent-R1-Audit-Verification-v2",
+  "verification_timestamp_utc": "2026-09-26T12:18:43.647990+00:00",
+  "git_commit": "aae9ed836fe37ec89522ce66382de1418c8d29a1",
   "git_dirty": true,
+  "stats_file": {
+    "path": "outputs/normalization/latent_residual_stats.json",
+    "sha256": "448b2c338d7ec9e3eb05c1fb1ca4d0ca2088eae2e7e6bec5fd2fab0c27978f36"
+  },
   "d0_checkpoint": {
     "path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H12/latent_transformer/best_long_vrmse.pt",
     "sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6",
@@ -11,11 +15,13 @@
   "data_protocol": {
     "split_file": "outputs/splits/grouped_split.json",
     "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+    "normalizer_file": "outputs/normalization/stats_grouped.pt",
     "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
     "train_trajectories": 33,
     "train_initial_clusters": 27,
     "total_train_windows": 825,
-    "train_stride": 8
+    "train_stride": 8,
+    "dataset_coverage_provenance": "sourced_from_frozen_stats_metadata"
   },
   "statistical_checks": {
     "num_channels": 64,

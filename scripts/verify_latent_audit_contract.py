@@ -12,6 +12,7 @@ Cryptographically verifies:
 """
 
 from datetime import datetime, timezone
+import argparse
 import json
 import os
 from pathlib import Path
@@ -24,9 +25,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.data.normalization import FieldNormalizer
 from src.utils.checkpoint import resolve_spatial_pos_config
 from src.utils.provenance import (
     compute_file_sha256,
+    compute_normalizer_hash,
     compute_split_hash_from_file,
     get_git_commit,
     hash_matches,
@@ -36,11 +39,14 @@ from src.utils.provenance import (
 
 def verify_latent_audit_contract(
     stats_path: str = "outputs/normalization/latent_residual_stats.json",
+    normalizer_path: str = "outputs/normalization/stats_grouped.pt",
     record_output_path: str = "outputs/normalization/latent_audit_verification_record.json",
 ) -> Dict[str, Any]:
     stats_file = Path(stats_path)
     if not stats_file.exists():
         raise FileNotFoundError(f"Latent residual stats file not found: {stats_path}")
+
+    actual_stats_sha = compute_file_sha256(stats_file)
 
     with open(stats_file, "r") as f:
         data = json.load(f)
@@ -89,12 +95,27 @@ def verify_latent_audit_contract(
     assert num_trajs == 33, f"Expected 33 training trajectories, got {num_trajs}"
     assert num_clusters == 27, f"Expected 27 initial condition clusters, got {num_clusters}"
 
-    # 3. Normalizer Hash Verification
+    # 3. Runtime Normalizer State and Hash Verification
+    if not os.path.exists(normalizer_path):
+        raise FileNotFoundError(f"Normalizer statistics file not found: {normalizer_path}")
+
+    normalizer = FieldNormalizer()
+    normalizer.load_state_dict(torch.load(normalizer_path, weights_only=True, map_location="cpu"))
+    actual_norm_hash = compute_normalizer_hash(normalizer)
+
     expected_norm_hash = split_info.get("normalizer_hash")
     ckpt_norm_hash = ckpt_data.get("normalizer_hash") or ckpt_data.get("config", {}).get("normalizer_hash")
-    assert hash_matches(expected_norm_hash, ckpt_norm_hash, min_prefix_len=16), (
-        f"Normalizer hash mismatch with D0: expected {expected_norm_hash}, got {ckpt_norm_hash}"
-    )
+
+    if not hash_matches(expected_norm_hash, actual_norm_hash, min_prefix_len=16):
+        raise ValueError(
+            f"Normalizer hash mismatch between stats file and actual normalizer file: "
+            f"expected {expected_norm_hash}, got {actual_norm_hash}"
+        )
+    if not hash_matches(ckpt_norm_hash, actual_norm_hash, min_prefix_len=16):
+        raise ValueError(
+            f"Normalizer hash mismatch between D0 checkpoint and actual normalizer file: "
+            f"ckpt has {ckpt_norm_hash}, got {actual_norm_hash}"
+        )
 
     # 4. Statistical Invariant Verification
     stats = data["statistics"]
@@ -126,11 +147,16 @@ def verify_latent_audit_contract(
     assert pooled_err < 1e-14, f"Pooled variance identity error: {pooled_err}"
 
     # 5. Emit Verification Record
+    coverage_meta = split_info.get("dataset_coverage", {})
     record = {
-        "verification_version": "ProbLatent-R1-Audit-Verification-v1",
+        "verification_version": "ProbLatent-R1-Audit-Verification-v2",
         "verification_timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "git_commit": get_git_commit(PROJECT_ROOT),
         "git_dirty": is_git_dirty(PROJECT_ROOT),
+        "stats_file": {
+            "path": str(stats_file),
+            "sha256": actual_stats_sha,
+        },
         "d0_checkpoint": {
             "path": d0_path,
             "sha256": actual_d0_sha,
@@ -139,11 +165,13 @@ def verify_latent_audit_contract(
         "data_protocol": {
             "split_file": split_file,
             "split_hash": actual_split_hash,
-            "normalizer_hash": ckpt_norm_hash,
+            "normalizer_file": normalizer_path,
+            "normalizer_hash": actual_norm_hash,
             "train_trajectories": num_trajs,
             "train_initial_clusters": num_clusters,
-            "total_train_windows": 825,
-            "train_stride": 8,
+            "total_train_windows": coverage_meta.get("num_windows", 825),
+            "train_stride": coverage_meta.get("stride", 8),
+            "dataset_coverage_provenance": "sourced_from_frozen_stats_metadata",
         },
         "statistical_checks": {
             "num_channels": 64,
@@ -159,18 +187,46 @@ def verify_latent_audit_contract(
         "status": "AUDIT_VERIFIED_PASS",
     }
 
-    os.makedirs(os.path.dirname(record_output_path), exist_ok=True)
-    with open(record_output_path, "w") as f:
-        json.dump(record, f, indent=2)
+    if record_output_path:
+        os.makedirs(os.path.dirname(record_output_path), exist_ok=True)
+        with open(record_output_path, "w") as f:
+            json.dump(record, f, indent=2)
 
     return record
 
 
 if __name__ == "__main__":
-    record = verify_latent_audit_contract()
+    parser = argparse.ArgumentParser(description="Cryptographically verify latent audit contract.")
+    parser.add_argument(
+        "--stats_path",
+        type=str,
+        default="outputs/normalization/latent_residual_stats.json",
+        help="Path to latent residual stats JSON.",
+    )
+    parser.add_argument(
+        "--normalizer_path",
+        type=str,
+        default="outputs/normalization/stats_grouped.pt",
+        help="Path to normalizer state pt file.",
+    )
+    parser.add_argument(
+        "--record_output_path",
+        type=str,
+        default="outputs/normalization/latent_audit_verification_record.json",
+        help="Path to save verification record JSON.",
+    )
+    args = parser.parse_args()
+
+    record = verify_latent_audit_contract(
+        stats_path=args.stats_path,
+        normalizer_path=args.normalizer_path,
+        record_output_path=args.record_output_path,
+    )
     print("Latent residual audit contract verified successfully:")
-    print(f"  D0 SHA-256:        {record['d0_checkpoint']['sha256']}")
-    print(f"  Split hash:        {record['data_protocol']['split_hash']}")
-    print(f"  Topology:          {record['data_protocol']['train_trajectories']} trajectories, {record['data_protocol']['train_initial_clusters']} clusters, {record['data_protocol']['total_train_windows']} windows")
-    print(f"  Pooled variance:   {record['statistical_checks']['pooled_residual_variance']:.10f}")
-    print(f"  Audit Status:      {record['status']}")
+    print(f"  Stats file SHA-256: {record['stats_file']['sha256']}")
+    print(f"  D0 SHA-256:         {record['d0_checkpoint']['sha256']}")
+    print(f"  Split hash:         {record['data_protocol']['split_hash']}")
+    print(f"  Normalizer hash:    {record['data_protocol']['normalizer_hash']}")
+    print(f"  Topology:           {record['data_protocol']['train_trajectories']} trajectories, {record['data_protocol']['train_initial_clusters']} clusters")
+    print(f"  Windows provenance: {record['data_protocol']['total_train_windows']} windows ({record['data_protocol']['dataset_coverage_provenance']})")
+    print(f"  Audit Status:       {record['status']}")

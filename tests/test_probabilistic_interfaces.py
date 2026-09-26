@@ -314,10 +314,10 @@ class TestLatentForecasterSampleRollout:
 
 
 class TestStructuralParityAndGovernance:
-    """Verify refactoring parity, freeze governance, and optimizer parameter updates."""
+    """Verify interface parity, freeze governance, and optimizer parameter updates."""
 
-    def test_refactor_structural_parity_direct_and_residual_modes(self):
-        """Verify forward_features refactoring preserves exact mathematical parity in all modes."""
+    def test_deterministic_forward_and_probabilistic_mean_structural_parity(self):
+        """当前确定性接口与概率均值接口的一致性测试：验证 direct/residual 与空间位置编码下两接口一致."""
         for pred_mode in ["direct", "residual"]:
             for use_pos in [True, False]:
                 model = LatentSTTransformer(
@@ -350,6 +350,29 @@ class TestStructuralParityAndGovernance:
                 model.attach_variance_head(v_head)
                 mu_dist, _ = model.predict_distribution(z_hist, re=re, sc=sc)
                 assert torch.equal(mu_forward, mu_dist)
+
+    def test_fixed_seed_reference_output_regression(self):
+        """独立数值回归测试：固定随机种子与确定性权重，验证前向输出与预计算参考快照数值一致."""
+        torch.manual_seed(101)
+        model = LatentSTTransformer(
+            latent_channels=8,
+            embed_dim=16,
+            cond_dim=8,
+            depth=1,
+            num_heads=2,
+            history_length=2,
+            prediction_mode="direct",
+            use_spatial_pos=True,
+        )
+        z_hist = torch.ones(1, 2, 8, 4, 4)
+        re = torch.tensor([1000.0])
+        sc = torch.tensor([0.5])
+        out = model(z_hist, re=re, sc=sc)
+
+        expected_sum = -16.29408455
+        expected_std = 0.57136714
+        torch.testing.assert_close(out.sum(), torch.tensor(expected_sum, dtype=torch.float32), atol=1e-4, rtol=1e-4)
+        torch.testing.assert_close(out.std(), torch.tensor(expected_std, dtype=torch.float32), atol=1e-4, rtol=1e-4)
 
     def test_freeze_for_variance_training_and_optimizer_step(self):
         """Verify Phase 2 training step updates ONLY variance head while freezing all D0 parameters."""
