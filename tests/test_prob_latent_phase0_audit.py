@@ -429,6 +429,53 @@ class TestDataProtocolFingerprintVerificationFailClosed:
         assert s_hash == real_split_hash
         assert n_hash == "NONE"
 
+    def test_missing_split_hash_fails_closed(self, tmp_path):
+        import json
+        from scripts.compute_latent_statistics import verify_data_protocol_against_checkpoint
+
+        split_file = tmp_path / "valid_split.json"
+        with open(split_file, "w") as f:
+            json.dump({"train": []}, f)
+
+        # Checkpoint missing split_hash
+        ckpt_data = {
+            "normalizer_hash": "NONE",
+        }
+        with pytest.raises(ValueError, match="Missing required 'split_hash'"):
+            verify_data_protocol_against_checkpoint(
+                ckpt_data=ckpt_data,
+                split_file=str(split_file),
+                normalizer=None,
+            )
+
+    def test_missing_normalizer_hash_fails_closed(self, tmp_path):
+        import json
+        from scripts.compute_latent_statistics import verify_data_protocol_against_checkpoint
+        from src.utils.provenance import compute_split_hash_from_file
+
+        split_file = tmp_path / "valid_split.json"
+        with open(split_file, "w") as f:
+            json.dump({"train": []}, f)
+
+        real_split_hash = compute_split_hash_from_file(str(split_file))
+
+        # Checkpoint missing normalizer_hash
+        ckpt_data = {
+            "split_hash": real_split_hash,
+        }
+        with pytest.raises(ValueError, match="Missing required 'normalizer_hash'"):
+            verify_data_protocol_against_checkpoint(
+                ckpt_data=ckpt_data,
+                split_file=str(split_file),
+                normalizer=None,
+            )
+
+    def test_explicit_nonexistent_split_file_raises_filenotfound(self):
+        from scripts.compute_latent_statistics import resolve_split_file
+
+        with pytest.raises(FileNotFoundError, match="Explicitly specified split file not found"):
+            resolve_split_file(split_type="grouped", split_file="/path/to/nonexistent/split.json")
+
 
 class TestArchivedLatentResidualStatsIntegrity:
     """Verify the archived latent_residual_stats.json satisfies all mathematical and metadata contracts."""

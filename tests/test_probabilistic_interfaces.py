@@ -219,23 +219,202 @@ class TestLatentForecasterSampleRollout:
         # Different seeds must produce different sample trajectories
         assert not torch.allclose(res1["latent_samples"], res2["latent_samples"])
 
-    def test_sample_rollout_trajectory_isolation(self, forecaster):
-        """Verify that sample path k=0 does not contaminate sample path k=1."""
+    def test_controlled_noise_trajectory_isolation(self, forecaster):
+        """Verify rigorously that altering path 0 noise does not alter path 1 at any horizon step."""
         q_hist = torch.randn(1, 2, 4, 16, 16)
+        horizon = 3
+        k = 2
 
-        # Run 2 samples together
-        res_dual = forecaster.sample_rollout(q_hist=q_hist, horizon=2, num_samples=2, seed=42)
+        # 1. Baseline noise sequence for 3 steps, shape (B, K, 1, C_z, Hz, Wz) = (1, 2, 1, 8, 2, 2)
+        torch.manual_seed(42)
+        base_noise = [torch.randn(1, k, 1, 8, 2, 2) for _ in range(horizon)]
 
-        # Run 1 sample with generator initialized to the exact same seed
-        gen1 = torch.Generator().manual_seed(42)
-        # Note: when running 2 samples in parallel, step 0 generates noise for (2, ...)
-        # Trajectory 0 gets noise slice [0], Trajectory 1 gets noise slice [1].
-        # Each path evolves based only on its own previous step.
-        assert res_dual["latent_samples"].shape[1] == 2
-        # Verify the two generated trajectories differ from each other
-        sample_0 = res_dual["latent_samples"][:, 0]
-        sample_1 = res_dual["latent_samples"][:, 1]
-        assert not torch.allclose(sample_0, sample_1)
+        res_base = forecaster.sample_rollout(
+            q_hist=q_hist,
+            horizon=horizon,
+            num_samples=k,
+            custom_noise_sequence=base_noise,
+            decode_samples=True,
+        )
+
+        # 2. Perturbed noise sequence: ONLY alter Path 0 at Step 0, leave Path 1 identical at all steps
+        pert_noise = [n.clone() for n in base_noise]
+        pert_noise[0][0, 0] += 5.0  # Large perturbation to path 0 at step 0
+
+        res_pert = forecaster.sample_rollout(
+            q_hist=q_hist,
+            horizon=horizon,
+            num_samples=k,
+            custom_noise_sequence=pert_noise,
+            decode_samples=True,
+        )
+
+        # Path 0 must change because its noise changed
+        assert not torch.allclose(res_pert["latent_samples"][:, 0], res_base["latent_samples"][:, 0])
+        assert not torch.allclose(res_pert["sample_trajectories"][:, 0], res_base["sample_trajectories"][:, 0])
+
+        # Path 1 must remain 100% bit-wise identical across all horizon steps (latent and physical)
+        torch.testing.assert_close(res_pert["latent_samples"][:, 1], res_base["latent_samples"][:, 1], atol=0.0, rtol=0.0)
+        torch.testing.assert_close(res_pert["sample_trajectories"][:, 1], res_base["sample_trajectories"][:, 1], atol=0.0, rtol=0.0)
+        torch.testing.assert_close(res_pert["latent_variances"][:, 1], res_base["latent_variances"][:, 1], atol=0.0, rtol=0.0)
+
+    def test_batch_and_conditioning_isolation_multibatch(self, forecaster):
+        """Verify B>1 multi-batch and distinct Re/Sc conditioning maintains strict isolation."""
+        b, l, c_in, ny, nx = 2, 2, 4, 16, 16
+        k = 2
+        horizon = 2
+
+        q_hist = torch.randn(b, l, c_in, ny, nx)
+        re = torch.tensor([1000.0, 5000.0])
+        sc = torch.tensor([0.1, 1.0])
+
+        torch.manual_seed(99)
+        custom_noise = [torch.randn(b, k, 1, 8, 2, 2) for _ in range(horizon)]
+
+        # Joint batch rollout (B=2)
+        res_joint = forecaster.sample_rollout(
+            q_hist=q_hist,
+            re=re,
+            sc=sc,
+            horizon=horizon,
+            num_samples=k,
+            custom_noise_sequence=custom_noise,
+            decode_samples=True,
+        )
+
+        # Isolated single-batch rollouts (B=1 each)
+        noise_b0 = [n[0:1] for n in custom_noise]
+        noise_b1 = [n[1:2] for n in custom_noise]
+
+        res_b0 = forecaster.sample_rollout(
+            q_hist=q_hist[0:1],
+            re=re[0:1],
+            sc=sc[0:1],
+            horizon=horizon,
+            num_samples=k,
+            custom_noise_sequence=noise_b0,
+            decode_samples=True,
+        )
+
+        res_b1 = forecaster.sample_rollout(
+            q_hist=q_hist[1:2],
+            re=re[1:2],
+            sc=sc[1:2],
+            horizon=horizon,
+            num_samples=k,
+            custom_noise_sequence=noise_b1,
+            decode_samples=True,
+        )
+
+        # Batch 0 and Batch 1 results in joint run must exactly equal isolated runs
+        torch.testing.assert_close(res_joint["latent_samples"][0:1], res_b0["latent_samples"], atol=0.0, rtol=0.0)
+        torch.testing.assert_close(res_joint["latent_samples"][1:2], res_b1["latent_samples"], atol=0.0, rtol=0.0)
+        torch.testing.assert_close(res_joint["sample_trajectories"][0:1], res_b0["sample_trajectories"], atol=0.0, rtol=0.0)
+        torch.testing.assert_close(res_joint["sample_trajectories"][1:2], res_b1["sample_trajectories"], atol=0.0, rtol=0.0)
+
+
+class TestStructuralParityAndGovernance:
+    """Verify refactoring parity, freeze governance, and optimizer parameter updates."""
+
+    def test_refactor_structural_parity_direct_and_residual_modes(self):
+        """Verify forward_features refactoring preserves exact mathematical parity in all modes."""
+        for pred_mode in ["direct", "residual"]:
+            for use_pos in [True, False]:
+                model = LatentSTTransformer(
+                    latent_channels=8,
+                    embed_dim=16,
+                    cond_dim=8,
+                    depth=1,
+                    num_heads=2,
+                    history_length=2,
+                    prediction_mode=pred_mode,
+                    use_spatial_pos=use_pos,
+                )
+                z_hist = torch.randn(2, 2, 8, 4, 4)
+                re = torch.tensor([1000.0, 2000.0])
+                sc = torch.tensor([0.2, 0.8])
+
+                # 1. Standard forward
+                mu_forward = model(z_hist, re=re, sc=sc)
+
+                # 2. Manual evaluation of pipeline via forward_features
+                features, (b, l, c_z, hz, wz) = model.forward_features(z_hist, re=re, sc=sc)
+                delta = model.out_proj(features).view(b, 1, hz, wz, c_z).permute(0, 1, 4, 2, 3)
+                expected_mu = z_hist[:, -1:] + delta if pred_mode == "residual" else delta
+
+                # Must be 100% bit-wise identical
+                assert torch.equal(mu_forward, expected_mu)
+
+                # 3. Predict distribution mu
+                v_head = VarianceHead2D(embed_dim=16, latent_channels=8)
+                model.attach_variance_head(v_head)
+                mu_dist, _ = model.predict_distribution(z_hist, re=re, sc=sc)
+                assert torch.equal(mu_forward, mu_dist)
+
+    def test_freeze_for_variance_training_and_optimizer_step(self):
+        """Verify Phase 2 training step updates ONLY variance head while freezing all D0 parameters."""
+        enc = Encoder2D(in_channels=4, latent_channels=8, base_channels=8)
+        dec = Decoder2D(latent_channels=8, out_channels=4, base_channels=8)
+        trans = LatentSTTransformer(
+            latent_channels=8,
+            embed_dim=16,
+            cond_dim=8,
+            depth=1,
+            num_heads=2,
+            history_length=2,
+            prediction_mode="direct",
+            use_spatial_pos=False,
+        )
+        head = VarianceHead2D(embed_dim=16, latent_channels=8, variance_floor=1e-4)
+        trans.attach_variance_head(head)
+        forecaster = LatentForecaster(encoder=enc, transformer=trans, decoder=dec)
+
+        # Apply strict Phase 2 freezing contract
+        forecaster.freeze_for_variance_training()
+
+        # Check requires_grad flags
+        assert all(not p.requires_grad for p in forecaster.encoder.parameters())
+        assert all(not p.requires_grad for p in forecaster.decoder.parameters())
+        assert not forecaster.transformer.in_proj.weight.requires_grad
+        assert not forecaster.transformer.out_proj.weight.requires_grad
+        assert all(p.requires_grad for p in forecaster.transformer.variance_head.parameters())
+
+        # Save initial copies of weights
+        init_enc_weight = forecaster.encoder.in_conv.weight.clone()
+        init_dec_weight = forecaster.decoder.out_conv[2].weight.clone()
+        init_trans_in_proj = forecaster.transformer.in_proj.weight.clone()
+        init_trans_out_proj = forecaster.transformer.out_proj.weight.clone()
+        init_vhead_weight = forecaster.transformer.variance_head.linear.weight.clone()
+
+        # Train step with Gaussian NLL loss
+        optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, forecaster.parameters()),
+            lr=0.01,
+        )
+        optimizer.zero_grad()
+
+        q_hist = torch.randn(2, 2, 4, 16, 16)
+        target_z = torch.randn(2, 1, 8, 2, 2)
+        mu, var = forecaster.predict_distribution_single_step(q_hist)
+        loss = gaussian_nll_latent_loss(mu=mu, target=target_z, variance=var)
+        loss.backward()
+
+        # Verify gradients: variance head MUST have grad; frozen parts MUST have None
+        assert forecaster.transformer.variance_head.linear.weight.grad is not None
+        assert forecaster.transformer.variance_head.linear.bias.grad is not None
+        assert forecaster.transformer.out_proj.weight.grad is None
+        assert forecaster.transformer.in_proj.weight.grad is None
+        assert forecaster.encoder.in_conv.weight.grad is None
+        assert forecaster.decoder.out_conv[2].weight.grad is None
+
+        optimizer.step()
+
+        # Verify weight update: variance head updated; frozen parts remain bit-wise identical
+        assert not torch.equal(forecaster.transformer.variance_head.linear.weight, init_vhead_weight)
+        assert torch.equal(forecaster.encoder.in_conv.weight, init_enc_weight)
+        assert torch.equal(forecaster.decoder.out_conv[2].weight, init_dec_weight)
+        assert torch.equal(forecaster.transformer.in_proj.weight, init_trans_in_proj)
+        assert torch.equal(forecaster.transformer.out_proj.weight, init_trans_out_proj)
 
 
 class TestGaussianNLLLatentLoss:

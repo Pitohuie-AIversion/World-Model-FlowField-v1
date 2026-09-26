@@ -1,0 +1,32 @@
+{
+  "verification_version": "ProbLatent-R1-Audit-Verification-v1",
+  "verification_timestamp_utc": "2026-09-26T11:36:22.473964+00:00",
+  "git_commit": "c54afa52c20e53fff4ec7095383e2f6e9c172fe3",
+  "git_dirty": true,
+  "d0_checkpoint": {
+    "path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H12/latent_transformer/best_long_vrmse.pt",
+    "sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6",
+    "use_spatial_pos": true
+  },
+  "data_protocol": {
+    "split_file": "outputs/splits/grouped_split.json",
+    "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+    "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+    "train_trajectories": 33,
+    "train_initial_clusters": 27,
+    "total_train_windows": 825,
+    "train_stride": 8
+  },
+  "statistical_checks": {
+    "num_channels": 64,
+    "max_channel_identity_error": 2.7755575615628914e-17,
+    "variance_decomposition_error": 0.0,
+    "pooled_variance_identity_error": 0.0,
+    "mean_channel_centered_variance": 0.21243567587842088,
+    "mean_channel_squared_bias": 0.29603029999300406,
+    "mean_channel_second_moment": 0.508465975871425,
+    "pooled_residual_mean": -0.09137061342520868,
+    "pooled_residual_variance": 0.500117386873726
+  },
+  "status": "AUDIT_VERIFIED_PASS"
+}

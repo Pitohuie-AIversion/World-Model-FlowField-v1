@@ -183,6 +183,7 @@ class LatentForecaster(nn.Module):
         generator: Optional[torch.Generator] = None,
         variance_head: Optional[nn.Module] = None,
         decode_samples: bool = True,
+        custom_noise_sequence: Optional[list] = None,
     ) -> Dict[str, torch.Tensor]:
         """Execute single-source multi-trajectory probabilistic rollout in latent space.
 
@@ -199,6 +200,7 @@ class LatentForecaster(nn.Module):
             generator: Optional PyTorch Generator.
             variance_head: Optional variance head override.
             decode_samples: If True, decodes sample latent trajectories to physical space.
+            custom_noise_sequence: Optional list of H noise tensors for controlled testing.
 
         Returns:
             Dictionary containing:
@@ -217,12 +219,14 @@ class LatentForecaster(nn.Module):
         else:
             z_hist = self.encoder(q_hist)
 
+        c_z, hz, wz = z_hist.shape[2], z_hist.shape[3], z_hist.shape[4]
+
         # 1. Deterministic baseline rollout for reference
         buf_det = HistoryBuffer(history_length=l)
         buf_det.reset(z_hist)
 
-        def det_step(hz, _c=None):
-            return self.transformer(hz, re=re, sc=sc)
+        def det_step(hz_in, _c=None):
+            return self.transformer(hz_in, re=re, sc=sc)
 
         z_det_rollout = buf_det.rollout(det_step, steps=horizon, noise_std=0.0)
         q_det_rollout = self.decoder(z_det_rollout)
@@ -245,7 +249,7 @@ class LatentForecaster(nn.Module):
         sampled_latents = []
         sampled_variances = []
 
-        for _ in range(horizon):
+        for step in range(horizon):
             curr_hist = buf_prob.current  # (B * K, L, C_z, Hz, Wz)
             mu_t, var_t = self.transformer.predict_distribution(
                 z_hist=curr_hist,
@@ -253,7 +257,15 @@ class LatentForecaster(nn.Module):
                 sc=sc_exp,
                 variance_head=variance_head,
             )  # (B * K, 1, C_z, Hz, Wz)
-            z_sample_t = sample_next_latent(mu=mu_t, variance=var_t, generator=gen)
+            if custom_noise_sequence is not None:
+                noise_t = custom_noise_sequence[step].to(device=mu_t.device, dtype=mu_t.dtype)
+                if noise_t.ndim == 6:  # (B, K, 1, C_z, Hz, Wz)
+                    noise_t = noise_t.view(b * k, 1, c_z, hz, wz)
+                elif noise_t.ndim == 5 and noise_t.shape[0] == b and noise_t.shape[1] == k:
+                    noise_t = noise_t.view(b * k, 1, c_z, hz, wz)
+                z_sample_t = mu_t + torch.sqrt(var_t) * noise_t
+            else:
+                z_sample_t = sample_next_latent(mu=mu_t, variance=var_t, generator=gen)
             buf_prob.push(z_sample_t)
             sampled_latents.append(z_sample_t)
             sampled_variances.append(var_t)
@@ -261,9 +273,6 @@ class LatentForecaster(nn.Module):
         # Concat along horizon dimension: (B * K, H, C_z, Hz, Wz)
         z_samples_all = torch.cat(sampled_latents, dim=1)
         var_samples_all = torch.cat(sampled_variances, dim=1)
-
-        hz, wz = z_samples_all.shape[-2], z_samples_all.shape[-1]
-        c_z = z_samples_all.shape[2]
 
         # Reshape to (B, K, H, C_z, Hz, Wz)
         z_samples_reshaped = z_samples_all.view(b, k, horizon, c_z, hz, wz)
@@ -283,4 +292,25 @@ class LatentForecaster(nn.Module):
             results["ensemble_mean"] = q_samples.mean(dim=1)
 
         return results
+
+    def freeze_for_variance_training(self) -> None:
+        """Freeze representation and Transformer backbone; enable grads only on VarianceHead.
+
+        Phase 2 Governance Invariant:
+        Guarantees that deterministic mean dynamics, spatial positional embeddings,
+        conditioning projections, and encoder/decoder representations remain immutable.
+        """
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+        for p in self.decoder.parameters():
+            p.requires_grad = False
+        for p in self.transformer.parameters():
+            p.requires_grad = False
+
+        if self.transformer.variance_head is None:
+            raise RuntimeError(
+                "Cannot freeze_for_variance_training: transformer has no attached variance_head."
+            )
+        for p in self.transformer.variance_head.parameters():
+            p.requires_grad = True
 

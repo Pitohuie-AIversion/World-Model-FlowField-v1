@@ -262,15 +262,19 @@ def compute_latent_statistics_and_diagnostics(
 
 def resolve_split_file(split_type: str, split_file: Optional[str] = None) -> str:
     """Resolve path to split manifest JSON file."""
-    if split_file and os.path.exists(split_file):
-        return split_file
+    if split_file is not None:
+        if os.path.exists(split_file):
+            return split_file
+        raise FileNotFoundError(f"Explicitly specified split file not found: {split_file}")
     cand1 = f"outputs/splits/{split_type}_split.json"
     cand2 = f"outputs/splits/{split_type}.json"
     if os.path.exists(cand1):
         return cand1
     elif os.path.exists(cand2):
         return cand2
-    return cand1
+    raise FileNotFoundError(
+        f"Default split file for split_type='{split_type}' not found. Checked: {cand1}, {cand2}"
+    )
 
 
 def verify_data_protocol_against_checkpoint(
@@ -280,7 +284,7 @@ def verify_data_protocol_against_checkpoint(
 ) -> Tuple[str, str]:
     """Verify runtime split and normalizer cryptographic fingerprints against D0 contract.
 
-    Fails closed (raises ValueError) if runtime hashes do not match checkpoint contract.
+    Fails closed (raises ValueError) if hashes do not match or are missing from checkpoint contract.
     """
     if not os.path.exists(split_file):
         raise FileNotFoundError(f"Runtime split manifest not found: {split_file}")
@@ -297,21 +301,31 @@ def verify_data_protocol_against_checkpoint(
         or ckpt_data.get("config", {}).get("normalizer_hash")
     )
 
-    if expected_split_hash:
-        if not hash_matches(expected_split_hash, actual_split_hash, min_prefix_len=16):
-            raise ValueError(
-                f"Split hash contract violation: D0 checkpoint requires {expected_split_hash[:16]}..., "
-                f"but runtime split manifest '{split_file}' produced {actual_split_hash[:16]}... "
-                f"Refusing to generate latent statistics on mismatched data split."
-            )
+    if not expected_split_hash:
+        raise ValueError(
+            "Missing required 'split_hash' in D0 checkpoint metadata. "
+            "Checkpoint contract requires valid split_hash for fail-closed verification."
+        )
 
-    if expected_normalizer_hash:
-        if not hash_matches(expected_normalizer_hash, actual_normalizer_hash, min_prefix_len=16):
-            raise ValueError(
-                f"Normalizer hash contract violation: D0 checkpoint requires {expected_normalizer_hash[:16]}..., "
-                f"but runtime normalizer produced {actual_normalizer_hash[:16]}... "
-                f"Refusing to generate latent statistics on mismatched normalizer."
-            )
+    if not expected_normalizer_hash:
+        raise ValueError(
+            "Missing required 'normalizer_hash' in D0 checkpoint metadata. "
+            "Checkpoint contract requires valid normalizer_hash for fail-closed verification."
+        )
+
+    if not hash_matches(expected_split_hash, actual_split_hash, min_prefix_len=16):
+        raise ValueError(
+            f"Split hash contract violation: D0 checkpoint requires {expected_split_hash[:16]}..., "
+            f"but runtime split manifest '{split_file}' produced {actual_split_hash[:16]}... "
+            f"Refusing to generate latent statistics on mismatched data split."
+        )
+
+    if not hash_matches(expected_normalizer_hash, actual_normalizer_hash, min_prefix_len=16):
+        raise ValueError(
+            f"Normalizer hash contract violation: D0 checkpoint requires {expected_normalizer_hash[:16]}..., "
+            f"but runtime normalizer produced {actual_normalizer_hash[:16]}... "
+            f"Refusing to generate latent statistics on mismatched normalizer."
+        )
 
     return actual_split_hash, actual_normalizer_hash
 
