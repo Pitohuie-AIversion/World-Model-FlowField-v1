@@ -58,6 +58,15 @@ def get_git_commit_hash() -> str:
         return "unknown"
 
 
+def get_git_dirty() -> bool:
+    """Check if the git working tree has uncommitted modifications."""
+    try:
+        out = subprocess.check_output(["git", "status", "--porcelain"], stderr=subprocess.DEVNULL)
+        return len(out.strip()) > 0
+    except Exception:
+        return False
+
+
 def precheck_audit_manifest_and_samples(
     split_file: str,
     data_root: str,
@@ -436,9 +445,13 @@ def audit_pde_residuals(
         )
     print("=" * 90)
 
+    script_file = os.path.abspath(__file__)
     audit_payload = {
         "metadata": {
             "git_commit": get_git_commit_hash(),
+            "git_dirty": get_git_dirty(),
+            "audit_script": os.path.relpath(script_file, os.getcwd()) if script_file.startswith(os.getcwd()) else script_file,
+            "audit_script_sha256": compute_file_sha256(script_file),
             "dealias_protocol": (
                 "Orszag 2/3 rule: projection P to 2/3 Nyquist cutoff with zeroed Nyquist mode "
                 "before and after nonlinear multiplication, time difference using projected velocity"
@@ -470,4 +483,9 @@ def audit_pde_residuals(
 
 
 if __name__ == "__main__":
-    audit_pde_residuals()
+    import argparse
+    parser = argparse.ArgumentParser(description="Audit discrete PDE residuals across operational levels.")
+    parser.add_argument("--output_json", type=str, default="outputs/evaluations/pde_residual_audit_traceable.json")
+    parser.add_argument("--num_samples", type=int, default=4)
+    args = parser.parse_args()
+    audit_pde_residuals(output_json=args.output_json, num_samples=args.num_samples)
