@@ -46,6 +46,7 @@ logs/*
 !normalization/*.pt
 !normalization/*.json
 !figures/**/*.png
+!figures/**/*.pdf
 !figures/**/*.json
 !figures/**/
 !figures/README.md
