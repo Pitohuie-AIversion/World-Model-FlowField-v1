@@ -9,6 +9,11 @@ from src.losses.rollout import RolloutLoss
 from src.losses.divergence import DivergenceLoss
 from src.losses.vorticity import VorticityLoss
 from src.losses.spectral import EnergySpectrumLoss
+from src.losses.navier_stokes import (
+    NavierStokesMomentumResidualLoss,
+    TracerAdvectionDiffusionResidualLoss,
+    NavierStokesPDELoss,
+)
 
 __all__ = [
     "FieldLoss",
@@ -16,5 +21,8 @@ __all__ = [
     "DivergenceLoss",
     "VorticityLoss",
     "EnergySpectrumLoss",
+    "NavierStokesMomentumResidualLoss",
+    "TracerAdvectionDiffusionResidualLoss",
+    "NavierStokesPDELoss",
 ]
 

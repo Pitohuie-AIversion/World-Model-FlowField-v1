@@ -13,6 +13,7 @@ import torch.fft
 
 _WAVENUMBER_CACHE: Dict[Tuple[int, int, float, float, torch.device, torch.dtype], Tuple[torch.Tensor, torch.Tensor]] = {}
 _RADIAL_SHELL_CACHE: Dict[Tuple[int, int, float, float, torch.device], Tuple[torch.Tensor, torch.Tensor, int]] = {}
+_DEALIAS_MASK_CACHE: Dict[Tuple[int, int, torch.device], torch.Tensor] = {}
 
 
 def get_wavenumbers(
@@ -82,9 +83,71 @@ def get_radial_shell_indices(
 
 
 def clear_wavenumber_cache() -> None:
-    """Clear all cached wavenumber grids and radial shell indices."""
+    """Clear all cached wavenumber grids, radial shell indices, and dealiasing masks."""
     _WAVENUMBER_CACHE.clear()
     _RADIAL_SHELL_CACHE.clear()
+    _DEALIAS_MASK_CACHE.clear()
+
+
+def get_dealias_mask(nx: int, ny: int, device: torch.device) -> torch.Tensor:
+    """Retrieve or compute cached 2D Orszag 2/3 dealiasing mask for RFFT2 grid.
+
+    Modes with frequency exceeding 2/3 of Nyquist limit (i.e. |k| >= N/3) are set to False.
+
+    Returns:
+        mask: Bool Tensor of shape (nx, ny // 2 + 1) where True represents retained modes.
+    """
+    key = (nx, ny, device)
+    cached = _DEALIAS_MASK_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    # kx indices in [-nx//2, nx//2 - 1]
+    kx_idx = torch.fft.fftfreq(nx, d=1.0 / nx, device=device).abs()
+    # ky indices in [0, ny//2]
+    ky_idx = torch.fft.rfftfreq(ny, d=1.0 / ny, device=device)
+
+    cutoff_x = nx / 3.0
+    cutoff_y = ny / 3.0
+
+    mask_x = (kx_idx < cutoff_x).view(nx, 1)
+    mask_y = (ky_idx < cutoff_y).view(1, ny // 2 + 1)
+    mask = mask_x & mask_y
+
+    _DEALIAS_MASK_CACHE[key] = mask
+    return mask
+
+
+def dealias_field_2d(field: torch.Tensor) -> torch.Tensor:
+    """Apply Orszag 2/3 spectral truncation filter to eliminate aliasing high frequencies.
+
+    Args:
+        field: Tensor of shape (..., Nx, Ny), real-valued.
+
+    Returns:
+        Filtered tensor of same shape and dtype.
+    """
+    nx, ny = field.shape[-2], field.shape[-1]
+    device = field.device
+    orig_dtype = field.dtype
+    calc_dtype = torch.float64 if orig_dtype == torch.float64 else torch.float32
+    field_calc = field.to(dtype=calc_dtype)
+
+    mask = get_dealias_mask(nx, ny, device)
+    if field.ndim > 2:
+        mask = mask.view(*([1] * (field.ndim - 2)), nx, ny // 2 + 1)
+
+    f_hat = torch.fft.rfft2(field_calc, dim=(-2, -1))
+    f_hat_filtered = torch.where(mask, f_hat, torch.zeros_like(f_hat))
+
+    # Also zero Nyquist if even
+    if nx % 2 == 0:
+        f_hat_filtered[..., nx // 2, :] = 0.0
+    if ny % 2 == 0:
+        f_hat_filtered[..., :, ny // 2] = 0.0
+
+    filtered = torch.fft.irfft2(f_hat_filtered, s=(nx, ny), dim=(-2, -1))
+    return filtered.to(dtype=orig_dtype)
 
 
 def spectral_grad_2d(

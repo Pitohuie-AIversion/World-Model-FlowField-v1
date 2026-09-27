@@ -24,6 +24,11 @@ from src.losses.field import FieldLoss
 from src.losses.rollout import RolloutLoss
 from src.losses.vorticity import VorticityLoss
 from src.losses.spectral import EnergySpectrumLoss
+from src.losses.navier_stokes import (
+    NavierStokesMomentumResidualLoss,
+    TracerAdvectionDiffusionResidualLoss,
+    NavierStokesPDELoss,
+)
 from src.metrics.field import evaluate_field_metrics
 from src.metrics.spectral import compute_spectral_error
 from src.models.decoder import Decoder2D
@@ -410,8 +415,16 @@ def _compute_batch_loss(
     vort_loss_fn: Optional[nn.Module] = None,
     lambda_spec: float = 0.0,
     spec_loss_fn: Optional[nn.Module] = None,
+    lambda_mom: float = 0.0,
+    lambda_tr: float = 0.0,
+    mom_loss_fn: Optional[nn.Module] = None,
+    tracer_loss_fn: Optional[nn.Module] = None,
+    re: Optional[torch.Tensor] = None,
+    sc: Optional[torch.Tensor] = None,
+    dt: Optional[torch.Tensor] = None,
+    q0_phys: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """Compute field loss, physical conservation penalties, and multi-scale spectral loss."""
+    """Compute field loss, physical conservation penalties, spectral loss, and PDE residuals."""
     if field_loss_space == "physical" and normalizer is not None:
         pred_field_loss = normalizer.denormalize(pred)
         target_field_loss = normalizer.denormalize(q_future)
@@ -421,7 +434,15 @@ def _compute_batch_loss(
 
     loss = rollout_loss_fn(pred_field_loss, target_field_loss)
 
-    if lambda_div > 0 or lambda_vort > 0 or lambda_spec > 0:
+    need_phys = (
+        lambda_div > 0
+        or lambda_vort > 0
+        or lambda_spec > 0
+        or lambda_mom > 0
+        or lambda_tr > 0
+    )
+
+    if need_phys:
         if normalizer is not None:
             pred_phys = normalizer.denormalize(pred)
             target_phys = normalizer.denormalize(q_future)
@@ -435,6 +456,12 @@ def _compute_batch_loss(
             loss = loss + lambda_vort * vort_loss_fn(pred_phys, target_phys)
         if lambda_spec > 0 and spec_loss_fn is not None:
             loss = loss + lambda_spec * spec_loss_fn(pred_phys, target_phys)
+        if lambda_mom > 0 and mom_loss_fn is not None and re is not None:
+            loss_mom, _ = mom_loss_fn(pred_phys, re=re, dt=dt if dt is not None else 0.1, q0_phys=q0_phys)
+            loss = loss + lambda_mom * loss_mom
+        if lambda_tr > 0 and tracer_loss_fn is not None and re is not None and sc is not None:
+            loss_tr, _ = tracer_loss_fn(pred_phys, re=re, sc=sc, dt=dt if dt is not None else 0.1, q0_phys=q0_phys)
+            loss = loss + lambda_tr * loss_tr
 
     return loss
 
@@ -465,6 +492,10 @@ def _train_epoch(
     pushforward_mode: str = "future",
     lambda_spec: float = 0.0,
     spec_loss_fn: Optional[nn.Module] = None,
+    lambda_mom: float = 0.0,
+    lambda_tr: float = 0.0,
+    mom_loss_fn: Optional[nn.Module] = None,
+    tracer_loss_fn: Optional[nn.Module] = None,
 ) -> float:
     """Execute one training epoch with exact sample-weighted gradient accumulation."""
     if is_distributed and train_sampler is not None:
@@ -499,6 +530,12 @@ def _train_epoch(
         re = batch["re"].to(device) if use_condition else None
         sc = batch["sc"].to(device) if use_condition else None
 
+        # Physical parameters are always extracted for PDE residual calculations,
+        # even if model conditioning embedding is disabled.
+        phys_re = batch["re"].to(device) if "re" in batch else None
+        phys_sc = batch["sc"].to(device) if "sc" in batch else None
+        phys_dt = batch["dt"].to(device) if "dt" in batch else torch.tensor(0.1, device=device)
+
         avail_future = q_future.shape[1]
         avail_hist = q_hist.shape[1]
 
@@ -524,6 +561,9 @@ def _train_epoch(
             target_future = q_future[:, :horizon]
             hist_input = q_hist[:, -4:] if avail_hist >= 4 else q_hist
 
+        hist_last_norm = hist_input[:, -1]
+        q0_phys = normalizer.denormalize(hist_last_norm) if normalizer is not None else hist_last_norm
+
         with torch.amp.autocast('cuda', enabled=use_amp):
             pred = _forward_model_prediction(
                 model=model,
@@ -548,6 +588,14 @@ def _train_epoch(
                 vort_loss_fn=vort_loss_fn,
                 lambda_spec=lambda_spec,
                 spec_loss_fn=spec_loss_fn,
+                lambda_mom=lambda_mom,
+                lambda_tr=lambda_tr,
+                mom_loss_fn=mom_loss_fn,
+                tracer_loss_fn=tracer_loss_fn,
+                re=phys_re,
+                sc=phys_sc,
+                dt=phys_dt,
+                q0_phys=q0_phys,
             )
 
             window_start = (batch_idx // grad_accum_steps) * grad_accum_steps
@@ -748,6 +796,12 @@ def train_forecaster(
     lambda_spec: float = 0.0,
     spec_loss_type: str = "log_l1",
     spec_high_freq_weight: float = 0.0,
+    lambda_mom: float = 0.0,
+    lambda_tr: float = 0.0,
+    mom_scale_u: float = 0.05,
+    mom_scale_v: float = 0.05,
+    tracer_scale_s: float = 0.02,
+    pde_dealias: bool = True,
 ):
     if grad_accum_steps < 1:
         raise ValueError(f"grad_accum_steps must be >= 1, got {grad_accum_steps}")
@@ -857,6 +911,25 @@ def train_forecaster(
         if lambda_spec > 0
         else None
     )
+    mom_loss_fn = (
+        NavierStokesMomentumResidualLoss(
+            domain_size=(1.0, 2.0),
+            scale_u=mom_scale_u,
+            scale_v=mom_scale_v,
+            dealias=pde_dealias,
+        ).to(device)
+        if lambda_mom > 0
+        else None
+    )
+    tracer_loss_fn = (
+        TracerAdvectionDiffusionResidualLoss(
+            domain_size=(1.0, 2.0),
+            scale_s=tracer_scale_s,
+            dealias=pde_dealias,
+        ).to(device)
+        if lambda_tr > 0
+        else None
+    )
     scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
     tracker = None
@@ -905,6 +978,10 @@ def train_forecaster(
             pushforward_mode=curriculum_config.pushforward_mode,
             lambda_spec=lambda_spec,
             spec_loss_fn=spec_loss_fn,
+            lambda_mom=lambda_mom,
+            lambda_tr=lambda_tr,
+            mom_loss_fn=mom_loss_fn,
+            tracer_loss_fn=tracer_loss_fn,
         )
 
         if global_rank == 0:
@@ -987,6 +1064,12 @@ def train_forecaster(
                 "lambda_spec": lambda_spec,
                 "spec_loss_type": spec_loss_type,
                 "spec_high_freq_weight": spec_high_freq_weight,
+                "lambda_mom": lambda_mom,
+                "lambda_tr": lambda_tr,
+                "mom_scale_u": mom_scale_u,
+                "mom_scale_v": mom_scale_v,
+                "tracer_scale_s": tracer_scale_s,
+                "pde_dealias": pde_dealias,
                 "field_loss_space": field_loss_space,
                 "lr": lr,
                 "batch_size": batch_size,
@@ -1162,6 +1245,42 @@ if __name__ == "__main__":
         default=0.0,
         help="Linear wavenumber weighting alpha for high-frequency emphasis (default: 0.0).",
     )
+    parser.add_argument(
+        "--lambda_mom",
+        type=float,
+        default=0.0,
+        help="Weight for Navier-Stokes momentum residual loss (default: 0.0).",
+    )
+    parser.add_argument(
+        "--lambda_tr",
+        type=float,
+        default=0.0,
+        help="Weight for passive tracer advection-diffusion residual loss (default: 0.0).",
+    )
+    parser.add_argument(
+        "--mom_scale_u",
+        type=float,
+        default=0.05,
+        help="Residual scale factor a_u for u momentum (default: 0.05).",
+    )
+    parser.add_argument(
+        "--mom_scale_v",
+        type=float,
+        default=0.05,
+        help="Residual scale factor a_v for v momentum (default: 0.05).",
+    )
+    parser.add_argument(
+        "--tracer_scale_s",
+        type=float,
+        default=0.02,
+        help="Residual scale factor a_s for tracer transport (default: 0.02).",
+    )
+    parser.add_argument(
+        "--pde_dealias",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Apply Orszag 2/3 dealiasing to non-linear PDE advection (default: True).",
+    )
     args = parser.parse_args()
 
     freeze_rep = False if args.joint else args.freeze_representation
@@ -1211,4 +1330,10 @@ if __name__ == "__main__":
         lambda_spec=args.lambda_spec,
         spec_loss_type=args.spec_loss_type,
         spec_high_freq_weight=args.spec_high_freq_weight,
+        lambda_mom=args.lambda_mom,
+        lambda_tr=args.lambda_tr,
+        mom_scale_u=args.mom_scale_u,
+        mom_scale_v=args.mom_scale_v,
+        tracer_scale_s=args.tracer_scale_s,
+        pde_dealias=args.pde_dealias,
     )

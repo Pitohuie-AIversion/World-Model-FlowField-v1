@@ -37,6 +37,8 @@ class ShearFlowDataset(Dataset):
         normalizer: Optional[FieldNormalizer] = None,
         preload_to_memory: bool = False,
         downsample_factor: int = 1,
+        require_pressure: bool = False,
+        require_tracer: bool = False,
     ):
         super().__init__()
         if file_paths is None and trajectories is None:
@@ -72,11 +74,14 @@ class ShearFlowDataset(Dataset):
         self.normalizer = normalizer
         self.preload_to_memory = preload_to_memory
         self.downsample_factor = downsample_factor
+        self.require_pressure = require_pressure
+        self.require_tracer = require_tracer
 
         # Index all valid windows across files and simulations
         # Window entry: (file_idx, sim_idx, start_t, split_t, end_t, re, sc)
         self.samples: List[Tuple[int, int, int, int, int, float, float]] = []
         self._cached_data: Dict[int, np.ndarray] = {}
+        self._time_data: Dict[int, np.ndarray] = {}
         self._worker_pid: Optional[int] = None
         self._file_handles: Dict[str, h5py.File] = {}
 
@@ -134,6 +139,23 @@ class ShearFlowDataset(Dataset):
                 else:
                     n_sims = 1
                     t_steps = shape[0]
+
+                # Extract time coordinates
+                if "dimensions/time" in h5:
+                    time_arr = np.asarray(h5["dimensions/time"], dtype=np.float32)
+                elif "time" in h5:
+                    time_arr = np.asarray(h5["time"], dtype=np.float32)
+                else:
+                    time_arr = np.arange(t_steps, dtype=np.float32) * 0.1
+                self._time_data[f_idx] = time_arr
+
+                # Strict validation for physical fields when requested
+                has_p = self._find_dset(h5, ["t0_fields/pressure", "pressure"]) is not None
+                has_s = self._find_dset(h5, ["t0_fields/tracer", "tracer", "s"]) is not None
+                if self.require_pressure and not has_p:
+                    raise ValueError(f"require_pressure=True but pressure field is missing in {path}")
+                if self.require_tracer and not has_s:
+                    raise ValueError(f"require_tracer=True but tracer field is missing in {path}")
 
                 windows = generate_window_indices(
                     total_timesteps=t_steps,
@@ -266,11 +288,27 @@ class ShearFlowDataset(Dataset):
         history = tensor_slice[: self.history_length]
         future = tensor_slice[self.history_length :]
 
+        # Temporal coordinates
+        time_arr = self._time_data.get(f_idx)
+        if time_arr is not None and len(time_arr) > 0:
+            time_slice = time_arr[start_t:end_t]
+            if len(time_slice) >= 2:
+                dt_val = float(time_slice[1] - time_slice[0])
+            elif len(time_arr) >= 2:
+                dt_val = float(time_arr[1] - time_arr[0])
+            else:
+                dt_val = 0.1
+        else:
+            time_slice = np.arange(start_t, end_t, dtype=np.float32) * 0.1
+            dt_val = 0.1
+
         return {
             "history": history,  # (L, 4, Ny, Nx)
             "future": future,  # (H, 4, Ny, Nx)
             "re": torch.tensor(re_val, dtype=torch.float32),
             "sc": torch.tensor(sc_val, dtype=torch.float32),
+            "dt": torch.tensor(dt_val, dtype=torch.float32),
+            "time": torch.from_numpy(time_slice).float(),
             "source_file": path,
             "traj_idx": torch.tensor(sim_idx, dtype=torch.long),
             "start_t": torch.tensor(start_t, dtype=torch.long),
