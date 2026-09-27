@@ -592,8 +592,16 @@ class TestAutoregressiveRolloutCompleteness:
             assert "rms_divergence" in h_res["ground_truth_references"]
             assert "vorticity_rms" in h_res["ground_truth_references"]
 
+            # Check D0 VRMSE fields
+            assert "ensemble_mean_vrmse" in h_res["D0"]
+            assert "rms_of_window_mean_vrmse" in h_res["D0"]
+
             for model in ("G0", "G1"):
                 m_res = h_res[model]
+                # VRMSE fields
+                assert "ensemble_mean_vrmse" in m_res
+                assert "rms_of_window_mean_vrmse" in m_res
+
                 # Velocity pooled spread skill
                 assert "spread_skill_velocity" in m_res
                 ss_vel = m_res["spread_skill_velocity"]
@@ -618,3 +626,96 @@ class TestAutoregressiveRolloutCompleteness:
                 assert "vorticity_rmse_ensemble_mean" in m_res
                 assert "vorticity_rmse_individual_samples" in m_res
                 assert "vorticity_rms_individual_samples" in m_res
+
+    def test_rollout_vrmse_standard_mean_vs_rms_aggregation(self):
+        """CRITICAL: Verify that ensemble_mean_vrmse is the standard arithmetic mean across windows,
+
+        and distinct from rms_of_window_mean_vrmse.
+        When window 1 has VRMSE=1.0 and window 2 has VRMSE=3.0:
+        Standard mean = (1 + 3) / 2 = 2.0
+        RMS diagnostic = sqrt((1^2 + 3^2) / 2) = sqrt(5) approx 2.236068
+        """
+        H = 1
+        K = 2
+        entries = [
+            {"source_file": "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5", "traj_idx": 1, "start_t": 0, "cluster_id": 1},
+            {"source_file": "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5", "traj_idx": 1, "start_t": 8, "cluster_id": 1},
+        ]
+
+        # Target field with unit variance and pressure gauge applied
+        torch.manual_seed(42)
+        base_target = torch.randn(4, 16, 16)
+        base_target = apply_pressure_gauge(base_target)
+        base_target = (base_target - base_target.mean(dim=(-2, -1), keepdim=True)) / base_target.std(dim=(-2, -1), keepdim=True)
+
+        # Zero-mean error pattern with unit variance (gauge invariant)
+        err = torch.randn(4, 16, 16)
+        err = (err - err.mean(dim=(-2, -1), keepdim=True)) / err.std(dim=(-2, -1), keepdim=True)
+
+        class SyntheticTargetDataset(Dataset):
+            def __len__(self):
+                return 2
+            def __getitem__(self, idx):
+                return {
+                    "history": torch.zeros(4, 4, 16, 16),
+                    "future": base_target.unsqueeze(0),  # (1, 4, 16, 16)
+                    "re": torch.tensor(10000.0),
+                    "sc": torch.tensor(0.1),
+                    "source_file": entries[idx]["source_file"],
+                    "traj_idx": torch.tensor(entries[idx]["traj_idx"], dtype=torch.long),
+                    "start_t": torch.tensor(entries[idx]["start_t"], dtype=torch.long),
+                    "cluster_id": torch.tensor(entries[idx]["cluster_id"], dtype=torch.long),
+                }
+
+        loader = DataLoader(SyntheticTargetDataset(), batch_size=1)
+
+        class ControlledVRMSEForecaster(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.call_idx = 0
+            def eval(self):
+                pass
+            def sample_rollout(self, q_hist, re, sc, horizon, num_samples, seed, variance_head=None, decode_samples=False):
+                w_idx = self.call_idx // 3  # 3 calls per window: D0, G0, G1
+                self.call_idx += 1
+                scale = 1.0 if w_idx == 0 else 3.0
+                pred = (base_target + scale * err).unsqueeze(0).unsqueeze(0)  # (1, 1, 4, 16, 16)
+                if decode_samples:
+                    return {
+                        "deterministic_rollout": pred,
+                        "sample_trajectories": pred.repeat(1, num_samples, 1, 1, 1, 1),
+                        "ensemble_mean": pred,
+                    }
+                else:
+                    return {
+                        "deterministic_rollout": pred,
+                    }
+
+        class MockNormalizer:
+            def denormalize(self, x):
+                return x
+
+        res = evaluate_autoregressive_rollouts(
+            forecaster=ControlledVRMSEForecaster(),
+            g0_head=nn.Identity(),
+            test_loader=loader,
+            normalizer=MockNormalizer(),
+            device=torch.device("cpu"),
+            horizon=H,
+            num_samples=K,
+            eval_horizons=(1,),
+            seed=42,
+            max_rollout_windows=2,
+        )
+
+        h1 = res["per_horizon_metrics"]["horizon_1"]
+
+        for model_name in ("D0", "G0", "G1"):
+            m = h1[model_name]
+            # Standard mean VRMSE must be approx 2.0
+            assert m["ensemble_mean_vrmse"] == pytest.approx(2.0, rel=1e-3)
+            # Custom RMS diagnostic must be approx sqrt(5) ~ 2.236
+            expected_rms = math.sqrt(5.0)
+            assert m["rms_of_window_mean_vrmse"] == pytest.approx(expected_rms, rel=1e-3)
+            # Distinctness check
+            assert abs(m["ensemble_mean_vrmse"] - m["rms_of_window_mean_vrmse"]) > 0.20
