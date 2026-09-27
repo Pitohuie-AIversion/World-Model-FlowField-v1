@@ -11,6 +11,58 @@ from src.data.splits import parse_shear_flow_filename
 from src.data.windows import generate_window_indices
 
 
+def validate_uniform_time_grid(
+    time_arr: Union[np.ndarray, torch.Tensor],
+    min_steps: int = 2,
+    source_desc: str = "",
+) -> float:
+    """Validate that a 1D time grid is finite, strictly monotonically increasing, and uniform.
+
+    Args:
+        time_arr: 1D array of temporal coordinates.
+        min_steps: Minimum number of required timesteps.
+        source_desc: Optional file path or identifier for error reporting.
+
+    Returns:
+        dt: The verified uniform time step scalar.
+
+    Raises:
+        ValueError: If time array is shorter than min_steps, contains non-finite values (NaN/Inf),
+                    is not strictly monotonic, or contains irregular/non-uniform intervals.
+    """
+    if isinstance(time_arr, torch.Tensor):
+        time_np = time_arr.detach().cpu().numpy()
+    else:
+        time_np = np.asarray(time_arr, dtype=np.float64)
+
+    ctx = f" in {source_desc}" if source_desc else ""
+
+    if len(time_np) < min_steps:
+        raise ValueError(
+            f"Time coordinates{ctx} have length {len(time_np)}, but require at least {min_steps} timesteps."
+        )
+
+    if not np.all(np.isfinite(time_np)):
+        raise ValueError(f"Time dataset{ctx} contains non-finite values (NaN/Inf).")
+
+    diffs = np.diff(time_np)
+    if not np.all(diffs > 0):
+        raise ValueError(f"Time dataset{ctx} is not strictly monotonically increasing.")
+
+    dt0 = float(diffs[0])
+    if not (np.isfinite(dt0) and dt0 > 0):
+        raise ValueError(f"Invalid non-positive or non-finite dt={dt0}{ctx}.")
+
+    # Tolerance: relative 1e-4 of dt0 plus absolute 1e-6
+    if not np.all(np.abs(diffs - dt0) <= 1e-4 * dt0 + 1e-6):
+        raise ValueError(
+            f"Time dataset{ctx} has irregular intervals (min={diffs.min():.6e}, max={diffs.max():.6e}, initial={dt0:.6e}). "
+            f"PDE residual formulation requires a uniform time grid."
+        )
+
+    return dt0
+
+
 class ShearFlowDataset(Dataset):
     """Dataset loader for 2D periodic incompressible shear flow trajectories.
 
@@ -56,6 +108,9 @@ class ShearFlowDataset(Dataset):
             for t in trajectories:
                 item = dict(t)
                 item["file_path"] = _resolve_path(item["file_path"])
+                traj_idx = item["traj_idx"]
+                if traj_idx < 0:
+                    raise IndexError(f"Trajectory index cannot be negative, got {traj_idx} for {item['file_path']}")
                 resolved_trajs.append(item)
             self.trajectories = resolved_trajs
             self.allowed_set = {(t["file_path"], t["traj_idx"]) for t in resolved_trajs}
@@ -163,21 +218,7 @@ class ShearFlowDataset(Dataset):
                     time_arr = np.arange(t_steps, dtype=np.float32) * 0.1
 
                 if self.require_pressure or self.require_tracer:
-                    if len(time_arr) < t_steps:
-                        raise ValueError(
-                            f"Time coordinates in {path} have length {len(time_arr)}, but trajectory has {t_steps} timesteps."
-                        )
-                    if not np.all(np.isfinite(time_arr)):
-                        raise ValueError(f"Time dataset in {path} contains non-finite values (NaN/Inf).")
-                    diffs = np.diff(time_arr)
-                    if not np.all(diffs > 0):
-                        raise ValueError(f"Time dataset in {path} is not strictly monotonically increasing.")
-                    dt0 = float(diffs[0])
-                    if not np.all(np.abs(diffs - dt0) <= 1e-4 * dt0 + 1e-6):
-                        raise ValueError(
-                            f"Time dataset in {path} has irregular intervals (min={diffs.min()}, max={diffs.max()}). "
-                            f"PDE residual formulation requires a uniform time grid."
-                        )
+                    validate_uniform_time_grid(time_arr, min_steps=t_steps, source_desc=path)
 
                 self._time_data[f_idx] = time_arr
 
@@ -188,6 +229,13 @@ class ShearFlowDataset(Dataset):
                     raise KeyError(f"require_pressure=True but pressure field is missing in {path}")
                 if self.require_tracer and not has_s:
                     raise KeyError(f"require_tracer=True but tracer field is missing in {path}")
+
+                if self.allowed_set is not None:
+                    for (p, s_idx) in self.allowed_set:
+                        if p == path and (s_idx < 0 or s_idx >= n_sims):
+                            raise IndexError(
+                                f"Trajectory index {s_idx} out of range in {path} (expected 0 <= traj_idx < {n_sims})."
+                            )
 
                 windows = generate_window_indices(
                     total_timesteps=t_steps,
@@ -339,8 +387,11 @@ class ShearFlowDataset(Dataset):
             dt_val = 0.1
 
         if self.require_pressure or self.require_tracer:
-            if not (np.isfinite(dt_val) and dt_val > 0):
-                raise ValueError(f"Invalid non-positive or non-finite dt={dt_val} for sample from {path}")
+            dt_val = validate_uniform_time_grid(
+                time_slice,
+                min_steps=2,
+                source_desc=f"{path} window [{start_t}:{end_t}]",
+            )
             if not (np.isfinite(re_val) and re_val > 0):
                 raise ValueError(f"Invalid non-positive or non-finite Re={re_val} for sample from {path}")
             if self.require_tracer and not (np.isfinite(sc_val) and sc_val > 0):

@@ -776,6 +776,30 @@ def _save_checkpoint_artifacts(
             print(f"  >>> New Best J_long: {j_long:.4f} (Saved to best_long_vrmse.pt)")
 
 
+def validate_forecaster_pde_config(
+    lambda_mom: float,
+    lambda_tr: float,
+    pushforward_steps: int,
+    pushforward_mode: str,
+) -> None:
+    """Validate PDE residual loss configuration and pushforward curriculum constraints."""
+    if pushforward_steps > 0 and pushforward_mode == "history":
+        raise NotImplementedError(
+            "pushforward_mode='history' with pushforward_steps > 0 is currently disabled "
+            "for standard training because the dataset loader provides fixed history_length=4 "
+            "without the extended historical context (history_length + pushforward_steps) "
+            "required to preserve temporal alignment at t_0. Use pushforward_mode='future' instead."
+        )
+
+    if (lambda_mom > 0 or lambda_tr > 0) and pushforward_steps > 0:
+        raise ValueError(
+            f"PDE residual losses (lambda_mom={lambda_mom}, lambda_tr={lambda_tr}) "
+            f"cannot be combined with pushforward_steps={pushforward_steps} > 0 in this version. "
+            f"Pushforward shifts the temporal prediction origin away from the historical q0 boundary, "
+            f"causing temporal discretization errors across the transition interface."
+        )
+
+
 def train_forecaster(
     model_type: str = "latent_transformer",
     data_dir: str = "/root/autodl-tmp/datasets/shear_flow",
@@ -829,6 +853,13 @@ def train_forecaster(
     tracer_scale_s: float = 0.02,
     pde_dealias: bool = True,
 ):
+    validate_forecaster_pde_config(
+        lambda_mom=lambda_mom,
+        lambda_tr=lambda_tr,
+        pushforward_steps=pushforward_steps,
+        pushforward_mode=pushforward_mode,
+    )
+
     if grad_accum_steps < 1:
         raise ValueError(f"grad_accum_steps must be >= 1, got {grad_accum_steps}")
 
@@ -850,22 +881,6 @@ def train_forecaster(
         pushforward_mode=pushforward_mode,
     )
     scheduler = CurriculumRolloutScheduler(curriculum_config)
-
-    if pushforward_steps > 0 and pushforward_mode == "history":
-        raise NotImplementedError(
-            "pushforward_mode='history' with pushforward_steps > 0 is currently disabled "
-            "for standard training because the dataset loader provides fixed history_length=4 "
-            "without the extended historical context (history_length + pushforward_steps) "
-            "required to preserve temporal alignment at t_0. Use pushforward_mode='future' instead."
-        )
-
-    if (lambda_mom > 0 or lambda_tr > 0) and pushforward_steps > 0:
-        raise ValueError(
-            f"PDE residual losses (lambda_mom={lambda_mom}, lambda_tr={lambda_tr}) "
-            f"cannot be combined with pushforward_steps={pushforward_steps} > 0 in this version. "
-            f"Pushforward shifts the temporal prediction origin away from the historical q0 boundary, "
-            f"causing temporal discretization errors across the transition interface."
-        )
 
     effective_train_horizon = horizon
     if curriculum_rollout:

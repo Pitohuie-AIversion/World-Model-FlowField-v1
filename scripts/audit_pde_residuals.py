@@ -15,8 +15,10 @@ Strict Contract Guarantees:
 - Full provenance metadata: Archives evaluated files, trajectories, Re, Sc, dt, and model checkpoints.
 """
 
+import hashlib
 import json
 import os
+import subprocess
 import sys
 from typing import Any, Dict, List, Optional
 
@@ -28,11 +30,152 @@ import torch
 import torch.nn as nn
 
 from src.data.normalization import FieldNormalizer
+from src.data.shear_flow_dataset import validate_uniform_time_grid
 from src.losses.navier_stokes import NavierStokesPDELoss
 from src.models.decoder import Decoder2D
 from src.models.encoder import Encoder2D
 from src.models.latent_transformer import LatentSTTransformer
 from src.utils.fft_derivatives import compute_divergence
+
+
+def compute_file_sha256(filepath: str) -> Optional[str]:
+    """Compute SHA-256 hexadecimal digest for a file, or return None if not present."""
+    if not os.path.exists(filepath):
+        return None
+    h = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        while chunk := f.read(8192 * 1024):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def get_git_commit_hash() -> str:
+    """Retrieve current git commit hash for audit traceability."""
+    try:
+        out = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL)
+        return out.decode("utf-8").strip()
+    except Exception:
+        return "unknown"
+
+
+def precheck_audit_manifest_and_samples(
+    split_file: str,
+    data_root: str,
+    total_window: int = 8,
+    num_samples: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Strictly validate manifest integrity, file paths, trajectory indices, time grid, and fields.
+
+    This function executes entirely before loading any model checkpoints or allocating GPU buffers,
+    ensuring fail-fast data contract enforcement and complete test isolation in clean CI environments.
+
+    Args:
+        split_file: Path to JSON split manifest file.
+        data_root: Directory root to resolve relative HDF5 file paths.
+        total_window: Minimum contiguous time steps required per sample (history_length + horizon).
+        num_samples: Optional cap on the number of samples to validate.
+
+    Returns:
+        List of validated sample records containing resolved file paths, indices, Re, Sc, and dt.
+
+    Raises:
+        FileNotFoundError: If split manifest or referenced HDF5 file is missing.
+        ValueError: If manifest has no valid trajectories, or time grid is non-finite / irregular.
+        IndexError: If trajectory index is negative or out of bounds (>= n_sims).
+        KeyError: If required physics scalars or fields are missing.
+        RuntimeError: If 0 samples are evaluated.
+    """
+    if not os.path.exists(split_file):
+        raise FileNotFoundError(f"Split file '{split_file}' not found.")
+
+    with open(split_file, "r") as f:
+        splits = json.load(f)
+
+    val_trajs = splits.get("valid", [])
+    if not val_trajs:
+        raise ValueError(f"No valid trajectories found in {split_file}")
+
+    if num_samples is not None and num_samples <= 0:
+        raise RuntimeError(
+            f"Strict audit failure: num_samples={num_samples} must be > 0. "
+            f"Failing closed to prevent writing unverified empty audit reports."
+        )
+
+    validated_samples: List[Dict[str, Any]] = []
+
+    for traj_info in val_trajs:
+        if num_samples is not None and len(validated_samples) >= num_samples:
+            break
+
+        h5_rel = traj_info.get("file_path")
+        if not h5_rel:
+            raise ValueError(f"Trajectory specification missing 'file_path': {traj_info}")
+
+        sim_idx = traj_info.get("traj_idx")
+        if sim_idx is None:
+            raise ValueError(f"Trajectory specification missing 'traj_idx': {traj_info}")
+
+        # Strict path resolution: NEVER guess, NEVER fallback to valid/
+        h5_path = os.path.join(data_root, h5_rel) if not os.path.isabs(h5_rel) else h5_rel
+        if not os.path.exists(h5_path):
+            raise FileNotFoundError(
+                f"Strict data contract violation: specified manifest file '{h5_rel}' not found at '{h5_path}'. "
+                f"Directory guessing or fallback is forbidden."
+            )
+
+        with h5py.File(h5_path, "r") as f:
+            if "t1_fields/velocity" not in f:
+                raise KeyError(f"Missing 't1_fields/velocity' dataset in file '{h5_path}'.")
+            vel_ds = f["t1_fields/velocity"]
+            n_sims = vel_ds.shape[0]
+
+            # Strict trajectory indexing: NEVER take modulo (% n_sims), enforce 0 <= traj_idx < n_sims
+            if sim_idx < 0 or sim_idx >= n_sims:
+                raise IndexError(
+                    f"Strict data contract violation: requested traj_idx={sim_idx} out of range (expected 0 <= traj_idx < {n_sims}) "
+                    f"in file '{h5_path}'. Modulo remapping is forbidden."
+                )
+
+            if "scalars/Reynolds" not in f or "scalars/Schmidt" not in f:
+                raise KeyError(f"Physics scalar parameters missing in file '{h5_path}'.")
+            re_val = float(f["scalars/Reynolds"][()])
+            sc_val = float(f["scalars/Schmidt"][()])
+            if not (np.isfinite(re_val) and re_val > 0):
+                raise ValueError(f"Invalid non-positive or non-finite Re={re_val} in file '{h5_path}'.")
+            if not (np.isfinite(sc_val) and sc_val > 0):
+                raise ValueError(f"Invalid non-positive or non-finite Sc={sc_val} in file '{h5_path}'.")
+
+            if "t0_fields/pressure" not in f or "t0_fields/tracer" not in f:
+                raise KeyError(f"Required pressure or tracer fields missing in file '{h5_path}'.")
+
+            # Strict time verification via unified validate_uniform_time_grid
+            if "dimensions/time" not in f and "time" not in f:
+                raise KeyError(f"Explicit time dataset missing in file '{h5_path}'. Fabricating dt is forbidden.")
+            time_ds = f["dimensions/time"] if "dimensions/time" in f else f["time"]
+            time_arr = np.asarray(time_ds, dtype=np.float64)
+
+            dt_val = validate_uniform_time_grid(
+                time_arr[:total_window],
+                min_steps=total_window,
+                source_desc=f"{h5_path} (traj {sim_idx})",
+            )
+
+            validated_samples.append({
+                "file_path": h5_path,
+                "rel_file_path": h5_rel,
+                "traj_idx": sim_idx,
+                "re": re_val,
+                "sc": sc_val,
+                "dt": dt_val,
+            })
+
+    if len(validated_samples) == 0:
+        raise RuntimeError(
+            f"Strict audit failure: 0 samples were evaluated from split '{split_file}'. "
+            f"Failing closed to prevent writing unverified empty audit reports."
+        )
+
+    return validated_samples
 
 
 def audit_pde_residuals(
@@ -54,21 +197,23 @@ def audit_pde_residuals(
     if data_root is None:
         data_root = os.environ.get("SHEAR_FLOW_DATA_DIR", "/root/autodl-tmp/datasets/shear_flow")
 
-    if not os.path.exists(split_file):
-        raise FileNotFoundError(f"Split file '{split_file}' not found.")
+    total_window = history_length + horizon
+
+    # Precheck data manifest, file existence, bounds, time grid, and fields BEFORE loading weights
+    print(f"Prechecking audit data manifest and samples from {split_file}...")
+    validated_samples = precheck_audit_manifest_and_samples(
+        split_file=split_file,
+        data_root=data_root,
+        total_window=total_window,
+        num_samples=num_samples,
+    )
+
     if not os.path.exists(norm_file):
         raise FileNotFoundError(f"Normalizer checkpoint '{norm_file}' not found.")
     if not os.path.exists(ae_ckpt):
         raise FileNotFoundError(f"Autoencoder checkpoint '{ae_ckpt}' not found.")
     if not os.path.exists(d0_ckpt):
         raise FileNotFoundError(f"D0 dynamics checkpoint '{d0_ckpt}' not found.")
-
-    print(f"Loading data splits from {split_file}...")
-    with open(split_file, "r") as f:
-        splits = json.load(f)
-    val_trajs = splits.get("valid", [])
-    if not val_trajs:
-        raise ValueError(f"No valid trajectories found in {split_file}")
 
     print(f"Loading normalizer from {norm_file}...")
     normalizer = FieldNormalizer()
@@ -128,51 +273,17 @@ def audit_pde_residuals(
     print(f"Transition intervals: {history_length - 1}->{history_length} up to {total_window - 2}->{total_window - 1} ({horizon} intervals)")
 
     with torch.no_grad():
-        for traj_info in val_trajs:
-            if sample_count >= num_samples:
-                break
-
-            h5_rel = traj_info["file_path"]
-            sim_idx = traj_info["traj_idx"]
-
-            # Strict path resolution: NEVER guess, NEVER fallback to valid/
-            h5_path = os.path.join(data_root, h5_rel) if not os.path.isabs(h5_rel) else h5_rel
-            if not os.path.exists(h5_path):
-                raise FileNotFoundError(
-                    f"Strict data contract violation: specified manifest file '{h5_rel}' not found at '{h5_path}'. "
-                    f"Directory guessing or fallback is forbidden."
-                )
+        for sample_info in validated_samples:
+            h5_path = sample_info["file_path"]
+            sim_idx = sample_info["traj_idx"]
+            re_val = sample_info["re"]
+            sc_val = sample_info["sc"]
+            dt_val = sample_info["dt"]
 
             with h5py.File(h5_path, "r") as f:
-                vel_ds = f["t1_fields/velocity"]
-                n_sims = vel_ds.shape[0]
-
-                # Strict trajectory indexing: NEVER take modulo (% n_sims)
-                if sim_idx >= n_sims:
-                    raise IndexError(
-                        f"Strict data contract violation: requested traj_idx={sim_idx} exceeds available trajectories "
-                        f"(n_sims={n_sims}) in file '{h5_path}'. Modulo remapping is forbidden."
-                    )
-
-                if "scalars/Reynolds" not in f or "scalars/Schmidt" not in f:
-                    raise KeyError(f"Physics scalar parameters missing in file '{h5_path}'.")
-                re_val = float(f["scalars/Reynolds"][()])
-                sc_val = float(f["scalars/Schmidt"][()])
-
-                # Strict time reading
-                if "dimensions/time" not in f and "time" not in f:
-                    raise KeyError(f"Explicit time dataset missing in file '{h5_path}'. Fabricating dt is forbidden.")
-                time_ds = f["dimensions/time"] if "dimensions/time" in f else f["time"]
-                time_arr = np.asarray(time_ds, dtype=np.float32)
-                if len(time_arr) < total_window:
-                    raise ValueError(f"Time dataset has length {len(time_arr)}, but window requires {total_window}.")
-                dt_val = float(time_arr[1] - time_arr[0])
-                if not (np.isfinite(dt_val) and dt_val > 0):
-                    raise ValueError(f"Invalid non-positive or non-finite dt={dt_val} in file '{h5_path}'.")
-
-                vel = vel_ds[sim_idx, :total_window]  # (T, 256, 512, 2)
-                p = f["t0_fields/pressure"][sim_idx, :total_window]  # (T, 256, 512)
-                s = f["t0_fields/tracer"][sim_idx, :total_window]    # (T, 256, 512)
+                vel = f["t1_fields/velocity"][sim_idx, :total_window]  # (T, 256, 512, 2)
+                p = f["t0_fields/pressure"][sim_idx, :total_window]    # (T, 256, 512)
+                s = f["t0_fields/tracer"][sim_idx, :total_window]      # (T, 256, 512)
 
                 u_full = vel[..., 0]
                 v_full = vel[..., 1]
@@ -327,13 +438,24 @@ def audit_pde_residuals(
 
     audit_payload = {
         "metadata": {
+            "git_commit": get_git_commit_hash(),
+            "dealias_protocol": (
+                "Orszag 2/3 rule: projection P to 2/3 Nyquist cutoff with zeroed Nyquist mode "
+                "before and after nonlinear multiplication, time difference using projected velocity"
+            ),
             "split_file": split_file,
+            "split_file_sha256": compute_file_sha256(split_file),
             "norm_file": norm_file,
+            "norm_file_sha256": compute_file_sha256(norm_file),
             "ae_ckpt": ae_ckpt,
+            "ae_ckpt_sha256": compute_file_sha256(ae_ckpt),
             "d0_ckpt": d0_ckpt,
+            "d0_ckpt_sha256": compute_file_sha256(d0_ckpt),
             "history_length": history_length,
             "horizon": horizon,
+            "total_window": total_window,
             "sample_count": sample_count,
+            "evaluation_intervals": f"{history_length - 1}->{history_length} to {total_window - 2}->{total_window - 1}",
             "evaluated_samples": evaluated_samples_meta,
         },
         "results": results,

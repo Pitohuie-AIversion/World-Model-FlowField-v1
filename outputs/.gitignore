@@ -17,6 +17,7 @@
 !logs/
 !manifests/
 !metrics/
+!evaluations/
 !splits/
 !tables/
 
@@ -43,6 +44,7 @@ logs/*
 !splits/*.json
 !manifests/*.json
 !metrics/*.json
+!evaluations/*.json
 !normalization/*.pt
 !normalization/*.json
 !figures/**/*.png

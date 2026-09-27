@@ -1,0 +1,83 @@
+{
+  "metadata": {
+    "git_commit": "e3c36914c173f807b5d8119a742f7c024b2df714",
+    "dealias_protocol": "Orszag 2/3 rule: projection P to 2/3 Nyquist cutoff with zeroed Nyquist mode before and after nonlinear multiplication, time difference using projected velocity",
+    "split_file": "outputs/splits/grouped_split.json",
+    "split_file_sha256": "cfee2ff891a65e399b5f6b6bde62462646183b5a5dcbcea059113310bb382a6a",
+    "norm_file": "outputs/normalization/stats_grouped.pt",
+    "norm_file_sha256": "6bf4dc6e4b04435c48ada7d0ce7d608079be80e367a8c29f6025ef1f9541080a",
+    "ae_ckpt": "outputs/checkpoints/representation/best_autoencoder.pt",
+    "ae_ckpt_sha256": "a903715704d29b080cf0ab2a32cbc95b1cb4939bd9121b3c63a4b51ddd6453f6",
+    "d0_ckpt": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H12/latent_transformer/best_long_vrmse.pt",
+    "d0_ckpt_sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6",
+    "history_length": 4,
+    "horizon": 4,
+    "total_window": 8,
+    "sample_count": 4,
+    "evaluation_intervals": "3->4 to 6->7",
+    "evaluated_samples": [
+      {
+        "sample_idx": 0,
+        "file_path": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "re": 10000.0,
+        "sc": 0.10000000149011612,
+        "dt": 0.09999999999999999,
+        "evaluated_intervals": "3->4 to 6->7"
+      },
+      {
+        "sample_idx": 1,
+        "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "re": 10000.0,
+        "sc": 0.10000000149011612,
+        "dt": 0.09999999999999999,
+        "evaluated_intervals": "3->4 to 6->7"
+      },
+      {
+        "sample_idx": 2,
+        "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "re": 10000.0,
+        "sc": 0.10000000149011612,
+        "dt": 0.09999999999999999,
+        "evaluated_intervals": "3->4 to 6->7"
+      },
+      {
+        "sample_idx": 3,
+        "file_path": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "re": 10000.0,
+        "sc": 0.10000000149011612,
+        "dt": 0.09999999999999999,
+        "evaluated_intervals": "3->4 to 6->7"
+      }
+    ]
+  },
+  "results": {
+    "1_gt_full": {
+      "div_rmse": 0.0025771405489649624,
+      "res_u_rmse": 0.0015791369369253516,
+      "res_v_rmse": 0.0015189253026619554,
+      "res_s_rmse": 0.0013064508675597608
+    },
+    "2_gt_downsampled": {
+      "div_rmse": 0.0010457200987730175,
+      "res_u_rmse": 0.0015063339669723064,
+      "res_v_rmse": 0.001513141905888915,
+      "res_s_rmse": 0.0010593750776024535
+    },
+    "3_ae_reconstruction": {
+      "div_rmse": 0.09875243436545134,
+      "res_u_rmse": 0.03746348270215094,
+      "res_v_rmse": 0.047899444587528706,
+      "res_s_rmse": 0.0458851873409003
+    },
+    "4_d0_prediction": {
+      "div_rmse": 0.1257454939186573,
+      "res_u_rmse": 0.09293483383953571,
+      "res_v_rmse": 0.07331035193055868,
+      "res_s_rmse": 0.10603517107665539
+    }
+  }
+}
