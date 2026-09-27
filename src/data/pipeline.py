@@ -81,6 +81,8 @@ def create_flow_datasets(
     stats_dir: str = "outputs/normalization",
     preload_to_memory: bool = False,
     seed: int = 42,
+    require_pressure: bool = False,
+    require_tracer: bool = False,
 ) -> Tuple[ShearFlowDataset, ShearFlowDataset, ShearFlowDataset, Optional[FieldNormalizer]]:
     """Create reproducible PyTorch Datasets for train, valid, and test sets.
 
@@ -107,6 +109,8 @@ def create_flow_datasets(
         stats_dir: Directory to cache fitted normalizer statistics.
         preload_to_memory: Whether to cache HDF5 files in memory.
         seed: Random seed for deterministic initialization.
+        require_pressure: Whether to enforce presence and validity of pressure field and time.
+        require_tracer: Whether to enforce presence and validity of tracer field and time.
 
     Returns:
         (train_dataset, valid_dataset, test_dataset, normalizer)
@@ -158,6 +162,8 @@ def create_flow_datasets(
             normalizer=None,
             preload_to_memory=preload_to_memory,
             downsample_factor=downsample_factor,
+            require_pressure=require_pressure,
+            require_tracer=require_tracer,
         )
     else:
         raw_train_ds = ShearFlowDataset(
@@ -169,6 +175,8 @@ def create_flow_datasets(
             normalizer=None,
             preload_to_memory=preload_to_memory,
             downsample_factor=downsample_factor,
+            require_pressure=require_pressure,
+            require_tracer=require_tracer,
         )
 
     fitted_normalizer = None
@@ -254,6 +262,8 @@ def create_flow_datasets(
             normalizer=fitted_normalizer,
             preload_to_memory=preload_to_memory,
             downsample_factor=downsample_factor,
+            require_pressure=require_pressure,
+            require_tracer=require_tracer,
         )
         test_dataset = ShearFlowDataset(
             trajectories=test_entries,
@@ -264,6 +274,8 @@ def create_flow_datasets(
             normalizer=fitted_normalizer,
             preload_to_memory=preload_to_memory,
             downsample_factor=downsample_factor,
+            require_pressure=require_pressure,
+            require_tracer=require_tracer,
         )
     else:
         valid_dataset = ShearFlowDataset(
@@ -275,6 +287,8 @@ def create_flow_datasets(
             normalizer=fitted_normalizer,
             preload_to_memory=preload_to_memory,
             downsample_factor=downsample_factor,
+            require_pressure=require_pressure,
+            require_tracer=require_tracer,
         )
         test_dataset = ShearFlowDataset(
             file_paths=test_entries,
@@ -285,6 +299,8 @@ def create_flow_datasets(
             normalizer=fitted_normalizer,
             preload_to_memory=preload_to_memory,
             downsample_factor=downsample_factor,
+            require_pressure=require_pressure,
+            require_tracer=require_tracer,
         )
 
     return train_dataset, valid_dataset, test_dataset, fitted_normalizer
@@ -313,6 +329,8 @@ def create_flow_dataloaders(
     world_size: int = 1,
     seed: int = 42,
     return_sampler: bool = False,
+    require_pressure: bool = False,
+    require_tracer: bool = False,
 ) -> Union[
     Tuple[DataLoader, DataLoader, DataLoader, Optional[FieldNormalizer]],
     Tuple[DataLoader, DataLoader, DataLoader, Optional[FieldNormalizer], Optional[torch.utils.data.distributed.DistributedSampler]],
@@ -335,6 +353,8 @@ def create_flow_dataloaders(
         stats_dir=stats_dir,
         preload_to_memory=preload_to_memory,
         seed=seed,
+        require_pressure=require_pressure,
+        require_tracer=require_tracer,
     )
 
     train_sampler = None

@@ -456,11 +456,37 @@ def _compute_batch_loss(
             loss = loss + lambda_vort * vort_loss_fn(pred_phys, target_phys)
         if lambda_spec > 0 and spec_loss_fn is not None:
             loss = loss + lambda_spec * spec_loss_fn(pred_phys, target_phys)
-        if lambda_mom > 0 and mom_loss_fn is not None and re is not None:
-            loss_mom, _ = mom_loss_fn(pred_phys, re=re, dt=dt if dt is not None else 0.1, q0_phys=q0_phys)
+
+        if lambda_mom > 0:
+            if mom_loss_fn is None:
+                raise RuntimeError("lambda_mom > 0 but mom_loss_fn is None.")
+            if re is None:
+                raise RuntimeError("lambda_mom > 0 requires physical Reynolds number (re), but got None.")
+            if dt is None:
+                raise RuntimeError("lambda_mom > 0 requires physical time step (dt), but got None.")
+            if not torch.all(torch.isfinite(re)):
+                raise ValueError("Physical parameter 're' contains non-finite values (NaN/Inf).")
+            if not torch.all(torch.isfinite(dt)):
+                raise ValueError("Physical parameter 'dt' contains non-finite values (NaN/Inf).")
+            loss_mom, _ = mom_loss_fn(pred_phys, re=re, dt=dt, q0_phys=q0_phys)
+            if not torch.isfinite(loss_mom):
+                raise FloatingPointError(f"Momentum residual loss is non-finite: {loss_mom.item()}")
             loss = loss + lambda_mom * loss_mom
-        if lambda_tr > 0 and tracer_loss_fn is not None and re is not None and sc is not None:
-            loss_tr, _ = tracer_loss_fn(pred_phys, re=re, sc=sc, dt=dt if dt is not None else 0.1, q0_phys=q0_phys)
+
+        if lambda_tr > 0:
+            if tracer_loss_fn is None:
+                raise RuntimeError("lambda_tr > 0 but tracer_loss_fn is None.")
+            if re is None or sc is None:
+                raise RuntimeError("lambda_tr > 0 requires physical parameters 're' and 'sc', but got None.")
+            if dt is None:
+                raise RuntimeError("lambda_tr > 0 requires physical time step (dt), but got None.")
+            if not (torch.all(torch.isfinite(re)) and torch.all(torch.isfinite(sc))):
+                raise ValueError("Physical parameters 're' or 'sc' contain non-finite values (NaN/Inf).")
+            if not torch.all(torch.isfinite(dt)):
+                raise ValueError("Physical parameter 'dt' contains non-finite values (NaN/Inf).")
+            loss_tr, _ = tracer_loss_fn(pred_phys, re=re, sc=sc, dt=dt, q0_phys=q0_phys)
+            if not torch.isfinite(loss_tr):
+                raise FloatingPointError(f"Tracer residual loss is non-finite: {loss_tr.item()}")
             loss = loss + lambda_tr * loss_tr
 
     return loss
@@ -534,7 +560,7 @@ def _train_epoch(
         # even if model conditioning embedding is disabled.
         phys_re = batch["re"].to(device) if "re" in batch else None
         phys_sc = batch["sc"].to(device) if "sc" in batch else None
-        phys_dt = batch["dt"].to(device) if "dt" in batch else torch.tensor(0.1, device=device)
+        phys_dt = batch["dt"].to(device) if "dt" in batch else None
 
         avail_future = q_future.shape[1]
         avail_hist = q_hist.shape[1]
@@ -833,6 +859,14 @@ def train_forecaster(
             "required to preserve temporal alignment at t_0. Use pushforward_mode='future' instead."
         )
 
+    if (lambda_mom > 0 or lambda_tr > 0) and pushforward_steps > 0:
+        raise ValueError(
+            f"PDE residual losses (lambda_mom={lambda_mom}, lambda_tr={lambda_tr}) "
+            f"cannot be combined with pushforward_steps={pushforward_steps} > 0 in this version. "
+            f"Pushforward shifts the temporal prediction origin away from the historical q0 boundary, "
+            f"causing temporal discretization errors across the transition interface."
+        )
+
     effective_train_horizon = horizon
     if curriculum_rollout:
         effective_train_horizon = max(effective_train_horizon, curriculum_config.target_horizon)
@@ -861,6 +895,8 @@ def train_forecaster(
         world_size=world_size,
         seed=seed,
         return_sampler=True,
+        require_pressure=(lambda_mom > 0),
+        require_tracer=(lambda_tr > 0),
         **({"stats_dir": stats_dir} if stats_dir is not None else {}),
     )
 

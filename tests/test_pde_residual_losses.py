@@ -346,3 +346,84 @@ def test_input_validation_and_failures():
     # 4. Single frame without q0
     with pytest.raises(ValueError, match="Cannot compute temporal PDE residual on single-frame"):
         loss_fn(q_valid[:, :1], re=100.0, sc=1.0, dt=0.1, q0_phys=None)
+
+    # 5. Non-finite values: NaN and Inf in state field
+    q_nan = q_valid.clone()
+    q_nan[0, 0, 0, 10, 10] = float("nan")
+    with pytest.raises(ValueError, match="non-finite"):
+        loss_fn(q_nan, re=100.0, sc=1.0, dt=0.1)
+
+    q_inf = q_valid.clone()
+    q_inf[0, 0, 0, 10, 10] = float("inf")
+    with pytest.raises(ValueError, match="non-finite"):
+        loss_fn(q_inf, re=100.0, sc=1.0, dt=0.1)
+
+    # 6. Non-finite values: NaN and Inf in physics parameters
+    with pytest.raises(ValueError, match="non-finite"):
+        loss_fn(q_valid, re=float("nan"), sc=1.0, dt=0.1)
+
+    with pytest.raises(ValueError, match="non-finite"):
+        loss_fn(q_valid, re=100.0, sc=float("inf"), dt=0.1)
+
+    with pytest.raises(ValueError, match="non-finite"):
+        loss_fn(q_valid, re=100.0, sc=1.0, dt=float("nan"))
+
+
+def test_high_frequency_advection_dealiasing():
+    """Test 8: High-frequency quadratic product Orszag 2/3 dealiasing benchmark.
+
+    Benchmark case:
+        Grid: Nx = 24, Ny = 24 on [0, 1] x [0, 1].
+        Single Fourier mode: u(x) = sin(2 * pi * 9 * x).
+        Exact continuous advection product:
+            u * du/dx = 9 * pi * sin(2 * pi * 18 * x).
+        The Nyquist limit on Nx=24 is k_nyq = 12.
+        Mode 18 lies beyond Nyquist. In an aliased discrete evaluation, mode 18
+        folds back to 24 - 18 = 6, which lands inside the retained band (|k| < 8).
+
+        1. A naive 'multiply on original grid, then post-filter' preserves the spurious mode 6
+           (RMS in retained band ~19.99).
+        2. With proper Orszag 2/3 dealiasing (pre-truncating operands and projecting product),
+           the mode is rigorously removed from the retained band (RMS ~ 0).
+    """
+    nx, ny = 24, 24
+    lx, ly = 1.0, 1.0
+    dtype = torch.float64
+    x = torch.linspace(0.0, lx - lx / nx, nx, dtype=dtype)
+    y = torch.linspace(0.0, ly - ly / ny, ny, dtype=dtype)
+    xx, yy = torch.meshgrid(x, y, indexing="ij")
+
+    # Pure mode 9 field
+    u_val = torch.sin(2.0 * torch.pi * 9.0 * xx)
+    v_val = torch.zeros_like(xx)
+    p_val = torch.zeros_like(xx)
+    s_val = torch.zeros_like(xx)
+
+    # Form (B=1, T=2, C=4, Nx, Ny) stationary field so partial_t = 0
+    q = torch.stack([u_val, v_val, p_val, s_val], dim=0).unsqueeze(0).repeat(1, 2, 1, 1, 1).to(dtype=torch.float32)
+
+    mom_loss_dealias = NavierStokesMomentumResidualLoss(domain_size=(lx, ly), dealias=True)
+    mom_loss_nodealias = NavierStokesMomentumResidualLoss(domain_size=(lx, ly), dealias=False)
+
+    # When dealias=True: operands are pre-truncated to |k| < 8; mode 9 is zeroed out before multiplication,
+    # resulting in strictly zero advective force and zero residual.
+    _, stats_dealias = mom_loss_dealias(q[:, 1:], re=1000.0, dt=0.1, q0_phys=q[:, 0])
+
+    # When dealias=False: mode 9 multiplies mode 9 derivative on original grid, producing severe aliasing
+    _, stats_nodealias = mom_loss_nodealias(q[:, 1:], re=1000.0, dt=0.1, q0_phys=q[:, 0])
+
+    assert stats_dealias["res_momentum_u_rmse"] < 1e-5, (
+        f"Dealiased residual should be negligible (~0), got {stats_dealias['res_momentum_u_rmse']}"
+    )
+    assert stats_nodealias["res_momentum_u_rmse"] > 10.0, (
+        f"Non-dealiased residual should exhibit large aliasing (> 10.0), got {stats_nodealias['res_momentum_u_rmse']}"
+    )
+
+
+def test_zero_weights_pde_loss():
+    """Test 9: PDE loss with zero weights returns 0.0 without affecting gradient / loss flow."""
+    pde_loss = NavierStokesPDELoss(domain_size=(1.0, 2.0), lambda_mom=0.0, lambda_tr=0.0)
+    q = torch.randn(1, 2, 4, 32, 64)
+    loss, stats = pde_loss(q[:, 1:], re=100.0, sc=1.0, dt=0.1, q0_phys=q[:, 0])
+    assert loss.item() == 0.0
+    assert stats["loss_pde_total"] == 0.0

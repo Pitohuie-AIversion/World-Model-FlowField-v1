@@ -150,6 +150,35 @@ def dealias_field_2d(field: torch.Tensor) -> torch.Tensor:
     return filtered.to(dtype=orig_dtype)
 
 
+spectral_truncate_2d = dealias_field_2d
+
+
+def dealiased_product_2d(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Compute point-wise product of two fields using standard Orszag 2/3 dealiasing.
+
+    In pseudo-spectral methods on periodic domains, computing a non-linear quadratic
+    product a * b on an N-point grid generates frequencies up to 2 * k_max.
+    If the operands contain modes beyond N/3, these modes alias into low wavenumbers.
+
+    Orszag 2/3 truncation rule ensures aliasing-free evaluation in the retained band
+    (|kx| < Nx/3, |ky| < Ny/3) by:
+      1. Pre-truncating operands a and b to |k| < N/3.
+      2. Computing the spatial product a_trunc * b_trunc.
+      3. Projecting the product back to |k| < N/3, eliminating all aliased modes.
+
+    Args:
+        a: Tensor of shape (..., Nx, Ny).
+        b: Tensor of shape (..., Nx, Ny), broadcastable with a.
+
+    Returns:
+        Dealiased product tensor of same shape and dtype as a.
+    """
+    a_trunc = dealias_field_2d(a)
+    b_trunc = dealias_field_2d(b)
+    prod = a_trunc * b_trunc
+    return dealias_field_2d(prod)
+
+
 def spectral_grad_2d(
     field: torch.Tensor,
     domain_size: Tuple[float, float] = (1.0, 2.0),

@@ -29,6 +29,7 @@ from src.utils.fft_derivatives import (
     dealias_field_2d,
     project_zero_mean_pressure,
     spectral_grad_xy,
+    spectral_truncate_2d,
 )
 
 
@@ -118,8 +119,8 @@ class NavierStokesMomentumResidualLoss(nn.Module):
         self.scale_v = float(scale_v)
         self.dealias = bool(dealias)
 
-        if self.scale_u <= 0 or self.scale_v <= 0:
-            raise ValueError(f"Residual scales must be positive, got scale_u={scale_u}, scale_v={scale_v}")
+        if not (self.scale_u > 0 and self.scale_v > 0 and torch.isfinite(torch.tensor([self.scale_u, self.scale_v])).all()):
+            raise ValueError(f"Residual scales must be strictly positive and finite, got scale_u={scale_u}, scale_v={scale_v}")
 
     def compute_spatial_operator(
         self,
@@ -145,22 +146,36 @@ class NavierStokesMomentumResidualLoss(nn.Module):
 
         p_gauge = project_zero_mean_pressure(p)
 
+        if self.dealias:
+            # Orszag 2/3 projection: truncate operand fields to effective bandwidth |k| < N/3
+            u_eff = spectral_truncate_2d(u)
+            v_eff = spectral_truncate_2d(v)
+            p_eff = spectral_truncate_2d(p_gauge)
+        else:
+            u_eff = u
+            v_eff = v
+            p_eff = p_gauge
+
         # Gradients
-        du_dx, du_dy = spectral_grad_xy(u, domain_size=self.domain_size)
-        dv_dx, dv_dy = spectral_grad_xy(v, domain_size=self.domain_size)
-        dp_dx, dp_dy = spectral_grad_xy(p_gauge, domain_size=self.domain_size)
+        du_dx, du_dy = spectral_grad_xy(u_eff, domain_size=self.domain_size)
+        dv_dx, dv_dy = spectral_grad_xy(v_eff, domain_size=self.domain_size)
+        dp_dx, dp_dy = spectral_grad_xy(p_eff, domain_size=self.domain_size)
 
         # Laplacians
-        lap_u = compute_laplacian_2d(u, domain_size=self.domain_size)
-        lap_v = compute_laplacian_2d(v, domain_size=self.domain_size)
+        lap_u = compute_laplacian_2d(u_eff, domain_size=self.domain_size)
+        lap_v = compute_laplacian_2d(v_eff, domain_size=self.domain_size)
 
         # Advective non-linear acceleration: (u * du/dx + v * du/dy)
-        advect_u = u * du_dx + v * du_dy
-        advect_v = u * dv_dx + v * dv_dy
+        advect_u_raw = u_eff * du_dx + v_eff * du_dy
+        advect_v_raw = u_eff * dv_dx + v_eff * dv_dy
 
         if self.dealias:
-            advect_u = dealias_field_2d(advect_u)
-            advect_v = dealias_field_2d(advect_v)
+            # Project product back to |k| < N/3 to eliminate all aliasing modes
+            advect_u = spectral_truncate_2d(advect_u_raw)
+            advect_v = spectral_truncate_2d(advect_v_raw)
+        else:
+            advect_u = advect_u_raw
+            advect_v = advect_v_raw
 
         A_u = advect_u + dp_dx - nu * lap_u
         A_v = advect_v + dp_dy - nu * lap_v
@@ -189,13 +204,20 @@ class NavierStokesMomentumResidualLoss(nn.Module):
         """
         full_traj, num_intervals = _ensure_trajectory_dim(pred_phys, q0=q0_phys)
 
+        if not torch.all(torch.isfinite(full_traj)):
+            raise ValueError("Input flow trajectory contains non-finite values (NaN/Inf).")
+
         device = full_traj.device
         b = full_traj.shape[0]
 
         # Broadcast Re and dt
-        # full_traj shape: (B, T, C, Nx, Ny) -> broadcast to (B, 1, Nx, Ny)
         nu_tensor = _broadcast_physics_param(1.0 / re if isinstance(re, (int, float)) else 1.0 / re, (b, 1, 1, 1), device)
         dt_tensor = _broadcast_physics_param(dt, (b, 1, 1, 1), device)
+
+        if not torch.all(torch.isfinite(nu_tensor)):
+            raise ValueError("Reynolds number contains non-finite values (NaN/Inf).")
+        if not torch.all(torch.isfinite(dt_tensor)):
+            raise ValueError("Time step dt contains non-finite values (NaN/Inf).")
 
         if torch.any(nu_tensor <= 0):
             raise ValueError("Reynolds number must be strictly positive (nu > 0).")
@@ -203,7 +225,6 @@ class NavierStokesMomentumResidualLoss(nn.Module):
             raise ValueError("Time step dt must be strictly positive.")
 
         # Compute spatial operator A(q) for all frames along trajectory
-        # Merge B and T for batched spectral operations
         t_steps = full_traj.shape[1]
         c, nx, ny = full_traj.shape[2], full_traj.shape[3], full_traj.shape[4]
         q_flattened = full_traj.view(b * t_steps, c, nx, ny)
@@ -214,8 +235,12 @@ class NavierStokesMomentumResidualLoss(nn.Module):
         A_u_all = A_u_flat.view(b, t_steps, nx, ny)
         A_v_all = A_v_flat.view(b, t_steps, nx, ny)
 
-        u_all = full_traj[:, :, 0, :, :]
-        v_all = full_traj[:, :, 1, :, :]
+        if self.dealias:
+            u_all = spectral_truncate_2d(full_traj[:, :, 0, :, :])
+            v_all = spectral_truncate_2d(full_traj[:, :, 1, :, :])
+        else:
+            u_all = full_traj[:, :, 0, :, :]
+            v_all = full_traj[:, :, 1, :, :]
 
         # Interval residuals across [n, n+1]
         u_n = u_all[:, :-1]
@@ -229,9 +254,11 @@ class NavierStokesMomentumResidualLoss(nn.Module):
         A_v_next = A_v_all[:, 1:]
 
         # Trapezoidal rule: r = (q_{n+1} - q_n) / dt + 0.5 * (A(q_{n+1}) + A(q_n))
-        # Note dt_tensor has shape (B, 1, 1, 1)
         r_u = (u_next - u_n) / dt_tensor + 0.5 * (A_u_next + A_u_n)
         r_v = (v_next - v_n) / dt_tensor + 0.5 * (A_v_next + A_v_n)
+
+        if not (torch.all(torch.isfinite(r_u)) and torch.all(torch.isfinite(r_v))):
+            raise FloatingPointError("Computed momentum residual contains non-finite values (NaN/Inf).")
 
         loss_u = torch.mean((r_u / self.scale_u) ** 2)
         loss_v = torch.mean((r_v / self.scale_v) ** 2)
@@ -278,8 +305,8 @@ class TracerAdvectionDiffusionResidualLoss(nn.Module):
         self.scale_s = float(scale_s)
         self.dealias = bool(dealias)
 
-        if self.scale_s <= 0:
-            raise ValueError(f"Residual scale_s must be positive, got {scale_s}")
+        if not (self.scale_s > 0 and torch.isfinite(torch.tensor(self.scale_s))):
+            raise ValueError(f"Residual scale_s must be strictly positive and finite, got {scale_s}")
 
     def compute_spatial_operator(
         self,
@@ -302,12 +329,23 @@ class TracerAdvectionDiffusionResidualLoss(nn.Module):
         v = q[..., 1, :, :]
         s = q[..., 3, :, :]
 
-        ds_dx, ds_dy = spectral_grad_xy(s, domain_size=self.domain_size)
-        lap_s = compute_laplacian_2d(s, domain_size=self.domain_size)
-
-        advect_s = u * ds_dx + v * ds_dy
         if self.dealias:
-            advect_s = dealias_field_2d(advect_s)
+            u_eff = spectral_truncate_2d(u)
+            v_eff = spectral_truncate_2d(v)
+            s_eff = spectral_truncate_2d(s)
+        else:
+            u_eff = u
+            v_eff = v
+            s_eff = s
+
+        ds_dx, ds_dy = spectral_grad_xy(s_eff, domain_size=self.domain_size)
+        lap_s = compute_laplacian_2d(s_eff, domain_size=self.domain_size)
+
+        advect_s_raw = u_eff * ds_dx + v_eff * ds_dy
+        if self.dealias:
+            advect_s = spectral_truncate_2d(advect_s_raw)
+        else:
+            advect_s = advect_s_raw
 
         A_s = advect_s - kappa * lap_s
         return A_s
@@ -336,13 +374,20 @@ class TracerAdvectionDiffusionResidualLoss(nn.Module):
         """
         full_traj, num_intervals = _ensure_trajectory_dim(pred_phys, q0=q0_phys)
 
+        if not torch.all(torch.isfinite(full_traj)):
+            raise ValueError("Input tracer trajectory contains non-finite values (NaN/Inf).")
+
         device = full_traj.device
         b = full_traj.shape[0]
 
-        # kappa = 1 / (Re * Sc)
         re_tensor = _broadcast_physics_param(re, (b, 1, 1, 1), device)
         sc_tensor = _broadcast_physics_param(sc, (b, 1, 1, 1), device)
         dt_tensor = _broadcast_physics_param(dt, (b, 1, 1, 1), device)
+
+        if not (torch.all(torch.isfinite(re_tensor)) and torch.all(torch.isfinite(sc_tensor))):
+            raise ValueError("Reynolds and Schmidt numbers contain non-finite values (NaN/Inf).")
+        if not torch.all(torch.isfinite(dt_tensor)):
+            raise ValueError("Time step dt contains non-finite values (NaN/Inf).")
 
         if torch.any(re_tensor <= 0) or torch.any(sc_tensor <= 0):
             raise ValueError("Reynolds and Schmidt numbers must be strictly positive.")
@@ -360,7 +405,10 @@ class TracerAdvectionDiffusionResidualLoss(nn.Module):
         A_s_flat = self.compute_spatial_operator(q_flattened, kappa_flattened)
         A_s_all = A_s_flat.view(b, t_steps, nx, ny)
 
-        s_all = full_traj[:, :, 3, :, :]
+        if self.dealias:
+            s_all = spectral_truncate_2d(full_traj[:, :, 3, :, :])
+        else:
+            s_all = full_traj[:, :, 3, :, :]
 
         s_n = s_all[:, :-1]
         s_next = s_all[:, 1:]
@@ -369,6 +417,9 @@ class TracerAdvectionDiffusionResidualLoss(nn.Module):
 
         # Trapezoidal rule
         r_s = (s_next - s_n) / dt_tensor + 0.5 * (A_s_next + A_s_n)
+
+        if not torch.all(torch.isfinite(r_s)):
+            raise FloatingPointError("Computed tracer residual contains non-finite values (NaN/Inf).")
 
         loss_s = torch.mean((r_s / self.scale_s) ** 2)
         rs_rmse = torch.sqrt(torch.mean(r_s**2)).detach().item()

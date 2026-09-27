@@ -122,9 +122,17 @@ class ShearFlowDataset(Dataset):
         for f_idx, path in enumerate(self.file_paths):
             if not os.path.exists(path):
                 continue
-            params = parse_shear_flow_filename(os.path.basename(path))
-            re_val = params["re"]
-            sc_val = params["sc"]
+            try:
+                params = parse_shear_flow_filename(os.path.basename(path))
+                re_val = params["re"]
+                sc_val = params["sc"]
+            except ValueError:
+                with h5py.File(path, "r") as h5_check:
+                    if "scalars/Reynolds" in h5_check and "scalars/Schmidt" in h5_check:
+                        re_val = float(h5_check["scalars/Reynolds"][()])
+                        sc_val = float(h5_check["scalars/Schmidt"][()])
+                    else:
+                        raise
 
             with h5py.File(path, "r") as h5:
                 dset = self._find_dset(h5, ["t1_fields/velocity", "velocity", "t0_fields/tracer", "tracer", "u"])
@@ -141,21 +149,45 @@ class ShearFlowDataset(Dataset):
                     t_steps = shape[0]
 
                 # Extract time coordinates
-                if "dimensions/time" in h5:
-                    time_arr = np.asarray(h5["dimensions/time"], dtype=np.float32)
-                elif "time" in h5:
-                    time_arr = np.asarray(h5["time"], dtype=np.float32)
+                has_time = ("dimensions/time" in h5) or ("time" in h5)
+                if has_time:
+                    raw_time = h5["dimensions/time"] if "dimensions/time" in h5 else h5["time"]
+                    time_arr = np.asarray(raw_time, dtype=np.float32)
                 else:
+                    if self.require_pressure or self.require_tracer:
+                        raise KeyError(
+                            f"require_pressure={self.require_pressure} or require_tracer={self.require_tracer} "
+                            f"requires explicit ground-truth time dataset in {path}, but no time dataset was found. "
+                            f"Aborting to prevent fabricating synthetic time intervals."
+                        )
                     time_arr = np.arange(t_steps, dtype=np.float32) * 0.1
+
+                if self.require_pressure or self.require_tracer:
+                    if len(time_arr) < t_steps:
+                        raise ValueError(
+                            f"Time coordinates in {path} have length {len(time_arr)}, but trajectory has {t_steps} timesteps."
+                        )
+                    if not np.all(np.isfinite(time_arr)):
+                        raise ValueError(f"Time dataset in {path} contains non-finite values (NaN/Inf).")
+                    diffs = np.diff(time_arr)
+                    if not np.all(diffs > 0):
+                        raise ValueError(f"Time dataset in {path} is not strictly monotonically increasing.")
+                    dt0 = float(diffs[0])
+                    if not np.all(np.abs(diffs - dt0) <= 1e-4 * dt0 + 1e-6):
+                        raise ValueError(
+                            f"Time dataset in {path} has irregular intervals (min={diffs.min()}, max={diffs.max()}). "
+                            f"PDE residual formulation requires a uniform time grid."
+                        )
+
                 self._time_data[f_idx] = time_arr
 
                 # Strict validation for physical fields when requested
                 has_p = self._find_dset(h5, ["t0_fields/pressure", "pressure"]) is not None
                 has_s = self._find_dset(h5, ["t0_fields/tracer", "tracer", "s"]) is not None
                 if self.require_pressure and not has_p:
-                    raise ValueError(f"require_pressure=True but pressure field is missing in {path}")
+                    raise KeyError(f"require_pressure=True but pressure field is missing in {path}")
                 if self.require_tracer and not has_s:
-                    raise ValueError(f"require_tracer=True but tracer field is missing in {path}")
+                    raise KeyError(f"require_tracer=True but tracer field is missing in {path}")
 
                 windows = generate_window_indices(
                     total_timesteps=t_steps,
@@ -297,10 +329,22 @@ class ShearFlowDataset(Dataset):
             elif len(time_arr) >= 2:
                 dt_val = float(time_arr[1] - time_arr[0])
             else:
+                if self.require_pressure or self.require_tracer:
+                    raise ValueError(f"Cannot determine dt from time array in {path}")
                 dt_val = 0.1
         else:
+            if self.require_pressure or self.require_tracer:
+                raise KeyError(f"Missing time coordinates for sample in {path}")
             time_slice = np.arange(start_t, end_t, dtype=np.float32) * 0.1
             dt_val = 0.1
+
+        if self.require_pressure or self.require_tracer:
+            if not (np.isfinite(dt_val) and dt_val > 0):
+                raise ValueError(f"Invalid non-positive or non-finite dt={dt_val} for sample from {path}")
+            if not (np.isfinite(re_val) and re_val > 0):
+                raise ValueError(f"Invalid non-positive or non-finite Re={re_val} for sample from {path}")
+            if self.require_tracer and not (np.isfinite(sc_val) and sc_val > 0):
+                raise ValueError(f"Invalid non-positive or non-finite Sc={sc_val} for sample from {path}")
 
         return {
             "history": history,  # (L, 4, Ny, Nx)
