@@ -1,10 +1,10 @@
 # 流场世界模型 V1 阶段全链验收报告与 10 月任务规划
 
-> **报告日期**：2026-09-21  
+> **报告日期**：2026-09-21（2026-09-28 闭环修订）  
 > **项目名称**：World-Model-FlowField-v1  
 > **验收基准**：The Well `shear_flow` 2D 周期剪切流（不可压缩 Navier-Stokes + 被动示踪标量输运）  
 > **计算环境**：NVIDIA vGPU-32GB × 2 (CUDA 13.0, PyTorch 2.10.0+cu128)  
-> **代码与测试状态**：代码规范审查通过，自动化契约与单元测试 **56/56 项 100% 绿灯 PASS**  
+> **代码与测试状态**：代码规范审查通过，自动化契约与单元测试 **377/377 项 100% 绿灯 PASS**  
 
 ---
 
@@ -20,7 +20,8 @@
 | **基线体系** | 统一标准竞技场 | `src/baselines/fno.py`<br>`src/models/direct_transformer.py` | 统一输入输出接口契约与 Benchmark 数据协议一致性强校验 | **PASS** |
 | **Stage 4** | 纯潜空间自由滚动机制 | `src/models/history_buffer.py`<br>`scripts/train_forecaster.py` | FIFO 纯潜状态推演，双卡 DDP 长训（$H=2$），**单步 VRMSE 暴降 80.5%（0.3481）** | **PASS** |
 | **Stage 6** | 周期谱导数与独立物理指标 | `src/utils/fft_derivatives.py`<br>`src/metrics/rollout.py` | 2D 周期谱梯度、散度、涡量与拉普拉斯算子（**解析解误差 $1.40 \times 10^{-12}$**） | **PASS** |
-| **消融分析** | 物理消融体系 (E0-E4) | `scripts/evaluate_physics_ablation.py`<br>`outputs/figures/physics_ablation_curves.png` | 消融评测流水线规范就绪（Closure-R1 历史基准归档 ARCHIVED；Closure-R2 E0-E4 全量重跑 PENDING） | **PASS WITH CONDITIONS** |
+| **消融分析** | 物理消融体系 (E0-E4) | `scripts/evaluate_physics_ablation.py`<br>`outputs/figures/closure_r4/` | Closure-R4 在 Seeds 42, 43, 44 上全量完成双卡训练、跨种子评测与配对检验闭环（详见 [docs/MANUSCRIPT_RESULTS.md](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/MANUSCRIPT_RESULTS.md)） | **PASS** |
+
 
 ---
 
@@ -92,31 +93,41 @@
   3. **课程式自由滚动覆盖**：完成 $H=4$ 和 $H=8$ 的自由滚动长训并固化终局权重与指标。
   （待上述数据补充与实验重跑完成后，更新为终局正式 PASS）。
 
-## 五、 10 月份下一轮研发任务规划 (October Roadmap)
+## 五、 10 月份下一轮研发任务规划与实测落地进展 (October Roadmap & Progress)
 
-进入 10 月份后，研发重心将从“动力学核心基底打通”向“多尺度课程式长推演、生成式不确定性建模与宽参数域泛化”全面演进：
+进入 10 月份后，研发重心从“动力学核心基底打通”向“多尺度课程式长推演、生成式不确定性建模、连续 PDE 残差约束与宽参数域泛化”全面演进：
 
 ```
-[10月上旬] 课程式渐进展开训练 (H=4, 8) ──────► 攻克 50~100 步超长程推演无漂移
+[课程式多步递进 (H=4, 8, 12, 16)] ──────► 【已落地完成】全跨度展开与推前预热机制闭环
         │
-[10月中旬] 潜空间流形扩散模型 (Latent Diffusion) ──► 建模高雷诺数剪切湍流的多模态随机分岔
+[概率潜流形动力学 (ProbLatent Phase 0~3)] ─► 【已落地完成】异方差网络、区间校准与 Spread-Skill 闭环
         │
-[10月下旬] 宽域 Re/Sc 自适应与三维架构扩展 ──────► 跨量级外推与 3D 周期谱算子预研
+[Navier-Stokes / 示踪剂 PDE 残差受控训练] ──► 【已落地完成】连续物理方程可微约束与全验证集评估闭环
+        │
+[潜空间生成式扩散与三维预研] ────────────► 【规划中待调度】跨量级外推与 3D 周期谱算子预研
 ```
 
-### 任务 1：课程式多步自回归训练（Curriculum Multi-Step Rollout $H=4, 8$）
-- **背景与痛点**：目前物理消融模型采用 $H=2$ 短程展开，虽然依靠物理损失成功抑制了发散，但在步长迈向 50 步时仍存在能量衰减；
-- **具体目标**：
-  - 设计课程式调度器：Epoch 1~10 使用 $H=2$，Epoch 11~20 递进至 $H=4$，Epoch 21~30 递进至 $H=8$；
-  - 配合梯度检查点（Gradient Checkpointing）技术，在 32GB 显存内实现长程计算图穿透；
-  - 目标：将 50 步长期滚动的 VRMSE 压制在 2.0 以内。
+### 任务 1：课程式多步自回归训练（Curriculum Multi-Step Rollout $H=4, 8, 12, 16$）—— 【已完成】
+- **落地证据**：
+  - 完成 `CurriculumRolloutScheduler`（倍增/线性调度）与 `stop-gradient pushforward` 截断梯度推前预热；
+  - 调度完成 Horizon-R1 ($H=2, 4, 8$) 与 Horizon-R2 ($H=12, 16$ 双卡 DDP) 全量长训；
+  - 导出 H12 评测报告 [outputs/metrics/h12_benchmark_evaluation.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/h12_benchmark_evaluation.json) 与阶梯流场图集。
 
-### 任务 2：潜流形生成式扩散世界模型（Latent Diffusion Flow World Model）
-- **背景与痛点**：当剪切流雷诺数升至 $10^5$ 以上时，流动发生非线性混沌破裂与涡丝脱落，单一切值回归（MSE）会导致预测场模糊（平均化效应）；
-- **具体目标**：
-  - 在空间潜状态序列上接入条件扩散模型（DiT / Latent Diffusion）；
-  - 以 $Z_{t-L+1:t}$ 与物理参数为条件，通过反向去噪生成多模态未来潜流场；
-  - 目标：大幅提升湍流高频能量谱（Power Spectrum）的一致性与涡旋卷吸拓扑生动性。
+### 任务 2：概率潜流形动力学与不确定性量化 (ProbLatent Phase 0 ~ 3) —— 【已完成】
+- **落地证据**：
+  - Phase 0: 潜空间单步转移残差均值与方差审计（`latent_residual_stats.json`）；
+  - Phase 1 & 2: 冻结确定性底座（保持结构零误差平价），训练对角高斯异方差网络，测试集 NLL 降至 `-0.1704` nats/element，CRPS 改善 6.1%；
+  - Phase 3: 集合自回归推演，80%/90% 区间覆盖率误差 <0.6%，混合池化 Spread-Skill 评估完成，导出出版级矢量 PDF/PNG。
+
+### 任务 3：Navier-Stokes 与示踪剂 PDE 动力学残差受控训练 —— 【已完成】
+- **落地证据**：
+  - 实现全连续动量与标量输运方程残差算子，引入 Orszag 2/3 截断谱去混叠；
+  - 实施数据管道时间步均匀性断言与 `use_spatial_pos` Fail-Closed 治理；
+  - 残差基线审计确认 GT 真实残差仅 $\sim 1.5 \times 10^{-3}$，梯度尺度探测确定最佳权重；
+  - 在全体验证集 1110 个滑动窗口上评测证实：动量残差降低 1.48%、示踪物残差降低 2.18%、散度降低 0.19%、压力保真度改善。
+
+### 任务 4：潜流形生成式扩散世界模型（Latent Diffusion Flow World Model）—— 【待调度】
+
 
 ### 任务 3：宽参数域泛化与外推适应性（Broad-Domain Re/Sc Generalization）
 - **具体目标**：

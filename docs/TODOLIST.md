@@ -3,7 +3,7 @@
 > **项目名称**：World-Model-FlowField-v1  
 > **基准数据集**：The Well `shear_flow` (2D 不可压缩剪切流 + 被动示踪标量)  
 > **计算环境**：NVIDIA vGPU-32GB × 2 (Ada Lovelace AD103 / RTX 4080 32G, CUDA 13.0, PyTorch 2.10.0+cu128，详见 [HARDWARE_ENVIRONMENT.md](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/HARDWARE_ENVIRONMENT.md))  
-> **工程测试基线**：全套自动化测试套件通过（263 项用例收集/回归测试全部绿灯通过，含协议契约、实验身份治理、H12 扩展契约、编译兼容性与时序对齐测试）
+> **工程测试基线**：全套自动化测试套件通过（**377 项测试用例全部绿灯通过**，涵盖协议契约、实验身份治理、H12 扩展契约、概率潜空间动力学 Phase 0~3、Navier-Stokes 与示踪剂 PDE 动力学残差体系、编译兼容性与时序对齐测试）
 
 ---
 
@@ -21,7 +21,10 @@
 | **Stage 5** | 物理守恒损失消融实验 (E0 - E4) | Closure-R4 物理损失 E0-E4 在三组种子（Seeds 42, 43, 44）上完成全量双卡训练、跨种子评测与配对检验闭环 | <font color="#2ea44f">● 已完成 (DONE)</font> |
 | **Stage 6** | 周期 FFT 导数与独立物理评价系统 | 二维周期谱导数与拉普拉斯算子、全量物理衍生量、8 联排出版级 Rollout 看板导出 | <font color="#2ea44f">● 已完成 (DONE)</font> |
 | **V1 全链验收** | 汇总主模型与基线、失败案例审计、架构规范与 V1 验收 | 实验身份契约全面冻结（P1-1~P1-5 闭环，Normalizer Hash 校验，Fail-Closed 阻断），Closure-R4 三种子消融与基线大盘汇总完成 | <font color="#2ea44f">● 已完成 (DONE)</font> |
-| **10 月路线图** | 课程式长推演、潜流形扩散、宽域泛化与三维预研 | 课程式多步自回归展开（H=4, 8, 16）与 Pushforward 预热机制已落地通过回归测试；潜流形扩散与三维预研待调度 | <font color="#d29922">● 部分就绪 (IN PROGRESS)</font> |
+| **Horizon 阶梯** | 课程式长推演 ($H=4, 8, 12, 16$) 与推前训练 | 完成倍增课程调度、截断梯度推前预热、H12 扩展、H16 双卡 DDP 训练与跨度阶梯横向比对评测 | <font color="#2ea44f">● 已完成 (DONE)</font> |
+| **ProbLatent** | 概率潜空间动力学与不确定性量化 | Phase 0~3 闭环：潜残差审计、对角高斯方差头、负对数似然 (NLL) 训练、自回归集合展开、Spread-Skill 诊断与区间校准 | <font color="#2ea44f">● 已完成 (DONE)</font> |
+| **PDE 动力学约束** | Navier-Stokes 与示踪剂 PDE 残差受控训练 | 连续 NS 动量方程与标量输运方程残差、时间网格与坐标解析治理、残差基线审计、梯度尺度探测与全验证集受控模型遴选 | <font color="#2ea44f">● 已完成 (DONE)</font> |
+| **前沿探索** | 潜流形扩散生成、宽域泛化与三维预研 | 潜流形扩散世界模型、极端参数域外推泛化适应性与三维不可压缩流场预研 | <font color="#d29922">● 待调度 (PLANNED)</font> |
 
 ---
 
@@ -129,17 +132,70 @@
 
 ---
 
-### 10 月份下一轮研发任务路线图 (October Roadmap)
-- [x] **任务 1：课程式长时程多步自回归展开 ($H=4, 8, 16$) 与推前训练机制**：
+### 10 月份前沿研发任务路线图 (October Roadmap & Specialized Modules)
+
+#### 1. 课程式长时程多步自回归展开 ($H=4, 8, 12, 16$) 与推前训练机制
+- [x] **课程式自回归调度器与推前预热**：
   - 完成 `CurriculumRolloutScheduler`（倍增/线性/固定阶段调度）；
   - 完成 `HistoryBuffer` 与 `LatentForecaster` 的截断梯度推前预热机制（`stop-gradient pushforward`）；
   - 严格规范推前训练时间契约：`future` 模式监督 $q_{\text{future}}[K:K+H]$；`history` 模式底层支持扩展上下文切片，标准 4 步数据入口实施 fail-closed 安全隔离；
-  - 完成 Horizon-R1（$H=2, 4, 8$）与 Horizon-R2（$H=16$ 双卡 DDP）长程推演训练与物理大盘评测；
-  - 通过 16 项专用回归测试套件（`tests/test_curriculum_pushforward.py`）；
-  - *代码位置*：[src/training/curriculum.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/training/curriculum.py), [scripts/train_forecaster.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/train_forecaster.py), [scripts/run_horizon_ablation.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/run_horizon_ablation.py), [scripts/run_h16_extension.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/run_h16_extension.py)
-- [ ] **任务 2：潜流形生成式扩散世界模型 (Latent Diffusion Flow Model)**
-- [ ] **任务 3：宽参数域泛化与极端工况外推适应性**
-- [ ] **任务 4：三维不可压缩流场与复杂几何架构预研**
+  - 完成 Horizon-R1（$H=2, 4, 8$）与 Horizon-R2（$H=12, 16$ 双卡 DDP）长程推演训练与物理大盘评测；
+  - 产出 H12 评测报告 [outputs/metrics/h12_benchmark_evaluation.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/h12_benchmark_evaluation.json) 与跨度阶梯对比图集 [outputs/figures/horizon_ladder_comparison/](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/horizon_ladder_comparison/)；
+  - 通过 16 项专用回归测试套件（`tests/test_curriculum_pushforward.py` 与 `tests/test_h12_extension.py`）；
+  - *代码位置*：[src/training/curriculum.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/training/curriculum.py), [scripts/train_forecaster.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/train_forecaster.py), [scripts/run_horizon_ablation.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/run_horizon_ablation.py), [scripts/run_h12_extension.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/run_h12_extension.py), [scripts/run_h16_extension.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/run_h16_extension.py)
+
+#### 2. 概率潜流形动力学与不确定性量化治理 (ProbLatent Phase 0 ~ Phase 3)
+- [x] **Phase 0：潜空间残差分布审计与契约锁定**：
+  - 提取确定性模型在验证集上的单步潜转移残差 $\Delta Z = Z_{t+1} - Z_t$，审计通道级与空间级均值、方差及极值分布；
+  - 导出 [outputs/normalization/latent_residual_stats.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/normalization/latent_residual_stats.json) 并生成安全校验记录 [outputs/normalization/latent_audit_verification_record.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/normalization/latent_audit_verification_record.json)；
+  - *代码位置*：[scripts/compute_latent_statistics.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/compute_latent_statistics.py), [scripts/verify_latent_audit_contract.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/verify_latent_audit_contract.py)
+- [x] **Phase 1：概率动力学模型架构与确定性均值结构平价**：
+  - 构建 `ProbabilisticLatentDynamics` 封装层与对角高斯方差头；
+  - 保证在方差头启用/禁用时均值前向 $\mu$ 与冻结底座确定性模型严格零误差（`max_mean_discrepancy == 0.0`）；
+  - *代码位置*：[src/models/probabilistic_latent_dynamics.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/models/probabilistic_latent_dynamics.py)
+- [x] **Phase 2：高斯负对数似然 (NLL) 方差模型训练**：
+  - 冻结确定性均值 Transformer 权重，使用 `F.gaussian_nll_loss` 单独训练对角方差网络；
+  - 验证集 NLL 从同方差基线 G0 的 `0.0237` 显著优化至异方差模型 G1 的 `-0.2066`（提升 `-0.230 nats/element`）；
+  - 记录完备物料元数据：[outputs/normalization/phase2_variance_training_record.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/normalization/phase2_variance_training_record.json)；
+  - *代码位置*：[scripts/train_prob_latent_variance.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/train_prob_latent_variance.py)
+- [x] **Phase 3：多步自回归集合推演、区间校准与 Spread-Skill 评估**：
+  - 实现集合重参数化长程推演与确定性轨迹完全隔离；
+  - 建立滑动窗口跨窗口混合池化（Cross-Window Pooled RMS）的 Spread-Skill 诊断比率；
+  - 测试集单步 NLL 从 `0.0270` 优化至 `-0.1704`，CRPS 改善 6.1%（0.3836 $\to$ 0.3602）；
+  - 80% 名义区间实测覆盖率达 79.6%（绝对误差仅 0.4%），90% 名义区间实测覆盖率达 90.6%（绝对误差仅 0.6%）；
+  - 产出评测大盘报告 [outputs/metrics/phase3_probabilistic_evaluation.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/phase3_probabilistic_evaluation.json) 与论文出版级高清矢量图集 [outputs/figures/probabilistic/](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/probabilistic/)（Figure 1~3 & Summary PNG/PDF）；
+  - *代码位置*：[scripts/evaluate_prob_latent_phase3.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/evaluate_prob_latent_phase3.py), [scripts/plot_prob_latent_phase3.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/plot_prob_latent_phase3.py)
+
+#### 3. Navier-Stokes 与被动示踪剂 PDE 动力学残差物理约束体系
+- [x] **高保真可微 PDE 残差算子实现**：
+  - 二维连续不可压缩动量方程残差 $\mathbf{r}_{\text{mom}} = \partial_t \mathbf{u} + (\mathbf{u} \cdot \nabla) \mathbf{u} + \nabla p - \frac{1}{Re} \nabla^2 \mathbf{u}$；
+  - 速度无散连续性约束 $\nabla \cdot \mathbf{u} = 0$；
+  - 被动标量对流扩散方程残差 $r_{\text{tracer}} = \partial_t s + (\mathbf{u} \cdot \nabla) s - \frac{1}{Re \cdot Sc} \nabla^2 s$；
+  - 支持二阶中心差分与向前差分两种时间离散格式；Orszag 2/3 截断谱去混叠；
+  - *代码位置*：[src/losses/navier_stokes.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/losses/navier_stokes.py)
+- [x] **数据管道时间网格与坐标解析治理**：
+  - 实施数据管道严格均匀时间步长 $\Delta t$ 校验与跨时间步断言；
+  - 严格修复空间位置编码契约：对 `use_spatial_pos` 实施 Fail-Closed 判定，杜绝非显式布尔传参引发的静默退化；
+  - *代码位置*：[src/data/shear_flow_dataset.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/data/shear_flow_dataset.py), [src/data/pipeline.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/data/pipeline.py)
+- [x] **PDE 残差基线审计 (Audit) 与零点验证**：
+  - 审计 GT、降采样 GT、Autoencoder 重建与 D0 推演输出在真实 PDE 上的残差；
+  - 证实 GT 真实物理残差仅为 $\sim 1.5 \times 10^{-3}$，确立了物理先验的数值严密性；
+  - 产出审计报告 [outputs/evaluations/pde_residual_audit.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/evaluations/pde_residual_audit.json)；
+  - *代码位置*：[scripts/audit_pde_residuals.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/audit_pde_residuals.py)
+- [x] **PDE 梯度量级与相似度探测 (Gradient Probe)**：
+  - 精确测量 PDE 物理梯度范数与场重构损失梯度范数的量级比，防止梯度主导或被淹没；
+  - 产出探测报告 [outputs/evaluations/pde_gradient_probe.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/evaluations/pde_gradient_probe.json)；
+  - *代码位置*：[scripts/probe_pde_gradient_scales.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/probe_pde_gradient_scales.py)
+- [x] **PDE 受控训练微调与全体验证集候选模型评测**：
+  - 运行受控微调实验（P0 对照组 vs PDE 实验组）；
+  - 在验证集全量 1110 个滑动窗口上执行全面严格评测：PDE 模型相较 P0 对照组在动量残差 $res_u$ 降低 1.48%、示踪物残差 $res_s$ 降低 2.18%、散度降低 0.19%、压力 VRMSE 改善 0.23%；
+  - 产出训练记录 [outputs/evaluations/pde_controlled_training_h12.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/evaluations/pde_controlled_training_h12.json) 与全验证集基准评测报告 [outputs/evaluations/pde_controlled_candidates_full_val.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/evaluations/pde_controlled_candidates_full_val.json)；
+  - *代码位置*：[scripts/run_pde_controlled_training.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/run_pde_controlled_training.py), [scripts/evaluate_pde_controlled_candidates.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/evaluate_pde_controlled_candidates.py)
+
+#### 4. 后续规划模块
+- [ ] **任务 4：潜流形生成式扩散世界模型 (Latent Diffusion Flow Model)**
+- [ ] **任务 5：宽参数域泛化与极端工况外推适应性**
+- [ ] **任务 6：三维不可压缩流场与复杂几何架构预研**
 
 ---
 

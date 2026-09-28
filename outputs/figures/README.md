@@ -27,6 +27,16 @@ outputs/figures/
 │   ├── rollout_benchmark_curves.png
 │   ├── failure_cases_analysis.png
 │   └── flow_state_real.png
+├── probabilistic/                 # ProbLatent 概率潜空间评估与校准套件 (PNG & 矢量 PDF)
+│   ├── figure_1_vrmse_evolution.png / .pdf
+│   ├── figure_2_interval_calibration.png / .pdf
+│   ├── figure_3_spread_skill_relationship.png / .pdf
+│   └── figure_summary_phase3.png / .pdf
+├── horizon_ladder_comparison/     # 跨度阶梯 (H2/H4/H8/H12/H16) 完整对比图集
+│   ├── comparison_fixed_ref_*.png (+ metadata.json)
+│   ├── comparison_median_err_*.png (+ metadata.json)
+│   ├── comparison_high_err_*.png (+ metadata.json)
+│   └── comparison_figures_index.json
 ├── h16_comparison/                # H16 多模型超长时序展开定性对比
 │   ├── comparison_fixed_ref_*.png (+ metadata.json)
 │   ├── comparison_median_err_*.png (+ metadata.json)
@@ -67,6 +77,10 @@ outputs/figures/
   ```bash
   python scripts/plot_physics_ablation.py
   ```
+- **概率潜空间动力学评估图集生成 (Phase 3 PNG & 矢量 PDF)**：
+  ```bash
+  python scripts/plot_prob_latent_phase3.py
+  ```
 - **定性流场图 (Qualitative) 生成**：
   ```bash
   # H8 长程模型评估三联组图 (自动生成 PNG 与 metadata JSON)
@@ -76,3 +90,4 @@ outputs/figures/
   ```bash
   python scripts/visualize_h16_comparison.py
   ```
+

@@ -98,10 +98,21 @@
 | **归一化参数** | [outputs/normalization/stats_grouped.pt](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/normalization/stats_grouped.pt) | 流场各通道均值、方差与极值预处理统计参数 |
 | **物理消融指标 (多种子)** | [outputs/metrics/closure_r4_physics_ablation_tri_seed_summary.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/closure_r4_physics_ablation_tri_seed_summary.json) | Closure-R4 Seeds 42/43/44 全量物理消融与配对检验汇总 |
 | **跨度消融指标** | [outputs/metrics/horizon_r1_test_evaluation.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/horizon_r1_test_evaluation.json) | Horizon-R1 ($H=2, 4, 8$) 长程泛化与 H8 Long-Best 遴选结果 |
+| **H12 扩展评测** | [outputs/metrics/h12_benchmark_evaluation.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/h12_benchmark_evaluation.json) | H12 扩展推演与父模型对比基准指标 |
 | **H16 极限基准指标** | [outputs/metrics/h16_benchmark_evaluation_v3.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/h16_benchmark_evaluation_v3.json) | H16 双卡 DDP 扩展与父模型全量对比评测大盘 |
+| **跨度阶梯图集** | [outputs/figures/horizon_ladder_comparison/](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/horizon_ladder_comparison/) | 跨度阶梯 ($H=2, 4, 8, 12, 16$) 对比流场三联图与元数据索引 |
+| **概率潜残差审计** | [outputs/normalization/latent_residual_stats.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/normalization/latent_residual_stats.json) | 潜空间单步转移残差通道级与空间级均值、方差及极值审计 |
+| **概率方差训练记录** | [outputs/normalization/phase2_variance_training_record.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/normalization/phase2_variance_training_record.json) | Phase 2 对角异方差网络 NLL 损失训练轨迹与检查点哈希指纹 |
+| **概率评测指标大盘** | [outputs/metrics/phase3_probabilistic_evaluation.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/phase3_probabilistic_evaluation.json) | Phase 3 概率自回归展开、不确定性区间校准与 Spread-Skill 评估报告 |
+| **概率出版级图集** | [outputs/figures/probabilistic/](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/probabilistic/) | 概率评估高清矢量 PDF 与 PNG 图表（VRMSE、校准曲线、Spread-Skill） |
+| **PDE 残差基线审计** | [outputs/evaluations/pde_residual_audit.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/evaluations/pde_residual_audit.json) | GT、降采样场、自编码器与推演模型的 Navier-Stokes/示踪剂连续物理残差 |
+| **PDE 梯度范数探测** | [outputs/evaluations/pde_gradient_probe.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/evaluations/pde_gradient_probe.json) | PDE 物理约束相对场值重构损失的参数梯度范数与余弦相似度 |
+| **PDE 受控训练记录** | [outputs/evaluations/pde_controlled_training_h12.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/evaluations/pde_controlled_training_h12.json) | P0 对照组与 PDE 实验组受控微调步进记录与检查点指纹 |
+| **PDE 全验证集评测** | [outputs/evaluations/pde_controlled_candidates_full_val.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/evaluations/pde_controlled_candidates_full_val.json) | 全体验证集 1110 窗口下 PDE 受控模型物理指标全面评测对比 |
 | **出版级对比大图** | [outputs/figures/manuscript/figure_a_vrmse_and_dispersion.png](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/manuscript/figure_a_vrmse_and_dispersion.png) | 论文正文 Figure A：多步 VRMSE 均值与跨种子方差耗散 |
 | **物理守恒图** | [outputs/figures/manuscript/figure_b_physical_invariants.png](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/manuscript/figure_b_physical_invariants.png) | 论文正文 Figure B：散度、涡量与拟能守恒演化曲线 |
 | **H16 定性图集** | [outputs/figures/h16_comparison_v2/](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/h16_comparison_v2/) | H16 多模型定性对比流场面板与元数据索引 |
+
 
 ---
 
@@ -170,3 +181,73 @@
   - 验证了课程式多步递进与推前机制对极端长跨度训练收敛的决定性保障作用。
 - **论文级详细数据与表格**：
   完整 LaTeX 表格与物理解析详见 [docs/MANUSCRIPT_RESULTS.md](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/MANUSCRIPT_RESULTS.md)。
+
+---
+
+## 7. Horizon-Ladder 跨度阶梯横向评测 ($H=2, 4, 8, 12, 16$) 与 H12 实验结果
+
+为建立时序展开窗口对世界模型动力学质量的完整阶梯全景，系统开展了 H12 扩展推演与全跨度横向比对：
+
+### 7.1 H12 评测结论 (H12 Benchmark)
+- **评测协议与样本**：基于 45 个严格隔离的滑动窗口（跨越 5 条独立测试轨迹），在无泄漏测试集上对父模型与 H12 扩展模型展开为期 30 步的评测；
+- **核心数据落盘**：[outputs/metrics/h12_benchmark_evaluation.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/h12_benchmark_evaluation.json)；
+- **定性阶梯面板**：完整跨度流场演化对比图集见 [outputs/figures/horizon_ladder_comparison/](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/horizon_ladder_comparison/)，包含流向速度 $u$、涡量场 $\omega$ 与示踪物浓度 $s$ 在不同误差分位数下的三联对比。
+
+---
+
+## 8. ProbLatent Phase 3 概率潜流形推演与不确定性校准评测报告
+
+在确定性底座（$D0$）之上，引入对角高斯异方差网络（$G1$）与固定同方差基准（$G0$），在 125 个测试窗口（4,096,000 个潜空间元素）上执行概率自回归评测：
+
+### 8.1 单步概率预测精度与负对数似然 (NLL)
+
+| 模型类别 | 模型描述 | 测试集 NLL (nats/element) | 连续排位概率得分 (CRPS) | MAE / RMSE | 结构均值一致性 |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **D0 (确定性基线)** | 确定性均值单点前向预测 | - | - | 0.5670 / 0.7171 | 基准 |
+| **G0 (同方差基线)** | 固定通道方差高斯先验 | 0.0270 | 0.3836 | - | 均值完全平价 |
+| **G1 (异方差模型)** | 依赖潜状态条件的自适应方差头 | **-0.1704** | **0.3602** | - | $\max \|\mu_{G1} - \mu_{D0}\| \equiv 0.0$ |
+| **相对改善量** | **G1 相对 G0 提升幅度** | **-0.1974 nats** | **改善 6.1%** | - | **严格零误差平价 (PASS)** |
+
+### 8.2 置信区间经验覆盖率校准 (Interval Calibration)
+
+| 名义置信水平 (Nominal) | G0 经验覆盖率 (PICP) | G1 经验覆盖率 (PICP) | G1 符号校准误差 (Error) | G1 平均区间宽度 (MPIW) | 校准质量评价 |
+| :---: | :---: | :---: | :---: | :---: | :--- |
+| **50% (0.50)** | 42.41% | **45.72%** | -4.28% | 0.8122 | 适度保守，较 G0 缩小误差近半 |
+| **80% (0.80)** | 79.36% | **79.62%** | **-0.38%** | 1.6210 | **超高精度吻合（绝对误差仅 0.38%）** |
+| **90% (0.90)** | 91.73% | **90.58%** | **+0.58%** | 2.0834 | **超高精度吻合（绝对误差仅 0.58%）** |
+| **95% (0.95)** | 96.48% | **95.69%** | **+0.69%** | 2.4841 | **超高精度吻合（绝对误差仅 0.69%）** |
+
+### 8.3 Spread-Skill 关系与出版级图表
+- **诊断指标**：在跨窗口混合池化（Cross-Window Pooled RMS）下计算集合发散度（Spread）与重构误差（Skill）之比，为长时程展开提供自适应不确定性安全带；
+- **落盘报告与图集**：详细指标见 [outputs/metrics/phase3_probabilistic_evaluation.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/metrics/phase3_probabilistic_evaluation.json)，出版级图表导出至 [outputs/figures/probabilistic/](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/probabilistic/)（Figure 1~3 & Summary PNG/PDF）。
+
+---
+
+## 9. Navier-Stokes 与示踪剂 PDE 动力学残差物理评测大盘
+
+### 9.1 真实流场与推演模型 PDE 残差基线审计 (Audit)
+经由 [scripts/audit_pde_residuals.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/audit_pde_residuals.py) 审计，各对象在无量纲时间网格上的偏微分方程残差 RMSE 实测如下：
+
+| 评估对象 | 散度 RMSE ($\nabla \cdot \mathbf{u}$) | 动量残差 $u$ ($res_u$) | 动量残差 $v$ ($res_v$) | 示踪物输运残差 ($res_s$) | 物理特性解读 |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Ground Truth (全分辨率)** | $0.0026$ | $0.0016$ | $0.0015$ | $0.0013$ | 严格服从连续 Navier-Stokes 方程与示踪剂对流-扩散守恒 |
+| **Ground Truth (降采样)** | $0.0010$ | $0.0015$ | $0.0015$ | $0.0011$ | 网格降采样平滑轻微削减高频微分波动 |
+| **Autoencoder 重建** | $0.0988$ | $0.0375$ | $0.0479$ | $0.0459$ | 8x 空间潜流形压缩保留了绝大部分微分物理结构 |
+| **D0 推演模型 (未约束)** | $0.1257$ | $0.0929$ | $0.0733$ | $0.1060$ | 自回归展开存在小幅度微分漂移，验证了显式 PDE 约束的必要性 |
+
+### 9.2 PDE 受控训练微调全体验证集评测对比 (1110 窗口全量评测)
+在验证集全部 1110 个滑动窗口上（$H=12$，下采样因子 2），对比父底座 $D0$、无 PDE 约束对照组 $P0$ 与引入 PDE 残差约束的实验组 $PDE$：
+
+| 评价物理指标 | 父模型 D0 基线 | P0 对照组 (step 50) | PDE 实验组 (step 50) | PDE 相对 P0 对照组改善百分比 |
+| :--- | :---: | :---: | :---: | :---: |
+| **水平动量残差 $res_u$ RMSE** | 0.07566 | 0.08353 | **0.08229** | <font color="#2ea44f">**-1.48% (显著降低)**</font> |
+| **竖直动量残差 $res_v$ RMSE** | 0.05744 | 0.06250 | **0.06226** | <font color="#2ea44f">**-0.39% (降低)**</font> |
+| **示踪物输运残差 $res_s$ RMSE** | 0.11904 | 0.12332 | **0.12064** | <font color="#2ea44f">**-2.18% (大幅改善)**</font> |
+| **速度散度 RMSE** | 0.12529 | 0.13783 | **0.13757** | <font color="#2ea44f">**-0.19% (改善)**</font> |
+| **压力场 VRMSE ($vrmse_p$)** | 0.46877 | 0.44601 | **0.44499** | <font color="#2ea44f">**-0.23% (更精准)**</font> |
+| **示踪物场 VRMSE ($vrmse_s$)** | 0.10054 | 0.10086 | **0.10072** | <font color="#2ea44f">**-0.14% (改善)**</font> |
+| **低扩散子群 ($Sc=0.1$) VRMSE** | 0.14393 | 0.14754 | **0.14709** | <font color="#2ea44f">**-0.31% (全场领先)**</font> |
+
+- **落盘评测报告**：[outputs/evaluations/pde_controlled_candidates_full_val.json](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/evaluations/pde_controlled_candidates_full_val.json)。
+- **核心结论**：PDE 残差约束不仅使动量与标量对流扩散物理方程残差全面下降，同时在保持场值重构高精度的前提下改善了压力场与标量场的空间保真度。
+

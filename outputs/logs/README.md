@@ -27,7 +27,9 @@ outputs/logs/
 │   └── train_horizon_r1_seed_42_E4_H8.log                         # H=8 Rollout (Selected Long-Best)
 ├── horizon_r2/                    # Horizon-R2 极端长跨度双卡 DDP 加速扩展日志
 │   └── seed_42/
+│       ├── h12_extension_train.log                                # H=12 Rollout Extension
 │       └── E4_H16.log                                             # H=16 Rollout (Dual GPU DDP)
+
 └── early_ablation/                # 早期探索性消融训练日志
     ├── train_ablation_A1_direct.log                               # Direct ST Transformer
     ├── train_ablation_A2_joint.log                                # Joint Fine-Tuning

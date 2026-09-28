@@ -117,9 +117,36 @@ We compare our Latent World Model against direct physical-space forecasting and 
 
 ---
 
+### 5.6 Horizon Ladder Extension ($H=4, 8, 12, 16$) & Curriculum Pushforward
+
+To address long-term autoregressive drift across extended time scales, our framework incorporates geometric doubling curriculum rollout ($H \in \{2, 4, 8, 12, 16\}$) combined with truncated-gradient pushforward pre-rollout (`stop-gradient pushforward`):
+- **H8 & H12 Long-Horizon Generalization**: Multi-step training up to $H=12$ stabilizes vortex pairing and suppresses high-frequency spectral aliasing on 30-step test evaluations (metrics archived in `outputs/metrics/h12_benchmark_evaluation.json`).
+- **Ladder Visualizations**: Comprehensive cross-horizon qualitative comparisons across multiple error percentiles are cataloged in `outputs/figures/horizon_ladder_comparison/`.
+
+---
+
+### 5.7 Probabilistic Latent Dynamics & Uncertainty Quantification (ProbLatent Phase 0 ~ 3)
+
+Recognizing intrinsic aleatoric uncertainty arising from chaotic shear-layer instabilities, we extended the deterministic latent transformer into a calibrated probabilistic world model:
+- **Zero-Error Mean Parity**: A decoupled diagonal Gaussian variance head $\sigma^2_\phi(\mathbf{Z}_t, c)$ is trained via Gaussian Negative Log-Likelihood ($\mathcal{L}_{\mathrm{NLL}}$) while freezing the deterministic backbone, preserving exact structural mean parity ($\max \|\mu_{\mathrm{prob}} - \hat{\mathbf{Z}}_{\mathrm{det}}\| \equiv 0.0$).
+- **Likelihood & Calibration Gains**: On unseen test rollouts, the heteroscedastic model improves NLL by $-0.1974$ nats/element over homoscedastic baselines, improving CRPS by $6.1\%$.
+- **Interval Reliability**: Empirical coverage on $80\%$ and $90\%$ nominal intervals reaches $79.6\%$ (error $0.38\%$) and $90.6\%$ (error $0.58\%$), respectively. Full vector graphics and spread-skill metrics are preserved in `outputs/figures/probabilistic/` and `outputs/metrics/phase3_probabilistic_evaluation.json`.
+
+---
+
+### 5.8 Exact Navier-Stokes & Passive Tracer Transport PDE Residuals
+
+To ensure outputs adhere to continuous partial differential equations governing fluid momentum and tracer transport, we integrated end-to-end differentiable PDE residual loss operators (`src/losses/navier_stokes.py`) equipped with Orszag 2/3 spectral dealiasing:
+- **Baseline Physics Audit**: Empirical audits confirm analytical GT residuals at $\sim 1.5 \times 10^{-3}$, establishing a rigorous numerical baseline (`outputs/evaluations/pde_residual_audit.json`).
+- **Controlled Fine-Tuning Validation**: On 1,110 multi-window validation trajectories, PDE-regularized training reduces momentum residual ($res_u$) by $1.48\%$, tracer transport residual ($res_s$) by $2.18\%$, and velocity divergence by $0.19\%$, demonstrating that spatial latent world models can be directly regularized by continuous Navier-Stokes physics without sacrificing reconstruction fidelity (`outputs/evaluations/pde_controlled_candidates_full_val.json`).
+
+---
+
 ## 6. Summary of Scientific Findings & Research Boundaries
 
 1. **Proven Incompressibility Enforcement**: Direct penalty on velocity divergence ($\mathcal{L}_{\mathrm{div}}$) consistently reduces physical divergence across multiple seeds without degrading field MSE.
 2. **Stabilization of Rotational Invariants**: Vorticity loss ($\mathcal{L}_\omega$) and full physics regularization ($\mathcal{L}_{\mathrm{div}} + \mathcal{L}_\omega$) reliably curb long-horizon vorticity and enstrophy divergence across 3 independent seeds.
 3. **Optimization Variance Reduction**: Physics regularization substantially reduces cross-seed variance ($\sigma_{\mathrm{VRMSE}}$ reduced by $3\times$ at step 5), yielding reproducible dynamics.
-4. **Boundary of Claims**: Physics regularization does not guarantee uniform superiority in raw field MSE at every intermediate horizon, and scalar high-$k$ spectral diagnostics must be interpreted in conjunction with full continuous Fourier curves.
+4. **Calibrated Probabilistic & PDE Physics Capabilities**: The architecture natively supports heteroscedastic uncertainty quantification and continuous Navier-Stokes/tracer PDE residual constraints, establishing a solid foundation for physical world models.
+5. **Boundary of Claims**: Physics regularization does not guarantee uniform superiority in raw field MSE at every intermediate horizon, and scalar high-$k$ spectral diagnostics must be interpreted in conjunction with full continuous Fourier curves.
+

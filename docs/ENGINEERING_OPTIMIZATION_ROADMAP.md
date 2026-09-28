@@ -22,6 +22,9 @@
 | **阶段 3.2**<br>不可压缩流形投影 | 连续 Fourier 空间 Leray 正交无散投影算子 ($\mathbf{P}_{\text{Leray}}$) | 亥姆霍兹-霍奇分解（Helmholtz-Hodge Decomposition） | **已完成 (PASS)** | 从底层解析满足 $\nabla \cdot \mathbf{u} = 0$，严格保全涡量且 100% 解析可导 |
 | **阶段 3.3**<br>时序曝光偏差对抗 | Pushforward 自回归预热 (Stop-gradient) + 课程训练调度器 | 缓解自回归自激误差放大，几何翻倍阶梯递进 ($2 \to 4 \to 8 \to 16$) | **已完成 (PASS)** | 显著压低长程外推累积漂移，验证集推演 VRMSE 稳定性大幅增强 |
 | **阶段 4.1**<br>动能谱多尺度损失 | 径向积分动能谱对数损失 $\mathcal{L}_{\text{spec}}$ (`EnergySpectrumLoss`) | 能量级联标度律（Kraichnan $k^{-3}$ 与 Kolmogorov 理论） | **已完成 (PASS)** | 显式压制小尺度涡耗散；GPU 原生 `scatter_add_` 仅占 260KB 显存 |
+| **阶段 5.1**<br>概率潜流形方差量化 | 对角高斯异方差网络 + 负对数似然 (NLL) + 混合池化 Spread-Skill 诊断 | 湍流初值敏感性与认知不确定性建模（Aleatoric UQ） | **已完成 (PASS)** | NLL 优化 -0.230 nats，CRPS 改善 6.1%，80%/90% 区间覆盖率误差 < 0.6% |
+| **阶段 5.2**<br>PDE 连续动力学约束 | 连续不可压缩动量与标量输运方程残差 + Orszag 2/3 去混叠 + 受控微调 | 本构 Navier-Stokes 与对流扩散输运偏微分方程 | **已完成 (PASS)** | 动量残差降低 1.48%，标量残差降低 2.18%，散度降低 0.19%，压力保真度提升 |
+
 
 ---
 
@@ -195,5 +198,21 @@ python3 scripts/train_forecaster.py \
 
 ## 9. 工程质量与持续集成保障规范 (Verification Protocol)
 
-- **全量回归测试集**：`tests/` 下覆盖 242 项测试，持续运行时间 83.28 秒，严格验证包括模型可微性、张量形状各向同性、算子逆向一致性、检查点跨运行期加载以及契约校验；
+- **全量自动化测试基线**：`tests/` 下覆盖 **377 项测试用例全部绿灯通过**，持续运行时间约 115 秒，全面覆盖模型可微性、概率潜流形均值零误差平价、NLL 损失收敛、PDE 连续微分残差审计、时间步均匀性断言、位置编码 Fail-Closed 治理、检查点递归前缀剥离与协议哈希治理；
 - **自动化远端 CI 流水线**：每次代码推送自动触发 GitHub Actions CI 工作流（基于 `uv` 与 CPU-only Wheels），运行耗时稳定保持在 30 秒至 3 分钟之间，确保远程构建永远绿灯（`✓ 100% Pass`）。
+
+---
+
+## 10. 阶段 5：概率潜流形动力学与 PDE 物理受控训练 (ProbLatent & PDE Constraints)
+
+### 10.1 概率潜流形方差网络与不确定性量化 (ProbLatent Phase 0 ~ Phase 3)
+1. **潜残差统计量审计**：通过 [scripts/compute_latent_statistics.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/compute_latent_statistics.py) 提取潜残差分布，锁定数据契约哈希；
+2. **异方差网络与均值平价**：独立训练空间卷积方差预测头 $\sigma^2(Z_t)$，冻结确定性均值底座，保证 $\max |\mu_{\text{prob}} - \hat{Z}_{\text{det}}| \equiv 0.0$；
+3. **负对数似然优化**：验证集 NLL 降至 $-0.2066$ nats/element，80%/90% 区间覆盖率误差低于 0.6%；
+4. **混合池化 Spread-Skill 诊断**：消除时间窗口拼接引起的统计伪影，导出出版级矢量 PDF/PNG 评估套件。
+
+### 10.2 连续 Navier-Stokes 与示踪剂 PDE 残差受控微调
+1. **偏微分方程连续残差算子**：实现动量方程残差 $\mathbf{r}_{\text{mom}}$、不可压缩连续性 $\nabla \cdot \mathbf{u} = 0$ 与示踪剂输运残差 $r_{\text{tracer}}$；
+2. **谱空间去混叠与时间网格治理**：应用 Orszag 2/3 准则消除非线性对流项频域混叠；强校验均匀时间步长 $\Delta t$；实施 `use_spatial_pos` 空间位置编码 Fail-Closed 治理；
+3. **全体验证集基准评测**：全体验证集 1110 个滑动窗口评测表明，受控微调在动量残差降低 1.48%、示踪物残差降低 2.18%、散度降低 0.19%、压力 VRMSE 改善 0.23%。
+

@@ -10,7 +10,7 @@
 
 系统采用 **空间潜流形解耦架构（Latent World Model Architecture）**。将流体动力学求解分解为两个正交解耦的子空间：
 1. **空间表示流形空间（Representation Subspace）**：负责将连续偏微分方程（PDE）的高维网格状态压缩映射到致密、光滑的低维离散物理潜状态；
-2. **时序动力学推演空间（Dynamics Subspace）**：在低维潜空间中执行纯自回归时序前向演化，并由物理守恒损失（无散度与涡量一致性）穿透解码器雅可比矩阵提供全局约束。
+2. **时序动力学推演空间（Dynamics Subspace）**：在低维潜空间中执行纯自回归时序前向演化（支持确定性残差更新与概率异方差重参数化采样），并由物理守恒损失（无散度与涡量一致性）以及连续 Navier-Stokes/示踪剂偏微分方程残差穿透解码器雅可比矩阵提供全局物理闭环约束。
 
 ```
 [ 输入历史流场 q_{t-L+1:t} ] (B, L, 4, 128, 256)
@@ -22,27 +22,32 @@
     │               ▼
     └──────────► [ LatentSTTransformer (6层时空解耦注意力 + 2D PosEmb) ]
                     │
-                    ▼  (AdaLN-Zero 调制 & 残差潜状态更新)
-            [ HistoryBuffer (FIFO 潜空间自回归循环 & Pushforward) ]
-                    │
-                    ▼ (推演 H 步潜状态序列 Z_{t+1:t+H})
-            [ Decoder2D ] (转置卷积 8x 空间上采样)
-                    │
-                    ▼ (非就地正交投影规范)
-            [ 压力零均值投影: p <- p - mean(p) ]
-                    │
-                    ▼
-            [ 预测物理流场 q_{t+1:t+H} ] (B, H, 4, 128, 256)
-                    │
-    ┌───────────────┼───────────────┐
-    ▼                               ▼                               ▼
-[ L_div 散度损失 ]              [ L_vort 涡量损失 ]              [ 可微 Leray 投影 ]
-||div(u)||^2 = 0            ||curl(u) - omega||^2           P(u) = u - grad(inv_lap(div(u)))
-(二维周期 FFT 谱梯度)         (二维周期 FFT 谱旋度)           (频域零散度投影)
-    │                               │
-    └───────────────┬───────────────┘
-                    ▼
-       [ 梯度穿透反向传播到 Transformer ]
+            ┌───────┴───────────────────────────────┐
+            ▼                                       ▼
+     [ 确定性残差转移 μ(Z) ]                 [ 异方差预测头 σ²(Z) ]
+            │                                       │
+            └───────────────┬───────────────────────┘
+                            ▼ (重参数化/集合推演或均值推演)
+                    [ HistoryBuffer (FIFO 潜空间自回归循环 & Pushforward) ]
+                            │
+                            ▼ (推演 H 步潜状态序列 Z_{t+1:t+H})
+                    [ Decoder2D ] (转置卷积 8x 空间上采样)
+                            │
+                            ▼ (非就地正交投影规范)
+                    [ 压力零均值投影: p <- p - mean(p) ]
+                            │
+                            ▼
+                    [ 预测物理流场 q_{t+1:t+H} ] (B, H, 4, 128, 256)
+                            │
+    ┌───────────────┬───────┴───────────────┬───────────────────────────────┐
+    ▼               ▼                       ▼                               ▼
+[ L_div 散度损失 ]  [ L_vort 涡量损失 ]    [ 可微 Leray 投影 ]             [ L_pde 动量/标量输运残差 ]
+||div(u)||^2 = 0    ||curl(u) - omega||^2   P(u) = u - grad(inv_lap(div(u)))  ||r_mom||^2 + ||r_tracer||^2
+(二维周期 FFT 谱梯度) (二维周期 FFT 谱旋度)  (频域零散度投影)                 (时空连续 Navier-Stokes 方程)
+    │               │                                                       │
+    └───────────────┴───────────────────────┬───────────────────────────────┘
+                                            ▼
+                               [ 梯度穿透反向传播到 Transformer ]
 ```
 
 ---
@@ -195,6 +200,63 @@ p_{\text{proj}}(x, y) = p(x, y) - \frac{1}{|\Omega|}\iint_\Omega p(x', y') \, dx
 - [ADR-002: 空间网格轴序契约与双向周期 FFT 谱导数算子](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-002-spatial-axis-ordering-and-spectral-derivatives.md)
 - [ADR-003: 产物分层治理规范与符号链接向后兼容策略](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-003-outputs-and-artifacts-governance.md)
 - [ADR-004: 多尺度动能谱损失与课程自回归推前训练架构](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-004-multiscale-spectral-loss-and-curriculum-pushforward.md)
+- [ADR-005: 概率潜流形方差建模与不确定性量化治理架构](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-005-probabilistic-latent-dynamics-and-calibration.md)
+- [ADR-006: 连续 Navier-Stokes 与示踪剂偏微分方程残差约束受控训练](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-006-navier-stokes-pde-residuals-and-controlled-training.md)
 
 详见 [docs/adr/README.md](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/README.md)。
+
+---
+
+## 10. 概率潜流形动力学与不确定性量化架构 (Probabilistic Latent Dynamics & UQ)
+
+为了解决流体湍流演化中对初值与微扰敏感带来的内在不确定性（Aleatoric Uncertainty），系统在 [src/models/probabilistic_latent_dynamics.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/models/probabilistic_latent_dynamics.py) 中构建了概率潜流形动力学系统：
+
+### 10.1 均值-方差解耦与结构平价 (Mean-Variance Decoupling & Parity)
+1. **确定性底座解耦**：时空 Transformer 专注于拟合确定性条件转移均值 $\mu_\theta(Z_t, c)$；
+2. **对角高斯异方差网络**：通过专用的轻量级空间卷积/MLP 方差预测头 $\sigma^2_\phi(Z_t, c)$ 输出逐潜空间元素的认知不确定性；
+3. **结构零误差平价契约**：在关闭方差扰动或提取均值时，概率模型输出与确定性底座严格满足数值零误差：
+   \[
+   \max |\mu_{\text{prob}} - \hat{Z}_{\text{det}}| \equiv 0.0
+   \]
+
+### 10.2 高斯负对数似然 (NLL) 损失与方差下界保护
+训练采用高斯负对数似然准则：
+\[
+\mathcal{L}_{\text{NLL}} = \frac{1}{2 D} \sum_{i=1}^D \left[ \frac{(Z_{t+1, i} - \mu_i)^2}{\sigma_i^2} + \ln \sigma_i^2 \right]
+\]
+引入数值截断下界 $\sigma_{\min}^2 = 10^{-4}$，防止方差坍缩引发的梯度爆炸。实测训练中验证集 NLL 稳定下降达 $-0.2066$ nats/element。
+
+### 10.3 集合推演、区间校准与 Spread-Skill 跨窗口混合池化
+在自回归长程展开中，支持蒙特卡洛集合推演（Monte Carlo Ensemble Rollout）：
+- **区间覆盖率校准 (PICP / MPIW)**：在 80% 与 90% 名义置信区间下，经验覆盖率与名义值偏差分别严格控制在 0.4% 与 0.6% 以内；
+- **Cross-Window Pooled RMS 诊断**：消除传统单样本 Spread-Skill 比率在多窗口拼接下的统计偏倚，为世界模型长程推演的可信度提供量化度量。
+
+---
+
+## 11. Navier-Stokes 与示踪剂偏微分方程残差约束体系 (PDE Residual Constraints)
+
+针对纯数据驱动自回归偏离连续物理规律的缺陷，系统在 [src/losses/navier_stokes.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/losses/navier_stokes.py) 中构建了端到端可微的 PDE 残差约束库：
+
+### 11.1 偏微分方程残差表述
+1. **动量方程残差 (Navier-Stokes Momentum Residual)**：
+   \[
+   \mathbf{r}_{\text{mom}} = \frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla) \mathbf{u} + \nabla p - \frac{1}{Re} \nabla^2 \mathbf{u}
+   \]
+2. **不可压缩连续性残差 (Incompressibility Residual)**：
+   \[
+   r_{\text{mass}} = \nabla \cdot \mathbf{u} = \frac{\partial u}{\partial x} + \frac{\partial v}{\partial y}
+   \]
+3. **被动标量输运残差 (Tracer Advection-Diffusion Residual)**：
+   \[
+   r_{\text{tracer}} = \frac{\partial s}{\partial t} + (\mathbf{u} \cdot \nabla) s - \frac{1}{Re \cdot Sc} \nabla^2 s
+   \]
+
+### 11.2 高阶谱空间差分与去混叠机制 (Orszag 2/3 Rule)
+- **非线性对流项去混叠**：流场对流项 $(\mathbf{u} \cdot \nabla) \mathbf{u}$ 与标量对流项 $(\mathbf{u} \cdot \nabla) s$ 在频域相乘会导致高波数混叠（Aliasing）；系统采用 Orszag 2/3 截断准则，在非线性乘积前后滤除高于 $2/3 k_{\max}$ 的高频噪声；
+- **精确时间离散**：支持二阶时间中心差分（Central Difference）与单向向前差分（Forward Difference）；
+- **时间步网格 $\Delta t$ 均匀性断言**：在数据加载器中强制校验时间网格均匀性，杜绝变步长污染偏微分方程残差。
+
+### 11.3 梯度探测与受控微调机制 (Controlled Training)
+在微调阶段引入自适应梯度探测（`scripts/probe_pde_gradient_scales.py`），精确定位物理残差与场值损失的梯度范数比，确保物理约束项不会压制主流场表征收敛。在全验证集 1110 个滑动窗口的评测证实，受控模型相较基线显著抑制了动量残差与标量输运残差。
+
 

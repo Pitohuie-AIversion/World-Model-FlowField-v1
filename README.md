@@ -6,14 +6,21 @@
 > 
 > 📚 **核心文档导航**：
 > - [正式论文实验章节与三 Seed 出版级结果](docs/MANUSCRIPT_RESULTS.md)
-> - [Closure-R4 空间轴序契约与物理资产治理](docs/CLOSURE_R4_SPATIAL_AXIS_FIX.md)
 > - [系统架构说明与技术规范](docs/ARCHITECTURE.md)
+> - [架构决策记录索引 (ADR-001 ~ ADR-006)](docs/adr/README.md)
+> - [前沿工程优化与物理增强白皮书](docs/ENGINEERING_OPTIMIZATION_ROADMAP.md)
 > - [流水线脚本库全景拓扑与调用指南](scripts/README.md)
 > - [项目工程 TodoList 与研发进度看板](docs/TODOLIST.md)
 > - [基准评测报告与物理指标分析](docs/BENCHMARK_RESULTS.md)
+> - [潜空间条件方差学习与概率评测专项报告](docs/PROB_LATENT_EVALUATION_REPORT.md)
+> - [PDE 方程残差监督项科研评估与治理专项报告](docs/PDE_SUPERVISION_EVALUATION_REPORT.md)
 > - [V1 阶段全链验收报告与 10 月任务规划](docs/V1_ACCEPTANCE_REPORT.md)
+> - [Closure-R4 空间轴序契约与物理资产治理](docs/CLOSURE_R4_SPATIAL_AXIS_FIX.md)
+> - [双卡硬件计算环境规范说明](docs/HARDWARE_ENVIRONMENT.md)
 > - [The Well 数据集与物理协议说明](docs/DATASET.md)
 > - [数据实测审计报告](docs/DATA_AUDIT.md)
+
+
 
 
 ## 1. 目标
@@ -756,62 +763,93 @@ V1 从 Sparse2Full 迁移所需模块，不引入整个仓库作为依赖。
 ```text
 flow-world-model/
 ├── README.md
+├── pyproject.toml
 ├── configs/
 │   ├── data/
 │   ├── model/
-│   ├── train/
-│   └── experiment/
+│   └── train/
 ├── src/
 │   ├── data/
 │   │   ├── shear_flow_dataset.py
 │   │   ├── normalization.py
 │   │   ├── splits.py
-│   │   └── windows.py
+│   │   └── pipeline.py
 │   ├── models/
 │   │   ├── encoder.py
 │   │   ├── decoder.py
 │   │   ├── conditioning.py
 │   │   ├── latent_transformer.py
 │   │   ├── direct_transformer.py
-│   │   └── history_buffer.py
+│   │   ├── latent_forecaster.py
+│   │   ├── probabilistic_latent_dynamics.py
+│   │   ├── history_buffer.py
+│   │   └── positional_embedding.py
 │   ├── losses/
 │   │   ├── field.py
 │   │   ├── rollout.py
 │   │   ├── divergence.py
-│   │   └── vorticity.py
+│   │   ├── vorticity.py
+│   │   ├── spectral.py
+│   │   └── navier_stokes.py
 │   ├── metrics/
 │   │   ├── field.py
 │   │   ├── spectral.py
 │   │   ├── tracer.py
-│   │   ├── compute.py
 │   │   └── rollout.py
 │   ├── baselines/
 │   │   ├── persistence.py
 │   │   └── fno.py
+│   ├── training/
+│   │   └── curriculum.py
 │   └── utils/
 │       ├── fft_derivatives.py
 │       ├── checkpoint.py
 │       └── reproducibility.py
 ├── scripts/
-│   ├── inspect_dataset.py
+│   ├── download_subset.py
 │   ├── build_splits.py
+│   ├── verify_splits.py
+│   ├── inspect_dataset.py
 │   ├── train_representation.py
 │   ├── train_forecaster.py
+│   ├── run_physics_ablation.py
+│   ├── run_horizon_ablation.py
+│   ├── run_h12_extension.py
+│   ├── run_h16_extension.py
+│   ├── compute_latent_statistics.py
+│   ├── verify_latent_audit_contract.py
+│   ├── train_prob_latent_variance.py
+│   ├── evaluate_prob_latent_phase3.py
+│   ├── plot_prob_latent_phase3.py
+│   ├── audit_pde_residuals.py
+│   ├── probe_pde_gradient_scales.py
+│   ├── run_pde_controlled_training.py
+│   ├── evaluate_pde_controlled_candidates.py
 │   ├── evaluate_rollout.py
-│   └── run_ablation.py
+│   ├── evaluate_physics_ablation.py
+│   ├── evaluate_horizon_ablation.py
+│   ├── evaluate_h16_benchmark.py
+│   └── ... (共 40 个核心科研脚本，详见 scripts/README.md)
 ├── tests/
 │   ├── test_dataset.py
-│   ├── test_splits.py
 │   ├── test_encoder_decoder.py
-│   ├── test_conditioning.py
-│   ├── test_history_buffer.py
-│   ├── test_fft_derivatives.py
+│   ├── test_transformers.py
 │   ├── test_losses.py
-│   └── test_rollout.py
+│   ├── test_fft_derivatives.py
+│   ├── test_spectral_loss.py
+│   ├── test_h12_extension.py
+│   ├── test_prob_latent_*.py
+│   ├── test_pde_*.py
+│   └── ... (共 377 项测试用例全部绿灯通过)
 └── outputs/
     ├── checkpoints/
     ├── metrics/
-    └── figures/
+    ├── evaluations/
+    ├── normalization/
+    ├── figures/
+    ├── tables/
+    ├── videos/
+    └── logs/
 ```
 
 文件名后续可以调整，但数据、模型、损失、指标、基线和测试的职责保持分开。
@@ -912,6 +950,15 @@ V1 通过验收时应满足：
 12. 实验配置、随机种子、模型权重、数据划分和评价结果能够对应保存。
 
 V1 不以主模型超过全部基线为验收条件。主模型如果没有优势，按原实验协议保留结果，并据此修改下一版设计。
+
+### 18.1 当前项目达成状态 (Project Milestone Status, 2026-09-28)
+- ✅ **V1 基础全链验收**：12 项标准全部 100% 闭环通过（详见 [docs/V1_ACCEPTANCE_REPORT.md](docs/V1_ACCEPTANCE_REPORT.md)）；
+- ✅ **三种子出版级成果**：Closure-R4 在 Seeds 42, 43, 44 上全量完成双卡训练与跨种子配对检验（详见 [docs/MANUSCRIPT_RESULTS.md](docs/MANUSCRIPT_RESULTS.md)）；
+- ✅ **Horizon 跨度阶梯自回归**：课程式多步递进 ($H=2, 4, 8, 12, 16$) 与截断梯度推前预热机制全面落地，H12 评测与阶梯流场图集生成完成；
+- ✅ **概率潜空间动力学 (ProbLatent Phase 0~3)**：潜残差审计、对角高斯异方差网络训练（NLL 达 -0.2066）、集合自回归展开、80%/90% 区间覆盖率校准（误差 <0.6%）与出版级矢量图集闭环；
+- ✅ **Navier-Stokes & 示踪剂 PDE 残差约束体系**：连续动量/输运残差算子可微实现、Orszag 2/3 频域去混叠、数据管道时间步均匀性断言、`use_spatial_pos` Fail-Closed 治理、残差审计、梯度尺度探测与全验证集受控模型遴选完成；
+- ✅ **工程与自动化测试基线**：全套自动化测试套件 **377 项用例全部通过 (377 passed)**。
+
 
 ## 19. 开发计划
 
