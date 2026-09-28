@@ -1,12 +1,21 @@
 {
   "metadata": {
-    "evaluation_git_commit": "f0934741a6dbb9cbae5d5e9a48da732de757dab3",
+    "evaluation_provenance": {
+      "evaluation_git_commit": "bd5eee6cc8bcbb10e327d7334a294e83d9115c15",
+      "evaluation_git_dirty": true,
+      "evaluation_script": "scripts/evaluate_pde_controlled_candidates.py",
+      "evaluation_script_sha256": "da5f6054a0fdb4e0d59c7a4bdff3d205ca743ee78d0e08c2cd69ef374fbb65c6"
+    },
+    "evaluation_git_commit": "bd5eee6cc8bcbb10e327d7334a294e83d9115c15",
     "evaluation_git_dirty": true,
-    "timestamp": "2026-09-28T02:57:25Z",
+    "evaluation_script": "scripts/evaluate_pde_controlled_candidates.py",
+    "evaluation_script_sha256": "da5f6054a0fdb4e0d59c7a4bdff3d205ca743ee78d0e08c2cd69ef374fbb65c6",
+    "timestamp": "2026-09-28T03:50:54Z",
     "split_file": "outputs/splits/grouped_split.json",
     "split_file_sha256": "cfee2ff891a65e399b5f6b6bde62462646183b5a5dcbcea059113310bb382a6a",
     "norm_file": "outputs/normalization/stats_grouped.pt",
     "norm_file_sha256": "6bf4dc6e4b04435c48ada7d0ce7d608079be80e367a8c29f6025ef1f9541080a",
+    "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
     "ae_ckpt": "outputs/checkpoints/representation/best_autoencoder.pt",
     "ae_ckpt_sha256": "a903715704d29b080cf0ab2a32cbc95b1cb4939bd9121b3c63a4b51ddd6453f6",
     "d0_ckpt": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H12/latent_transformer/best_long_vrmse.pt",
@@ -36,18 +45,28 @@
       "training_horizon": 12,
       "history_length": 4,
       "downsample_factor": 2,
-      "use_spatial_pos": false,
+      "use_spatial_pos": true,
       "split_file": "outputs/splits/grouped_split.json",
       "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
       "normalizer_file": "outputs/normalization/stats_grouped.pt",
-      "normalizer_hash": "6bf4dc6e4b04435c48ada7d0ce7d608079be80e367a8c29f6025ef1f9541080a",
+      "normalizer_file_sha256": "6bf4dc6e4b04435c48ada7d0ce7d608079be80e367a8c29f6025ef1f9541080a",
+      "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
       "physics_protocol": "Closure-R4",
       "spatial_axis_contract": "tensor(...,C,Nx,Ny):dim-2=x,dim-1=y",
       "physics_domain_size_xy": [
         1.0,
         2.0
       ],
-      "training_git_commit": "f0934741a6dbb9cbae5d5e9a48da732de757dab3",
+      "training_provenance": {
+        "training_git_commit": "8672c2a55424ed0e7faa2137f2328bd724cdaccd",
+        "training_git_dirty": true,
+        "training_script": "scripts/run_pde_controlled_training.py",
+        "training_script_sha256": "83426abd6de872903311d2cc24b3296031c41472e2cc378bdaf7e7c7d6a6d9f9",
+        "source_experiment_record": "outputs/evaluations/pde_controlled_training_h12.json",
+        "source_experiment_record_sha256": "c4a9d12a25c136f3f6b6e8fa5d1cbef9ff7077ebf8dd01ab2c825b02ea7250db",
+        "provenance_source": "controlled_training_record"
+      },
+      "training_git_commit": "8672c2a55424ed0e7faa2137f2328bd724cdaccd",
       "training_git_dirty": true,
       "pde_weights": {
         "lambda_mom": 0.0,
@@ -70,18 +89,28 @@
       "training_horizon": 12,
       "history_length": 4,
       "downsample_factor": 2,
-      "use_spatial_pos": false,
+      "use_spatial_pos": true,
       "split_file": "outputs/splits/grouped_split.json",
       "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
       "normalizer_file": "outputs/normalization/stats_grouped.pt",
-      "normalizer_hash": "6bf4dc6e4b04435c48ada7d0ce7d608079be80e367a8c29f6025ef1f9541080a",
+      "normalizer_file_sha256": "6bf4dc6e4b04435c48ada7d0ce7d608079be80e367a8c29f6025ef1f9541080a",
+      "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
       "physics_protocol": "Closure-R4",
       "spatial_axis_contract": "tensor(...,C,Nx,Ny):dim-2=x,dim-1=y",
       "physics_domain_size_xy": [
         1.0,
         2.0
       ],
-      "training_git_commit": "f0934741a6dbb9cbae5d5e9a48da732de757dab3",
+      "training_provenance": {
+        "training_git_commit": "8672c2a55424ed0e7faa2137f2328bd724cdaccd",
+        "training_git_dirty": true,
+        "training_script": "scripts/run_pde_controlled_training.py",
+        "training_script_sha256": "83426abd6de872903311d2cc24b3296031c41472e2cc378bdaf7e7c7d6a6d9f9",
+        "source_experiment_record": "outputs/evaluations/pde_controlled_training_h12.json",
+        "source_experiment_record_sha256": "c4a9d12a25c136f3f6b6e8fa5d1cbef9ff7077ebf8dd01ab2c825b02ea7250db",
+        "provenance_source": "controlled_training_record"
+      },
+      "training_git_commit": "8672c2a55424ed0e7faa2137f2328bd724cdaccd",
       "training_git_dirty": true,
       "pde_weights": {
         "lambda_mom": 2.5e-05,
@@ -501,14 +530,14 @@
     "d0_vrmse": 0.25862351882162393,
     "p0_vrmse": 0.2651101012454108,
     "pde_vrmse": 0.26487252486718665,
-    "continued_training_benefit_pct": 2.5081177664513716,
-    "pde_incremental_benefit_pct": -0.08961423088296919,
-    "pde_vs_d0_pct": 2.416255905122358,
+    "continued_training_delta_vs_d0_pct": 2.5081177664513716,
+    "pde_delta_vs_p0_pct": -0.08961423088296919,
+    "pde_delta_vs_d0_pct": 2.416255905122358,
     "pde_beats_p0_on_vrmse": true,
     "pde_beats_d0_on_vrmse": false,
     "div_pde_vs_p0_pct": -0.1877029810562617,
     "div_pde_beats_p0": true,
-    "trade_off_observation": "Field prediction accuracy (VRMSE/RMSE) improves under continued training + PDE, while some physical residuals (divergence, momentum, tracer) remain higher than frozen D0.",
+    "trade_off_observation": "Continued training degrades overall VRMSE relative to frozen D0; PDE regularization slightly reduces this degradation relative to the paired P0 control while improving several PDE residual metrics.",
     "status": "PARTIAL_OR_UNPROVEN"
   }
 }

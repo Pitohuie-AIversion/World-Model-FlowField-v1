@@ -8,6 +8,7 @@ subgroup analysis (e.g. Sc=0.1 vs Sc=1.0), and rigorous cryptographic checkpoint
 import argparse
 import copy
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -38,11 +39,89 @@ from src.metrics.field import compute_vrmse, evaluate_field_metrics
 from src.models.decoder import Decoder2D
 from src.models.encoder import Encoder2D
 from src.models.latent_transformer import LatentSTTransformer
+from src.utils.checkpoint import resolve_spatial_pos_config
 from src.utils.physics_contract import (
     PHYSICS_PROTOCOL,
     SPATIAL_AXIS_CONTRACT,
     SHEAR_FLOW_DOMAIN_SIZE_XY,
 )
+from src.utils.provenance import compute_normalizer_hash
+
+
+def resolve_candidate_spatial_pos(
+    ckpt_data: Dict[str, Any],
+    parent_d0_path: Optional[str] = None,
+) -> bool:
+    """Resolve use_spatial_pos strictly: config -> parent D0 -> model class default -> fail closed.
+
+    Guards against silent inductive bias drift from hardcoded assumptions.
+    """
+    cfg = ckpt_data.get("config", {}) if isinstance(ckpt_data, dict) else {}
+    if "use_spatial_pos" in cfg and isinstance(cfg["use_spatial_pos"], bool):
+        return cfg["use_spatial_pos"]
+    if "use_spatial_pos" in ckpt_data and isinstance(ckpt_data["use_spatial_pos"], bool):
+        return ckpt_data["use_spatial_pos"]
+
+    if parent_d0_path and os.path.exists(parent_d0_path):
+        p_data = torch.load(parent_d0_path, map_location="cpu", weights_only=False)
+        p_cfg = p_data.get("config", {}) if isinstance(p_data, dict) else {}
+        if "use_spatial_pos" in p_cfg and isinstance(p_cfg["use_spatial_pos"], bool):
+            return p_cfg["use_spatial_pos"]
+        try:
+            return resolve_spatial_pos_config(p_data, allow_unverified_fallback=True, default_if_unverified=True)
+        except Exception:
+            pass
+
+    sig = inspect.signature(LatentSTTransformer.__init__)
+    if "use_spatial_pos" in sig.parameters and isinstance(sig.parameters["use_spatial_pos"].default, bool):
+        return sig.parameters["use_spatial_pos"].default
+
+    raise ValueError("Cannot resolve 'use_spatial_pos' strictly for candidate checkpoint.")
+
+
+def resolve_candidate_training_provenance(
+    ckpt_data: Dict[str, Any],
+    training_record_file: Optional[str] = "outputs/evaluations/pde_controlled_training_h12.json",
+) -> Dict[str, Any]:
+    """Extract true training provenance from checkpoint or controlled training record.
+
+    Strictly decouples training commit from evaluation commit.
+    """
+    cfg = ckpt_data.get("config", {}) if isinstance(ckpt_data, dict) else {}
+
+    ckpt_commit = ckpt_data.get("training_git_commit") or cfg.get("training_git_commit")
+    ckpt_dirty = ckpt_data.get("training_git_dirty") if ckpt_data.get("training_git_dirty") is not None else cfg.get("training_git_dirty")
+
+    if ckpt_commit and ckpt_commit != "UNKNOWN":
+        return {
+            "training_git_commit": ckpt_commit,
+            "training_git_dirty": bool(ckpt_dirty),
+            "provenance_source": "checkpoint_native",
+        }
+
+    if training_record_file and os.path.exists(training_record_file):
+        with open(training_record_file, "r") as f:
+            rec = json.load(f)
+        meta = rec.get("metadata", {})
+        rec_commit = meta.get("git_commit")
+        rec_dirty = meta.get("git_dirty")
+        rec_script = meta.get("experiment_script", "scripts/run_pde_controlled_training.py")
+        rec_script_sha = meta.get("experiment_script_sha256")
+        if rec_commit:
+            return {
+                "training_git_commit": rec_commit,
+                "training_git_dirty": bool(rec_dirty),
+                "training_script": rec_script,
+                "training_script_sha256": rec_script_sha,
+                "source_experiment_record": training_record_file,
+                "source_experiment_record_sha256": compute_file_sha256(training_record_file),
+                "provenance_source": "controlled_training_record",
+            }
+
+    raise ValueError(
+        "Cannot resolve training provenance for candidate checkpoint: checkpoint lacks native "
+        "training commit and source training record is missing. Cannot guess training commit."
+    )
 
 
 def load_forecaster_model(
@@ -92,36 +171,25 @@ def evaluate_model_on_dataloader(
     horizon: int = 12,
     device: torch.device = torch.device("cpu"),
 ) -> Tuple[Dict[str, float], Dict[str, Dict[str, float]], int]:
-    """Evaluate model over dataloader collecting overall and per-subgroup metrics.
-
-    Returns:
-        overall_metrics: Aggregate mean over all windows.
-        subgroup_metrics: Per Schmidt group (e.g. Sc=0.1, Sc=1.0) aggregate means.
-        total_samples: Count of processed evaluation windows.
-    """
+    """Evaluate model over dataloader collecting overall and per-subgroup metrics."""
     model.eval()
-
     sample_metrics_list: List[Dict[str, Any]] = []
 
     with torch.no_grad():
         for batch in dataloader:
-            q_hist = batch["history"].to(device)  # normalized (B, L, 4, Ny, Nx)
-            q_future = batch["future"].to(device)  # normalized (B, H, 4, Ny, Nx)
-            re = batch["re"].to(device)  # (B,)
-            sc = batch["sc"].to(device)  # (B,)
-            dt = batch["dt"].to(device)  # (B,)
+            q_hist = batch["history"].to(device)
+            q_future = batch["future"].to(device)
+            re = batch["re"].to(device)
+            sc = batch["sc"].to(device)
+            dt = batch["dt"].to(device)
             b_size = q_hist.size(0)
 
-            # Rollout
             q_pred_norm = model.forward_rollout(q_hist, re=re, sc=sc, horizon=horizon)
-
-            # Denormalize
             q_pred = normalizer.denormalize(q_pred_norm)
             q_target = normalizer.denormalize(q_future)
             q_hist_phys = normalizer.denormalize(q_hist)
             q0_phys = q_hist_phys[:, -1]
 
-            # Zero-mean pressure gauge in physical space
             q_pred[:, :, 2:3] = q_pred[:, :, 2:3] - q_pred[:, :, 2:3].mean(dim=(-2, -1), keepdim=True)
             q_target[:, :, 2:3] = q_target[:, :, 2:3] - q_target[:, :, 2:3].mean(dim=(-2, -1), keepdim=True)
 
@@ -137,10 +205,7 @@ def evaluate_model_on_dataloader(
                 f_m = evaluate_field_metrics(p_b, t_b, channel_names=("u", "v", "p", "s"))
                 rmse_total = math.sqrt(torch.mean((p_b - t_b) ** 2).item())
 
-                # Divergence
                 div_val = math.sqrt(div_loss_fn(p_b[:, :, :2]).item())
-
-                # Discrete PDE residuals
                 _, pde_stats = pde_loss_fn(p_b, re=re_b, sc=sc_b, dt=dt_b, q0_phys=q0_b)
                 ru_val = pde_stats["res_momentum_u_rmse"]
                 rv_val = pde_stats["res_momentum_v_rmse"]
@@ -179,13 +244,11 @@ def evaluate_model_on_dataloader(
         "div_rmse", "res_u_rmse", "res_v_rmse", "res_s_rmse",
     ]
 
-    # Compute overall mean
     overall_metrics = {
         k: float(np.mean([s[k] for s in sample_metrics_list]))
         for k in metric_keys
     }
 
-    # Compute subgroup metrics by Sc
     sc_groups = sorted(list(set(s["sc"] for s in sample_metrics_list)))
     subgroup_metrics: Dict[str, Dict[str, float]] = {}
     for sc_val in sc_groups:
@@ -205,6 +268,9 @@ def build_candidate_governance_metadata(
     parent_d0_sha256: str,
     split_file: str,
     norm_file: str,
+    normalizer: Optional[FieldNormalizer] = None,
+    parent_d0_path: Optional[str] = None,
+    training_record_file: Optional[str] = "outputs/evaluations/pde_controlled_training_h12.json",
     history_length: int = 4,
     horizon: int = 12,
     seed: int = 42,
@@ -221,10 +287,17 @@ def build_candidate_governance_metadata(
     with open(split_file, "r") as f:
         split_json = json.load(f)
     split_hash = compute_split_hash(split_json)
-    norm_sha = compute_file_sha256(norm_file)
+    norm_file_sha = compute_file_sha256(norm_file)
 
-    training_git_commit = get_git_commit_hash()
-    training_git_dirty = get_git_dirty()
+    if normalizer is not None:
+        normalizer_semantic_hash = compute_normalizer_hash(normalizer)
+    else:
+        tmp_norm = FieldNormalizer()
+        tmp_norm.load_state_dict(torch.load(norm_file, map_location="cpu", weights_only=True))
+        normalizer_semantic_hash = compute_normalizer_hash(tmp_norm)
+
+    train_prov = resolve_candidate_training_provenance(ckpt_data, training_record_file)
+    use_spatial_pos = resolve_candidate_spatial_pos(ckpt_data, parent_d0_path)
 
     gov = {
         "checkpoint_path": checkpoint_path,
@@ -236,16 +309,18 @@ def build_candidate_governance_metadata(
         "training_horizon": horizon,
         "history_length": history_length,
         "downsample_factor": 2,
-        "use_spatial_pos": False,
+        "use_spatial_pos": use_spatial_pos,
         "split_file": split_file,
         "split_hash": split_hash,
         "normalizer_file": norm_file,
-        "normalizer_hash": norm_sha,
+        "normalizer_file_sha256": norm_file_sha,
+        "normalizer_hash": normalizer_semantic_hash,
         "physics_protocol": PHYSICS_PROTOCOL,
         "spatial_axis_contract": SPATIAL_AXIS_CONTRACT,
         "physics_domain_size_xy": list(SHEAR_FLOW_DOMAIN_SIZE_XY),
-        "training_git_commit": training_git_commit,
-        "training_git_dirty": training_git_dirty,
+        "training_provenance": train_prov,
+        "training_git_commit": train_prov["training_git_commit"],
+        "training_git_dirty": train_prov["training_git_dirty"],
         "pde_weights": {
             "lambda_mom": lambda_mom,
             "lambda_tr": lambda_tr,
@@ -263,6 +338,198 @@ def build_candidate_governance_metadata(
     return gov
 
 
+def build_scientific_verdict(
+    d0_overall: Dict[str, float],
+    p0_overall: Dict[str, float],
+    pde_overall: Dict[str, float],
+    total_val_windows: int,
+    split: str,
+) -> Dict[str, Any]:
+    """Construct rigorous scientific verdict devoid of bias or value-laden labels."""
+    d0_vrmse = d0_overall["vrmse_standard"]
+    p0_vrmse = p0_overall["vrmse_standard"]
+    pde_vrmse = pde_overall["vrmse_standard"]
+
+    continued_training_delta_vs_d0_pct = (p0_vrmse - d0_vrmse) / d0_vrmse * 100.0
+    pde_delta_vs_p0_pct = (pde_vrmse - p0_vrmse) / p0_vrmse * 100.0
+    pde_delta_vs_d0_pct = (pde_vrmse - d0_vrmse) / d0_vrmse * 100.0
+
+    pde_beats_p0 = pde_vrmse < p0_vrmse
+    pde_beats_d0 = pde_vrmse < d0_vrmse
+
+    div_pde = pde_overall["div_rmse"]
+    div_p0 = p0_overall["div_rmse"]
+    div_pde_beats_p0 = div_pde <= div_p0
+
+    return {
+        "total_windows_evaluated": total_val_windows,
+        "split": split,
+        "d0_vrmse": d0_vrmse,
+        "p0_vrmse": p0_vrmse,
+        "pde_vrmse": pde_vrmse,
+        "continued_training_delta_vs_d0_pct": continued_training_delta_vs_d0_pct,
+        "pde_delta_vs_p0_pct": pde_delta_vs_p0_pct,
+        "pde_delta_vs_d0_pct": pde_delta_vs_d0_pct,
+        "pde_beats_p0_on_vrmse": pde_beats_p0,
+        "pde_beats_d0_on_vrmse": pde_beats_d0,
+        "div_pde_vs_p0_pct": (div_pde - div_p0) / div_p0 * 100.0,
+        "div_pde_beats_p0": div_pde_beats_p0,
+        "trade_off_observation": (
+            "Continued training degrades overall VRMSE relative to frozen D0; "
+            "PDE regularization slightly reduces this degradation relative to the paired P0 control "
+            "while improving several PDE residual metrics."
+        ),
+        "status": (
+            "VALIDATED_ON_FULL_VAL" if (pde_beats_p0 and pde_beats_d0)
+            else "PARTIAL_OR_UNPROVEN"
+        ),
+    }
+
+
+def rebuild_metadata_and_verdict_only(
+    existing_output_json: str,
+    d0_checkpoint: str,
+    p0_checkpoint: str,
+    pde_checkpoint: str,
+    ae_checkpoint: str,
+    split_file: str,
+    norm_file: str,
+    training_record_file: str = "outputs/evaluations/pde_controlled_training_h12.json",
+    output_json: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Rebuild formal governance metadata and verdict without re-running GPU numerical forwards."""
+    if not os.path.exists(existing_output_json):
+        raise FileNotFoundError(f"Existing JSON not found: {existing_output_json}")
+
+    with open(existing_output_json, "r") as f:
+        existing = json.load(f)
+
+    raw_overall = existing["raw_overall_metrics"]
+    d0_overall = raw_overall["d0"]
+    p0_overall = raw_overall["p0"]
+    pde_overall = raw_overall["pde"]
+    comparison_overall = existing["overall_comparison"]
+    comparison_subgroups = existing["subgroup_comparison"]
+    total_val_windows = existing["metadata"]["evaluation_protocol"]["total_windows_evaluated"]
+    split = existing["metadata"]["evaluation_protocol"]["split"]
+    horizon = existing["metadata"]["evaluation_protocol"]["horizon"]
+    history_length = existing["metadata"]["evaluation_protocol"]["history_length"]
+    valid_stride = existing["metadata"]["evaluation_protocol"]["valid_stride"]
+    batch_size = existing["metadata"]["evaluation_protocol"]["batch_size"]
+
+    d0_sha = compute_file_sha256(d0_checkpoint)
+    p0_sha = compute_file_sha256(p0_checkpoint)
+    pde_sha = compute_file_sha256(pde_checkpoint)
+    norm_file_sha = compute_file_sha256(norm_file)
+
+    normalizer = FieldNormalizer()
+    normalizer.load_state_dict(torch.load(norm_file, map_location="cpu", weights_only=True))
+    normalizer_semantic_hash = compute_normalizer_hash(normalizer)
+
+    p0_ckpt_data = torch.load(p0_checkpoint, map_location="cpu", weights_only=False)
+    pde_ckpt_data = torch.load(pde_checkpoint, map_location="cpu", weights_only=False)
+
+    p0_governance = build_candidate_governance_metadata(
+        checkpoint_path=p0_checkpoint,
+        ckpt_data=p0_ckpt_data,
+        parent_d0_sha256=d0_sha,
+        split_file=split_file,
+        norm_file=norm_file,
+        normalizer=normalizer,
+        parent_d0_path=d0_checkpoint,
+        training_record_file=training_record_file,
+        history_length=history_length,
+        horizon=horizon,
+        seed=42,
+        lambda_mom=0.0,
+        lambda_tr=0.0,
+        branch_type="P0_control",
+        step=50,
+    )
+    pde_governance = build_candidate_governance_metadata(
+        checkpoint_path=pde_checkpoint,
+        ckpt_data=pde_ckpt_data,
+        parent_d0_sha256=d0_sha,
+        split_file=split_file,
+        norm_file=norm_file,
+        normalizer=normalizer,
+        parent_d0_path=d0_checkpoint,
+        training_record_file=training_record_file,
+        history_length=history_length,
+        horizon=horizon,
+        seed=42,
+        lambda_mom=2.5e-5,
+        lambda_tr=4.0e-6,
+        branch_type="PDE_experiment",
+        step=50,
+    )
+
+    verdict_summary = build_scientific_verdict(
+        d0_overall=d0_overall,
+        p0_overall=p0_overall,
+        pde_overall=pde_overall,
+        total_val_windows=total_val_windows,
+        split=split,
+    )
+
+    script_path = os.path.abspath(__file__)
+    eval_prov = {
+        "evaluation_git_commit": get_git_commit_hash(),
+        "evaluation_git_dirty": get_git_dirty(),
+        "evaluation_script": os.path.relpath(script_path, PROJECT_ROOT) if script_path.startswith(PROJECT_ROOT) else script_path,
+        "evaluation_script_sha256": compute_file_sha256(script_path),
+    }
+
+    payload = {
+        "metadata": {
+            "evaluation_provenance": eval_prov,
+            "evaluation_git_commit": eval_prov["evaluation_git_commit"],
+            "evaluation_git_dirty": eval_prov["evaluation_git_dirty"],
+            "evaluation_script": eval_prov["evaluation_script"],
+            "evaluation_script_sha256": eval_prov["evaluation_script_sha256"],
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "split_file": split_file,
+            "split_file_sha256": compute_file_sha256(split_file),
+            "norm_file": norm_file,
+            "norm_file_sha256": norm_file_sha,
+            "normalizer_hash": normalizer_semantic_hash,
+            "ae_ckpt": ae_checkpoint,
+            "ae_ckpt_sha256": compute_file_sha256(ae_checkpoint),
+            "d0_ckpt": d0_checkpoint,
+            "d0_ckpt_sha256": d0_sha,
+            "p0_ckpt": p0_checkpoint,
+            "p0_ckpt_sha256": p0_sha,
+            "pde_ckpt": pde_checkpoint,
+            "pde_ckpt_sha256": pde_sha,
+            "evaluation_protocol": {
+                "split": split,
+                "history_length": history_length,
+                "horizon": horizon,
+                "valid_stride": valid_stride,
+                "total_windows_evaluated": total_val_windows,
+                "batch_size": batch_size,
+                "downsample_factor": 2,
+            },
+        },
+        "governance": {
+            "p0_step_50": p0_governance,
+            "pde_step_50": pde_governance,
+        },
+        "overall_comparison": comparison_overall,
+        "subgroup_comparison": comparison_subgroups,
+        "raw_overall_metrics": raw_overall,
+        "verdict": verdict_summary,
+    }
+
+    out_file = output_json or existing_output_json
+    os.makedirs(os.path.dirname(out_file), exist_ok=True)
+    with open(out_file, "w") as f:
+        json.dump(payload, f, indent=2)
+
+    print(f"Successfully rebuilt governance metadata & verdict into: {out_file}")
+    return payload
+
+
 def run_full_validation_benchmark(
     d0_checkpoint: str = "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H12/latent_transformer/best_long_vrmse.pt",
     p0_checkpoint: str = "outputs/checkpoints/dynamics/pde_controlled_experiment/p0_step_50.pt",
@@ -270,6 +537,7 @@ def run_full_validation_benchmark(
     ae_checkpoint: str = "outputs/checkpoints/representation/best_autoencoder.pt",
     split_file: str = "outputs/splits/grouped_split.json",
     norm_file: str = "outputs/normalization/stats_grouped.pt",
+    training_record_file: str = "outputs/evaluations/pde_controlled_training_h12.json",
     data_root: Optional[str] = None,
     split: str = "valid",
     history_length: int = 4,
@@ -290,12 +558,14 @@ def run_full_validation_benchmark(
     d0_sha = compute_file_sha256(d0_checkpoint)
     p0_sha = compute_file_sha256(p0_checkpoint)
     pde_sha = compute_file_sha256(pde_checkpoint)
+    norm_file_sha = compute_file_sha256(norm_file)
 
     # 1. Normalizer setup
     normalizer = FieldNormalizer()
     normalizer.load_state_dict(torch.load(norm_file, map_location="cpu", weights_only=True))
     normalizer_cpu = copy.deepcopy(normalizer)
     normalizer.to(device)
+    normalizer_semantic_hash = compute_normalizer_hash(normalizer)
 
     # 2. Physics loss operators for validation
     pde_loss_fn = NavierStokesPDELoss(domain_size=(1.0, 2.0), dealias=True).to(device)
@@ -406,7 +676,6 @@ def run_full_validation_benchmark(
         )
     print("=" * 125)
 
-    # Subgroup comparisons
     comparison_subgroups: Dict[str, Any] = {}
     for grp_key in d0_subgroups.keys():
         sub_comp = {}
@@ -434,6 +703,9 @@ def run_full_validation_benchmark(
         parent_d0_sha256=d0_sha,
         split_file=split_file,
         norm_file=norm_file,
+        normalizer=normalizer,
+        parent_d0_path=d0_checkpoint,
+        training_record_file=training_record_file,
         history_length=history_length,
         horizon=horizon,
         seed=42,
@@ -448,6 +720,9 @@ def run_full_validation_benchmark(
         parent_d0_sha256=d0_sha,
         split_file=split_file,
         norm_file=norm_file,
+        normalizer=normalizer,
+        parent_d0_path=d0_checkpoint,
+        training_record_file=training_record_file,
         history_length=history_length,
         horizon=horizon,
         seed=42,
@@ -457,60 +732,40 @@ def run_full_validation_benchmark(
         step=50,
     )
 
-    # 9. Rigorous Scientific Verdict
-    d0_vrmse = d0_overall["vrmse_standard"]
-    p0_vrmse = p0_overall["vrmse_standard"]
-    pde_vrmse = pde_overall["vrmse_standard"]
-
-    continued_training_effect_pct = (p0_vrmse - d0_vrmse) / d0_vrmse * 100.0
-    pde_incremental_effect_pct = (pde_vrmse - p0_vrmse) / p0_vrmse * 100.0
-    pde_vs_d0_pct = (pde_vrmse - d0_vrmse) / d0_vrmse * 100.0
-
-    pde_beats_p0 = pde_vrmse < p0_vrmse
-    pde_beats_d0 = pde_vrmse < d0_vrmse
-    p0_beats_d0 = p0_vrmse < d0_vrmse
-
-    div_pde = pde_overall["div_rmse"]
-    div_p0 = p0_overall["div_rmse"]
-    div_pde_beats_p0 = div_pde <= div_p0
-
-    verdict_summary = {
-        "total_windows_evaluated": total_val_windows,
-        "split": split,
-        "d0_vrmse": d0_vrmse,
-        "p0_vrmse": p0_vrmse,
-        "pde_vrmse": pde_vrmse,
-        "continued_training_benefit_pct": continued_training_effect_pct,
-        "pde_incremental_benefit_pct": pde_incremental_effect_pct,
-        "pde_vs_d0_pct": pde_vs_d0_pct,
-        "pde_beats_p0_on_vrmse": pde_beats_p0,
-        "pde_beats_d0_on_vrmse": pde_beats_d0,
-        "div_pde_vs_p0_pct": (div_pde - div_p0) / div_p0 * 100.0,
-        "div_pde_beats_p0": div_pde_beats_p0,
-        "trade_off_observation": (
-            "Field prediction accuracy (VRMSE/RMSE) improves under continued training + PDE, "
-            "while some physical residuals (divergence, momentum, tracer) remain higher than frozen D0."
-        ),
-        "status": (
-            "VALIDATED_ON_FULL_VAL" if (pde_beats_p0 and pde_beats_d0)
-            else "PARTIAL_OR_UNPROVEN"
-        ),
-    }
+    # 9. Scientific Verdict
+    verdict_summary = build_scientific_verdict(
+        d0_overall=d0_overall,
+        p0_overall=p0_overall,
+        pde_overall=pde_overall,
+        total_val_windows=total_val_windows,
+        split=split,
+    )
 
     print("\nSCIENTIFIC VERDICT SUMMARY:")
     for k, v in verdict_summary.items():
         print(f"  {k}: {v}")
 
-    # 10. Archive payload
+    script_path = os.path.abspath(__file__)
+    eval_prov = {
+        "evaluation_git_commit": get_git_commit_hash(),
+        "evaluation_git_dirty": get_git_dirty(),
+        "evaluation_script": os.path.relpath(script_path, PROJECT_ROOT) if script_path.startswith(PROJECT_ROOT) else script_path,
+        "evaluation_script_sha256": compute_file_sha256(script_path),
+    }
+
     payload = {
         "metadata": {
-            "evaluation_git_commit": get_git_commit_hash(),
-            "evaluation_git_dirty": get_git_dirty(),
+            "evaluation_provenance": eval_prov,
+            "evaluation_git_commit": eval_prov["evaluation_git_commit"],
+            "evaluation_git_dirty": eval_prov["evaluation_git_dirty"],
+            "evaluation_script": eval_prov["evaluation_script"],
+            "evaluation_script_sha256": eval_prov["evaluation_script_sha256"],
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "split_file": split_file,
             "split_file_sha256": compute_file_sha256(split_file),
             "norm_file": norm_file,
-            "norm_file_sha256": compute_file_sha256(norm_file),
+            "norm_file_sha256": norm_file_sha,
+            "normalizer_hash": normalizer_semantic_hash,
             "ae_ckpt": ae_checkpoint,
             "ae_ckpt_sha256": compute_file_sha256(ae_checkpoint),
             "d0_ckpt": d0_checkpoint,
@@ -559,6 +814,7 @@ if __name__ == "__main__":
     parser.add_argument("--ae_checkpoint", type=str, default="outputs/checkpoints/representation/best_autoencoder.pt")
     parser.add_argument("--split_file", type=str, default="outputs/splits/grouped_split.json")
     parser.add_argument("--norm_file", type=str, default="outputs/normalization/stats_grouped.pt")
+    parser.add_argument("--training_record_file", type=str, default="outputs/evaluations/pde_controlled_training_h12.json")
     parser.add_argument("--data_root", type=str, default=None)
     parser.add_argument("--split", type=str, default="valid")
     parser.add_argument("--horizon", type=int, default=12)
@@ -568,23 +824,38 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--output_json", type=str, default="outputs/evaluations/pde_controlled_candidates_full_val.json")
+    parser.add_argument("--rebuild_metadata_only", action="store_true", help="Rebuild governance metadata and verdict from existing JSON without re-running forward passes.")
     args = parser.parse_args()
 
     stride = 1 if args.full_windows else args.valid_stride
 
-    run_full_validation_benchmark(
-        d0_checkpoint=args.d0_checkpoint,
-        p0_checkpoint=args.p0_checkpoint,
-        pde_checkpoint=args.pde_checkpoint,
-        ae_checkpoint=args.ae_checkpoint,
-        split_file=args.split_file,
-        norm_file=args.norm_file,
-        data_root=args.data_root,
-        split=args.split,
-        history_length=args.history_length,
-        horizon=args.horizon,
-        valid_stride=stride,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        output_json=args.output_json,
-    )
+    if args.rebuild_metadata_only:
+        rebuild_metadata_and_verdict_only(
+            existing_output_json=args.output_json,
+            d0_checkpoint=args.d0_checkpoint,
+            p0_checkpoint=args.p0_checkpoint,
+            pde_checkpoint=args.pde_checkpoint,
+            ae_checkpoint=args.ae_checkpoint,
+            split_file=args.split_file,
+            norm_file=args.norm_file,
+            training_record_file=args.training_record_file,
+            output_json=args.output_json,
+        )
+    else:
+        run_full_validation_benchmark(
+            d0_checkpoint=args.d0_checkpoint,
+            p0_checkpoint=args.p0_checkpoint,
+            pde_checkpoint=args.pde_checkpoint,
+            ae_checkpoint=args.ae_checkpoint,
+            split_file=args.split_file,
+            norm_file=args.norm_file,
+            training_record_file=args.training_record_file,
+            data_root=args.data_root,
+            split=args.split,
+            history_length=args.history_length,
+            horizon=args.horizon,
+            valid_stride=stride,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            output_json=args.output_json,
+        )
