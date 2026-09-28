@@ -194,6 +194,7 @@ def test_governance_uses_training_provenance_not_evaluation_head(mock_candidate_
         parent_d0_sha256=d0_sha,
         split_file=env["split_file"],
         norm_file=env["norm_file"],
+        parent_d0_path=env["d0_ckpt"],
         training_record_file=env["training_rec_file"],
         history_length=4,
         horizon=12,
@@ -222,6 +223,10 @@ def test_governance_preserves_true_spatial_pos_semantics(mock_candidate_eval_env
     ckpt_explicit_false = {"config": {"use_spatial_pos": False}}
     assert resolve_candidate_spatial_pos(ckpt_explicit_false) is False
 
+    # Test strict fail-closed when both candidate and parent lack explicit config
+    with pytest.raises(RuntimeError, match="Cannot resolve 'use_spatial_pos' strictly"):
+        resolve_candidate_spatial_pos({}, parent_d0_path=None)
+
 
 def test_normalizer_semantic_hash_is_distinct_from_file_sha(mock_candidate_eval_env):
     """P1-3 Defense: normalizer_hash must be semantic content fingerprint, distinct from file byte SHA256."""
@@ -244,6 +249,7 @@ def test_normalizer_semantic_hash_is_distinct_from_file_sha(mock_candidate_eval_
         split_file=env["split_file"],
         norm_file=env["norm_file"],
         normalizer=norm,
+        parent_d0_path=env["d0_ckpt"],
         training_record_file=env["training_rec_file"],
     )
 

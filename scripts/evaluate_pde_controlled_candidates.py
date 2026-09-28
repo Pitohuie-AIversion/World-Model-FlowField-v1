@@ -68,15 +68,15 @@ def resolve_candidate_spatial_pos(
         if "use_spatial_pos" in p_cfg and isinstance(p_cfg["use_spatial_pos"], bool):
             return p_cfg["use_spatial_pos"]
         try:
-            return resolve_spatial_pos_config(p_data, allow_unverified_fallback=True, default_if_unverified=True)
+            return resolve_spatial_pos_config(p_data, allow_unverified_fallback=False)
         except Exception:
             pass
 
-    sig = inspect.signature(LatentSTTransformer.__init__)
-    if "use_spatial_pos" in sig.parameters and isinstance(sig.parameters["use_spatial_pos"].default, bool):
-        return sig.parameters["use_spatial_pos"].default
-
-    raise ValueError("Cannot resolve 'use_spatial_pos' strictly for candidate checkpoint.")
+    raise RuntimeError(
+        "Cannot resolve 'use_spatial_pos' strictly for candidate checkpoint: "
+        "explicit configuration is missing from both candidate and parent checkpoints. "
+        "Failing closed to prevent inductive bias drift."
+    )
 
 
 def resolve_candidate_training_provenance(
