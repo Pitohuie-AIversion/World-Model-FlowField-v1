@@ -117,6 +117,7 @@ def compute_decoupled_batch_gradients(
     vort_loss_fn: Optional[nn.Module] = None,
     lambda_div: float = 0.0,
     lambda_vort: float = 0.0,
+    return_grads: bool = False,
     device: torch.device = torch.device("cpu"),
 ) -> Dict[str, Any]:
     """Compute decoupled gradients for existing, momentum, and tracer losses on identical parameter set theta."""
@@ -194,7 +195,7 @@ def compute_decoupled_batch_gradients(
     cos_sim_tr = compute_gradient_cosine_similarity(grads_existing, grads_tr)
     cos_sim_mom_tr = compute_gradient_cosine_similarity(grads_mom, grads_tr)
 
-    return {
+    res = {
         "loss_existing": float(loss_existing.item()),
         "loss_mom_raw": float(loss_mom.item()),
         "loss_tr_raw": float(loss_tr.item()),
@@ -209,6 +210,11 @@ def compute_decoupled_batch_gradients(
         "stats_mom": {k: float(v) if isinstance(v, (int, float, np.floating)) else v for k, v in stats_mom.items()},
         "stats_tr": {k: float(v) if isinstance(v, (int, float, np.floating)) else v for k, v in stats_tr.items()},
     }
+    if return_grads:
+        res["grads_existing"] = list(grads_existing)
+        res["grads_mom"] = list(grads_mom)
+        res["grads_tr"] = list(grads_tr)
+    return res
 
 
 def evaluate_on_fixed_validation_window(
@@ -353,6 +359,7 @@ def run_pde_gradient_probe(
     pde_probe_weights: Tuple[float, float] = (2.5e-5, 4.0e-6),
     output_json: str = "outputs/evaluations/pde_gradient_probe.json",
     num_workers: int = 2,
+    seed: int = 42,
     device: Optional[torch.device] = None,
 ) -> Dict[str, Any]:
     """Execute rigorous gradient norm and paired P0/PDE small-budget training probe."""
@@ -375,8 +382,8 @@ def run_pde_gradient_probe(
             (1.0e-3, 1.0e-4),
         ]
 
-    torch.manual_seed(42)
-    np.random.seed(42)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
 
     # Precheck contracts
     total_window = history_length + horizon
@@ -804,6 +811,11 @@ def run_pde_gradient_probe(
             "num_probe_batches": num_probe_batches,
             "update_steps": update_steps,
             "update_lr": lr,
+            "seed": seed,
+            "training_horizon": horizon,
+            "history_length": history_length,
+            "effective_batch_size": 4,
+            "validation_window_samples": validated_samples,
         },
         "q1_verification": {
             "gradients_finite": is_q1_finite,
@@ -842,6 +854,15 @@ def run_pde_gradient_probe(
             "comparison": comparison_summary,
             "p0_losses": p0_losses,
             "pde_losses": pde_losses,
+            "update_batch_provenance": [
+                {
+                    "step": idx,
+                    "re": [float(x) for x in b["re"].tolist()],
+                    "sc": [float(x) for x in b["sc"].tolist()],
+                    "dt": [float(x) for x in b["dt"].tolist()],
+                }
+                for idx, b in enumerate(update_batches)
+            ],
         },
     }
 
@@ -868,6 +889,7 @@ if __name__ == "__main__":
     parser.add_argument("--probe_lambda_mom", type=float, default=2.5e-5)
     parser.add_argument("--probe_lambda_tr", type=float, default=4.0e-6)
     parser.add_argument("--num_workers", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     run_pde_gradient_probe(
@@ -882,4 +904,5 @@ if __name__ == "__main__":
         lambda_vort=args.lambda_vort,
         pde_probe_weights=(args.probe_lambda_mom, args.probe_lambda_tr),
         num_workers=args.num_workers,
+        seed=args.seed,
     )

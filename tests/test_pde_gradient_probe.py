@@ -244,7 +244,7 @@ def test_probe_and_training_loss_and_gradient_consistency():
         "dt": torch.tensor([0.05, 0.05]),
     }
 
-    # 1. Probe decoupled computation
+    # 1. Probe decoupled computation with return_grads=True
     probe_res = compute_decoupled_batch_gradients(
         model=model,
         batch=batch,
@@ -256,6 +256,7 @@ def test_probe_and_training_loss_and_gradient_consistency():
         vort_loss_fn=vort_loss_fn,
         lambda_div=lambda_div,
         lambda_vort=lambda_vort,
+        return_grads=True,
         device=device,
     )
 
@@ -290,8 +291,48 @@ def test_probe_and_training_loss_and_gradient_consistency():
         q0_phys=q0_phys,
     )
 
-    # Direct loss and probe reconstructed loss must match to numerical precision
+    # 2a. Direct loss and probe reconstructed loss must match to numerical precision
     assert math.isclose(direct_training_loss.item(), reconstructed_loss, rel_tol=1e-5)
+
+    # 2b. Parameter-level gradient vector comparison:
+    # Autograd of total direct loss vs linear combination of decoupled probe gradients
+    trainable_params = [p for p in model.transformer.parameters() if p.requires_grad]
+    grads_direct = torch.autograd.grad(
+        direct_training_loss,
+        trainable_params,
+        retain_graph=False,
+        allow_unused=True,
+    )
+
+    grads_reconstructed = []
+    for g_ex, g_m, g_t in zip(probe_res["grads_existing"], probe_res["grads_mom"], probe_res["grads_tr"]):
+        g_comb = torch.zeros_like(g_ex) if g_ex is not None else None
+        if g_ex is not None:
+            g_comb = g_comb + g_ex
+        if g_m is not None:
+            if g_comb is None:
+                g_comb = lambda_mom * g_m
+            else:
+                g_comb = g_comb + lambda_mom * g_m
+        if g_t is not None:
+            if g_comb is None:
+                g_comb = lambda_tr * g_t
+            else:
+                g_comb = g_comb + lambda_tr * g_t
+        grads_reconstructed.append(g_comb)
+
+    # Verify every parameter tensor matches to numerical tolerance (float32 precision)
+    for p_idx, (g_dir, g_rec) in enumerate(zip(grads_direct, grads_reconstructed)):
+        if g_dir is None and g_rec is None:
+            continue
+        assert g_dir is not None and g_rec is not None, f"Gradient None mismatch at parameter {p_idx}"
+        assert torch.allclose(g_dir, g_rec, rtol=1e-4, atol=1e-5), (
+            f"Gradient mismatch at parameter {p_idx}: max diff = {(g_dir - g_rec).abs().max().item()}"
+        )
+
+    # Cosine similarity across full parameter space R^D must be strictly 1.0
+    cos_sim = compute_gradient_cosine_similarity(list(grads_direct), grads_reconstructed)
+    assert math.isclose(cos_sim, 1.0, rel_tol=1e-5)
 
 
 def test_abnormal_gradient_and_freeze_fail_closed():
@@ -491,3 +532,50 @@ def test_run_pde_gradient_probe_mock_end_to_end(mock_probe_environment, tmp_path
     assert "delta_pde_vs_p0_pct" in q3["comparison"]["vrmse_standard"]
     assert len(q3["p0_losses"]) == 2
     assert len(q3["pde_losses"]) == 2
+
+
+def test_zero_pde_weights_matches_p0_branch(mock_probe_environment, tmp_path):
+    """Verify that when lambda_mom=0 and lambda_tr=0, PDE branch is bit-for-bit identical to P0 branch."""
+    env = mock_probe_environment
+    output_json = tmp_path / "mock_zero_pde_probe.json"
+
+    result = run_pde_gradient_probe(
+        split_file=env["split_file"],
+        norm_file=env["norm_file"],
+        ae_ckpt=env["ae_ckpt"],
+        d0_ckpt=env["d0_ckpt"],
+        data_root=env["data_root"],
+        num_probe_batches=1,
+        update_steps=3,
+        history_length=4,
+        horizon=4,
+        mom_scale_u=0.05,
+        mom_scale_v=0.05,
+        tracer_scale_s=0.02,
+        lambda_div=0.01,
+        lambda_vort=0.05,
+        candidate_weights=[(0.0, 0.0)],
+        pde_probe_weights=(0.0, 0.0),
+        output_json=str(output_json),
+        num_workers=0,
+        seed=42,
+        device=torch.device("cpu"),
+    )
+
+    q3 = result["q3_paired_control_comparison"]
+    p0_losses = q3["p0_losses"]
+    pde_losses = q3["pde_losses"]
+
+    # 1. Update trajectory losses must match exactly step-for-step
+    assert len(p0_losses) == len(pde_losses) == 3
+    for s_idx, (l_p0, l_pde) in enumerate(zip(p0_losses, pde_losses)):
+        assert math.isclose(l_p0, l_pde, rel_tol=1e-6), f"Loss mismatch at step {s_idx}: {l_p0} vs {l_pde}"
+
+    # 2. Evaluation metrics must be identical across all metrics (delta = 0.0%)
+    comparison = q3["comparison"]
+    for metric_name, comp_dict in comparison.items():
+        val_p0 = comp_dict["p0_control"]
+        val_pde = comp_dict["pde_experiment"]
+        delta_pct = comp_dict["delta_pde_vs_p0_pct"]
+        assert math.isclose(val_p0, val_pde, rel_tol=1e-5), f"Metric {metric_name} mismatch: {val_p0} vs {val_pde}"
+        assert math.isclose(delta_pct, 0.0, abs_tol=1e-4), f"Delta for {metric_name} is non-zero: {delta_pct}%"
