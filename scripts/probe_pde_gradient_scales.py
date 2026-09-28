@@ -465,7 +465,7 @@ def run_pde_gradient_probe(
         is_distributed=False,
         rank=0,
         world_size=1,
-        seed=42,
+        seed=seed,
         return_sampler=True,
         require_pressure=True,
         require_tracer=True,
