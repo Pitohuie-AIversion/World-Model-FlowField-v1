@@ -355,6 +355,7 @@ class LatentForecaster(nn.Module):
         num_flow_steps: int = 10,
         solver: str = "midpoint",
         noise_scale: float = 1.0,
+        deterministic_fallback: bool = False,
         seed: Optional[int] = 42,
         generator: Optional[torch.Generator] = None,
         flow_matcher: Optional[nn.Module] = None,
@@ -374,6 +375,7 @@ class LatentForecaster(nn.Module):
             num_flow_steps: ODE integration steps per rollout step (default: 10).
             solver: Numerical ODE solver ('euler', 'midpoint', 'heun', 'rk4').
             noise_scale: Base noise standard deviation multiplier (default: 1.0).
+            deterministic_fallback: If True, bypasses ODE sampling and returns mu directly for exact D0 parity.
             seed: Optional integer seed for reproducibility (default: 42).
             generator: Optional PyTorch Generator.
             flow_matcher: Optional flow matcher override.
@@ -440,6 +442,7 @@ class LatentForecaster(nn.Module):
                 num_steps=num_flow_steps,
                 solver=solver,
                 noise_scale=noise_scale,
+                deterministic_fallback=deterministic_fallback,
                 generator=gen,
             )  # (B * K, 1, C_z, Hz, Wz)
 

@@ -262,25 +262,32 @@ p_{\text{proj}}(x, y) = p(x, y) - \frac{1}{|\Omega|}\iint_\Omega p(x', y') \, dx
 
 ---
 
-## 12. 潜空间最优传输连续流匹配架构 (Latent Optimal Transport Conditional Flow Matching, OT-CFM)
+## 12. 潜空间条件流匹配架构 (Residual Latent Conditional Flow Matching, Latent CFM)
 
-为了从根本上克服对角高斯独立白噪声带来的空间连续性破坏（不可压缩散度激增）、单峰对称假设无法拟合失稳间歇性尖峰、以及随机扰动脱离吸引子流形的缺陷，系统在 [src/models/latent_flow_matching.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/models/latent_flow_matching.py) 中落地了潜空间最优传输连续归一化流：
+受到 Google DeepMind GenCast / SEEDS 生成式系综思想启发，并在具体算法实现上对标 **ArchesWeatherGen (Science Advances 2024)**，系统在 [src/models/latent_flow_matching.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/models/latent_flow_matching.py) 中落地了两阶段潜空间条件残差连续流生成模型：
 
-### 12.1 均值先验引导的残差最优传输路径 (Residual OT-CFM)
-保持确定性主干 $D_0$ 与自编码器绝对冻结，以残差 $x_1 = r_t = Z_{t+1} - \mu_t$ 为生成目标，基分布为标准高斯 $x_0 \sim \mathcal{N}(0, I)$。
-最优传输直路径：
+### 12.1 残差尺度归一化与直移条件概率路径
+保持确定性主干 $D_0$ 与自编码器绝对冻结。基于 Phase 0 的 64 通道二阶矩统计量 $s_c = \sqrt{\mathbb{E}[r_c^2] + \epsilon}$，将原始潜残差执行通道尺度归一化：
+\[
+\tilde{r}_t = \frac{Z_{t+1} - \mu_t}{s_c}
+\]
+目标分布定义在归一化残差上 $x_1 = \tilde{r}_t$，基分布为标准高斯 $x_0 \sim \mathcal{N}(0, I)$。
+直移条件概率路径：
 \[
 x_\tau = (1 - (1 - \sigma_{\min}) \tau) x_0 + \tau x_1, \quad \tau \in [0, 1]
 \]
-目标条件速度场为常数：$u_\tau = x_1 - (1 - \sigma_{\min}) x_0$。通过均方误差损失 $\mathcal{L}_{\text{CFM}} = \| v_\theta(x_\tau, \tau, \text{cond}) - u_\tau \|_2^2$ 高效回归训练。
+目标条件速度场为常数：$u_\tau = x_1 - (1 - \sigma_{\min}) x_0$。通过均方误差损失 $\mathcal{L}_{\text{CFM}} = \| v_\theta(x_\tau, \tau, \text{cond}) - u_\tau \|_2^2$ 均衡学习所有潜通道。采样后通过 $\hat{r} = \hat{\tilde{r}} \odot s_c$ 恢复物理尺度。
 
 ### 12.2 二维双向周期性残差速度网络 (`LatentVelocityNet2D`)
 - **正弦流时间编码**：连续时间参数 $\tau$ 经 `SinusoidalTimeEmbedding` 频域映射为稠密特征；
 - **全周期性拓扑保持**：全部内部卷积层严格采用 `padding_mode="circular"`，契约性契合剪切流在潜流形上的二维环面拓扑；
 - **多尺度空间相干性**：通过残差卷积与轻量空间注意力机制（`LatentSpatialAttention2D`），显式重构非局部空间相干流场结构，根除独立白噪声造成的高频虚假噪点；
-- **零初始化零误差平价**：输出头权重与偏置采用零初始化，结合残差建模，在无噪声或初值状态下严格退化为确定性主干 $\mu_t$。
+- **零初始化与平价回退**：速度输出层采用零初始化；通过显式 `deterministic_fallback=True` 绕过流模型，提供严格的 $D_0$ 零误差结构平价。
 
-### 12.3 高精度常微分方程数值求解器 (`ODESolver`)
-提供并行化的数值求解器（`euler`, `midpoint`, `heun`, `rk4`），支持从 $\tau=0$ 到 $\tau=1$ 积分生成下一时刻潜状态。支持 `noise_scale` 动态温度调节与单源多轨迹隔离自回归推演（`sample_rollout_flow_matching`）。
+### 12.3 高精度 ODE 求解器与自回归系综推演
+- **高阶求解器**：并行化数值求解器（`euler`, `midpoint`, `heun`, `rk4`），支持从 $\tau=0$ 到 $\tau=1$ 积分生成下一时刻潜状态；
+- **温度与回退控制**：`noise_scale` 控制初值扰动离散度（温度旋钮），`deterministic_fallback` 提供严格无采样直通；
+- **系综隔离推演**：`sample_rollout_flow_matching` 支持单源多轨迹独立历史缓冲滚动，杜绝跨轨迹污染；
+- **训练治理契约**：Fail-Closed 密码学比对数据与检查点哈希，并在反向传播后、优化器步进前强制断言全量梯度范数有限性。
 
 

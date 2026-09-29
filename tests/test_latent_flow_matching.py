@@ -462,6 +462,120 @@ class TestLatentFlowMatcherContracts:
         assert ensemble.shape == (b, k, 1, latent_channels, 4, 4)
         assert not torch.isnan(ensemble).any()
 
+    def test_deterministic_fallback_contract(self):
+        """deterministic_fallback=True strictly returns mu even with non-zero initialized network.
+
+        In contrast, noise_scale=0.0 starts ODE from x0=0, which on a trained/non-zero network
+        produces learned velocity drift and does NOT equal mu.
+        """
+        latent_channels = 8
+        matcher = LatentFlowMatcher(
+            latent_channels=latent_channels,
+            cond_dim=16,
+            hidden_channels=16,
+            num_blocks=2,
+            target_mode="residual",
+            zero_init=False,  # Non-zero weights produce non-zero velocity field
+        )
+
+        b, hz, wz = 2, 4, 4
+        mu = torch.randn(b, 1, latent_channels, hz, wz)
+        re = torch.tensor([1e4, 1e4])
+        sc = torch.tensor([1.0, 1.0])
+
+        # 1. Deterministic fallback strictly bypasses ODE and returns mu
+        z_fallback = matcher.sample_next_latent(
+            mu=mu,
+            re=re,
+            sc=sc,
+            deterministic_fallback=True,
+        )
+        assert torch.allclose(z_fallback, mu, atol=1e-7)
+
+        # 2. Ensemble with deterministic fallback returns identical mu copies
+        ens_fallback = matcher.sample_ensemble(
+            mu=mu,
+            re=re,
+            sc=sc,
+            num_samples=4,
+            deterministic_fallback=True,
+        )
+        for k in range(4):
+            assert torch.allclose(ens_fallback[:, k], mu, atol=1e-7)
+
+        # 3. noise_scale=0.0 on non-zero network undergoes drift, proving it's NOT an exact fallback
+        z_zero_noise = matcher.sample_next_latent(
+            mu=mu,
+            re=re,
+            sc=sc,
+            noise_scale=0.0,
+            num_steps=5,
+            deterministic_fallback=False,
+        )
+        assert not torch.allclose(z_zero_noise, mu, atol=1e-3)
+
+    def test_residual_normalization_math(self):
+        """Validate per-channel residual scaling math in compute_loss and sample_next_latent."""
+        latent_channels = 4
+        matcher = LatentFlowMatcher(
+            latent_channels=latent_channels,
+            cond_dim=8,
+            hidden_channels=8,
+            num_blocks=1,
+            target_mode="residual",
+            sigma_min=1e-4,
+        )
+
+        # Set distinct non-trivial scales per channel: [1.0, 2.0, 0.5, 4.0]
+        scales = [1.0, 2.0, 0.5, 4.0]
+        matcher.set_residual_scale(scales)
+        assert matcher.residual_scale.shape == (1, 4, 1, 1)
+
+        b, hz, wz = 1, 2, 2
+        z_next = torch.tensor([[[[2.0, 2.0], [2.0, 2.0]],   # ch 0: res = 2.0 / 1.0 = 2.0
+                                [[4.0, 4.0], [4.0, 4.0]],   # ch 1: res = 4.0 / 2.0 = 2.0
+                                [[1.0, 1.0], [1.0, 1.0]],   # ch 2: res = 1.0 / 0.5 = 2.0
+                                [[8.0, 8.0], [8.0, 8.0]]]]).unsqueeze(0)  # ch 3: res = 8.0 / 4.0 = 2.0
+        mu = torch.zeros_like(z_next)
+        re = torch.tensor([1e4])
+        sc = torch.tensor([1.0])
+
+        fixed_tau = torch.tensor([[1.0]])
+        fixed_x0 = torch.zeros(b, latent_channels, hz, wz)
+
+        res = matcher.compute_loss(
+            z_next=z_next,
+            mu=mu,
+            re=re,
+            sc=sc,
+            custom_tau=fixed_tau,
+            custom_x0=fixed_x0,
+        )
+
+        # At tau=1, x_tau = x_1 = normalized residual
+        # Each channel residual divided by scale should equal 2.0
+        expected_normalized_residual = torch.full((1, 4, 2, 2), 2.0)
+        assert torch.allclose(res["x_tau"], expected_normalized_residual, atol=1e-5)
+
+    def test_from_residual_stats_initialization(self):
+        """Validate instantiation via from_residual_stats classmethod."""
+        dummy_stats = {
+            "statistics": {
+                "channel_residual_second_moment_g0": [0.09, 0.25, 0.49, 0.81],
+            }
+        }
+        matcher = LatentFlowMatcher.from_residual_stats(
+            stats_data=dummy_stats,
+            latent_channels=4,
+            cond_dim=8,
+            hidden_channels=8,
+            num_blocks=1,
+            eps=0.0,
+        )
+        assert matcher.residual_scale is not None
+        expected_scale = torch.tensor([0.3, 0.5, 0.7, 0.9]).view(1, 4, 1, 1)
+        assert torch.allclose(matcher.residual_scale, expected_scale, atol=1e-5)
+
 
 class TestLatentForecasterFlowMatchingIntegration:
     """Verify LatentForecaster integration with LatentFlowMatcher."""

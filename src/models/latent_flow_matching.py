@@ -1,18 +1,21 @@
-"""Latent Flow Matching (OT-CFM) Module for Fluid World Models.
+"""Residual Latent Conditional Flow Matching Module for Fluid World Models.
 
-Implements Optimal Transport Conditional Flow Matching (OT-CFM) directly in the
-latent manifold of the spatio-temporal world model:
+Implements Residual Latent Conditional Flow Matching (Latent CFM) with an
+Optimal-Transport-inspired straight probability path directly on normalized
+latent residuals (aligned with the ArchesWeatherGen paradigm: deterministic prediction
++ normalized residual + flow matching + autoregressive ensemble generation):
+
 1. SinusoidalTimeEmbedding: Continuous flow time tau in [0, 1] projection.
 2. LatentPeriodicResBlock2D: Residual convolutional block with circular padding
    and AdaLN condition modulation respecting 2D periodic boundary conditions.
 3. LatentSpatialAttention2D: Lightweight spatial self-attention on latent tokens.
-4. LatentVelocityNet2D: Lightweight spatial velocity field network v_theta(x_tau, tau, cond).
+4. LatentVelocityNet2D: Lightweight spatial velocity field network v_theta(x_tau, tau, context_mu, cond).
 5. ODESolver: Numerical ODE integrators (Euler, Midpoint, Heun, RK4) for continuous-time sampling.
-6. LatentFlowMatcher: Unified OT-CFM module supporting training loss, single-step sampling,
-   and multi-sample ensemble generation with complete trajectory isolation.
+6. LatentFlowMatcher: Residual flow matcher supporting per-channel residual scale normalization,
+   exact deterministic fallback, straight-path training loss, and multi-sample ensemble rollout.
 """
 
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import math
 import torch
 import torch.nn as nn
@@ -388,12 +391,15 @@ class ODESolver:
 
 
 class LatentFlowMatcher(nn.Module):
-    """Latent Optimal Transport Conditional Flow Matcher (Latent OT-CFM).
+    """Residual Latent Conditional Flow Matcher with OT-inspired probability path.
 
-    Provides:
-    1. Training loss computation under straight-path OT-CFM;
-    2. Sampling next latent state via numerical ODE integration;
-    3. Multi-sample ensemble generation with complete trajectory isolation.
+    Adopts the ArchesWeatherGen paradigm:
+    1. Deterministic forecaster D0 provides the predictable component mu_t;
+    2. Residual r_t = Z_{t+1} - mu_t is normalized by channel RMS scale s_c = sqrt(E[r_c^2] + eps);
+    3. Conditional Flow Matching models the normalized residual distribution x_1 = r / s;
+    4. Base distribution x_0 ~ N(0, I) has naturally matched unit scale;
+    5. After ODE sampling x_1, denormalization r = x_1 * s restores true physical variance;
+    6. Prediction is Z_{t+1} = mu_t + r.
 
     Args:
         latent_channels: Latent channel count C_z (default: 64).
@@ -405,6 +411,7 @@ class LatentFlowMatcher(nn.Module):
                      Default: 'residual'.
         sigma_min: Numerical boundary smoothness for probability path (default: 1e-4).
         zero_init: Zero-initialize velocity head for baseline parity at initialization.
+        residual_scale: Optional per-channel scaling tensor (C_z,) or (1, C_z, 1, 1).
     """
 
     def __init__(
@@ -417,6 +424,7 @@ class LatentFlowMatcher(nn.Module):
         target_mode: str = "residual",
         sigma_min: float = 1e-4,
         zero_init: bool = True,
+        residual_scale: Optional[Union[torch.Tensor, List[float]]] = None,
     ):
         super().__init__()
         assert target_mode in ("residual", "direct"), f"Unknown target_mode: {target_mode}"
@@ -439,6 +447,40 @@ class LatentFlowMatcher(nn.Module):
             use_spatial_attn=use_spatial_attn,
             zero_init=zero_init,
         )
+
+        # Residual scale buffer: s_c = sqrt(E[r_c^2] + eps)
+        self.register_buffer("residual_scale", None)
+        if residual_scale is not None:
+            self.set_residual_scale(residual_scale)
+
+    def set_residual_scale(self, scale: Union[torch.Tensor, List[float]]) -> None:
+        """Set per-channel residual scale tensor s_c = sqrt(E[r_c^2] + eps).
+
+        Normalizes raw latent residual to unit second moment prior to CFM training,
+        ensuring MSE loss treats all latent channels equally (ArchesWeatherGen paradigm).
+
+        Args:
+            scale: Tensor or sequence of shape (C_z,) or (1, C_z, 1, 1).
+        """
+        scale_tensor = torch.as_tensor(scale, dtype=torch.float32)
+        if scale_tensor.ndim == 1:
+            scale_tensor = scale_tensor.view(1, -1, 1, 1)
+        elif scale_tensor.ndim == 5:
+            scale_tensor = scale_tensor.squeeze(1)
+        self.register_buffer("residual_scale", scale_tensor)
+
+    @classmethod
+    def from_residual_stats(
+        cls,
+        stats_data: Dict[str, Any],
+        latent_channels: int = 64,
+        eps: float = 1e-6,
+        **kwargs,
+    ) -> "LatentFlowMatcher":
+        """Instantiate LatentFlowMatcher with residual scale from Phase 0 statistics."""
+        second_moments = stats_data["statistics"]["channel_residual_second_moment_g0"]
+        scale = torch.sqrt(torch.tensor(second_moments, dtype=torch.float32) + eps)
+        return cls(latent_channels=latent_channels, residual_scale=scale, **kwargs)
 
     def _resolve_condition(
         self,
@@ -464,7 +506,7 @@ class LatentFlowMatcher(nn.Module):
         custom_tau: Optional[torch.Tensor] = None,
         custom_x0: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
-        """Compute OT-CFM regression loss.
+        """Compute CFM regression loss with residual scale normalization.
 
         Args:
             z_next: True next latent state, shape (B, 1, C_z, H_z, W_z) or (B, C_z, H_z, W_z).
@@ -489,7 +531,12 @@ class LatentFlowMatcher(nn.Module):
 
         # 1. Determine target x_1
         if self.target_mode == "residual":
-            x1 = z_next - mu  # Ground-truth residual
+            raw_residual = z_next - mu  # Ground-truth residual
+            if self.residual_scale is not None:
+                scale = self.residual_scale.to(device=device, dtype=dtype)
+                x1 = raw_residual / scale
+            else:
+                x1 = raw_residual
         else:
             x1 = z_next  # Absolute latent target
 
@@ -509,7 +556,7 @@ class LatentFlowMatcher(nn.Module):
         else:
             tau = torch.rand(b, 1, generator=generator, device=device, dtype=dtype)
 
-        # 4. Construct straight OT-CFM probability path
+        # 4. Construct straight conditional probability path
         # x_tau = (1 - (1 - sigma_min) * tau) * x0 + tau * x1
         tau_expanded = tau.unsqueeze(-1).unsqueeze(-1)  # (B, 1, 1, 1)
         x_tau = (1.0 - (1.0 - self.sigma_min) * tau_expanded) * x0 + tau_expanded * x1
@@ -528,7 +575,7 @@ class LatentFlowMatcher(nn.Module):
             cond=cond,
         )
 
-        # 8. Regression loss: mean squared error
+        # 8. Regression loss: mean squared error across all elements
         loss = F.mse_loss(v_pred, u_target)
 
         return {
@@ -546,6 +593,7 @@ class LatentFlowMatcher(nn.Module):
         num_steps: int = 10,
         solver: str = "midpoint",
         noise_scale: float = 1.0,
+        deterministic_fallback: bool = False,
         generator: Optional[torch.Generator] = None,
         seed: Optional[int] = None,
         custom_x0: Optional[torch.Tensor] = None,
@@ -560,7 +608,12 @@ class LatentFlowMatcher(nn.Module):
             num_steps: Number of numerical integration steps (default: 10).
             solver: ODE solver name ('euler', 'midpoint', 'heun', 'rk4').
             noise_scale: Standard deviation scaling for base noise (default: 1.0).
-                         Setting noise_scale=0.0 yields deterministic integration.
+                         Acts as a sampling temperature / dispersion knob.
+                         NOTE: setting noise_scale=0.0 starts the ODE from x0=0. In a trained
+                         network with learned non-zero velocity, this yields a mean-drift trajectory
+                         and does NOT guarantee exact D0 parity.
+            deterministic_fallback: If True, bypasses ODE sampling completely and returns mu directly.
+                                     Guarantees strict zero-error D0 structural parity.
             generator: Optional PyTorch Generator.
             seed: Optional integer seed for reproducibility.
             custom_x0: Optional initial base noise tensor for testing.
@@ -575,6 +628,12 @@ class LatentFlowMatcher(nn.Module):
             mu_2d = mu.squeeze(1)
         else:
             mu_2d = mu
+
+        # 1. Exact deterministic fallback
+        if deterministic_fallback:
+            if return_trajectory:
+                return (mu.clone() if orig_ndim == 5 else mu_2d.clone()), [mu.clone() if orig_ndim == 5 else mu_2d.clone()]
+            return mu.clone() if orig_ndim == 5 else mu_2d.clone()
 
         b, c_z, hz, wz = mu_2d.shape
         device = mu_2d.device
@@ -623,8 +682,14 @@ class LatentFlowMatcher(nn.Module):
                 return_trajectory=False,
             )
 
+        # Rescale normalized residual back to true physical scale
         if self.target_mode == "residual":
-            z_sample = mu_2d + x1
+            if self.residual_scale is not None:
+                scale = self.residual_scale.to(device=device, dtype=dtype)
+                x1_scaled = x1 * scale
+            else:
+                x1_scaled = x1
+            z_sample = mu_2d + x1_scaled
         else:
             z_sample = x1
 
@@ -633,9 +698,11 @@ class LatentFlowMatcher(nn.Module):
 
         if return_trajectory:
             traj_out = []
+            scale = self.residual_scale.to(device=device, dtype=dtype) if self.residual_scale is not None else None
             for t_item in traj:
                 if self.target_mode == "residual":
-                    s = mu_2d + t_item
+                    t_scaled = t_item * scale if scale is not None else t_item
+                    s = mu_2d + t_scaled
                 else:
                     s = t_item
                 if orig_ndim == 5:
@@ -654,6 +721,7 @@ class LatentFlowMatcher(nn.Module):
         num_steps: int = 10,
         solver: str = "midpoint",
         noise_scale: float = 1.0,
+        deterministic_fallback: bool = False,
         generator: Optional[torch.Generator] = None,
         seed: Optional[int] = None,
     ) -> torch.Tensor:
@@ -666,7 +734,8 @@ class LatentFlowMatcher(nn.Module):
             num_samples: Number of sample realizations K (default: 8).
             num_steps: ODE integration steps per sample.
             solver: ODE solver name.
-            noise_scale: Noise scale factor.
+            noise_scale: Sampling temperature / dispersion knob.
+            deterministic_fallback: If True, strictly returns mu without ODE sampling.
             generator: Optional PyTorch Generator.
             seed: Optional integer seed.
 
@@ -675,6 +744,9 @@ class LatentFlowMatcher(nn.Module):
         """
         b = mu.shape[0]
         k = num_samples
+
+        if deterministic_fallback:
+            return mu.unsqueeze(1).repeat(1, k, 1, 1, 1, 1)
 
         # Expand batch by K for parallel execution
         mu_exp = mu.repeat_interleave(k, dim=0)  # (B * K, 1, C_z, H_z, W_z)
@@ -688,6 +760,7 @@ class LatentFlowMatcher(nn.Module):
             num_steps=num_steps,
             solver=solver,
             noise_scale=noise_scale,
+            deterministic_fallback=False,
             generator=generator,
             seed=seed,
             return_trajectory=False,
