@@ -12,5 +12,6 @@
 | [ADR-004](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-004-multiscale-spectral-loss-and-curriculum-pushforward.md) | 多尺度动能谱损失与课程自回归推前训练架构 | **Accepted** | 物理与训练 | 几何翻倍推演调度、Stop-Gradient 推前预热、GPU 可微径向谱求和、多尺度对数能谱损失 |
 | [ADR-005](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-005-probabilistic-latent-dynamics-and-calibration.md) | 概率潜流形方差建模与不确定性量化治理架构 | **Accepted** | 概率与量化 | 潜残差审计、对角高斯方差头、高斯负对数似然 (NLL) 训练、自回归集合推演、Spread-Skill 跨窗口混合池化与区间校准 |
 | [ADR-006](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-006-navier-stokes-pde-residuals-and-controlled-training.md) | 连续 Navier-Stokes 与示踪剂偏微分方程残差约束受控训练 | **Accepted** | 物理与PDE | 连续 NS 动量与标量输运残差、Orszag 2/3 去混叠、均匀时间网格与坐标 Fail-Closed 治理、梯度尺度探测与受控微调 |
+| [ADR-007](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-007-latent-flow-matching-world-model.md) | 潜空间最优传输连续流匹配架构 (Latent OT-CFM) | **Accepted** | 概率生成与流匹配 | 残差流匹配直路径、二维双向周期性残差速度网络、零初始化均值平价、多阶连续 ODE 积分求解器与单源多轨迹隔离推演 |
 
 

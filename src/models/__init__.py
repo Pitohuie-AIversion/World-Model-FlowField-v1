@@ -31,6 +31,14 @@ from src.models.probabilistic_latent_dynamics import (
     sample_next_latent,
     gaussian_nll_latent_loss,
 )
+from src.models.latent_flow_matching import (
+    SinusoidalTimeEmbedding,
+    LatentPeriodicResBlock2D,
+    LatentSpatialAttention2D,
+    LatentVelocityNet2D,
+    ODESolver,
+    LatentFlowMatcher,
+)
 
 __all__ = [
     "Encoder2D",
@@ -53,4 +61,10 @@ __all__ = [
     "VarianceHead2D",
     "sample_next_latent",
     "gaussian_nll_latent_loss",
+    "SinusoidalTimeEmbedding",
+    "LatentPeriodicResBlock2D",
+    "LatentSpatialAttention2D",
+    "LatentVelocityNet2D",
+    "ODESolver",
+    "LatentFlowMatcher",
 ]

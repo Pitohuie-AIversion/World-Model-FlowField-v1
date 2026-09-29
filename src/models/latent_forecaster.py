@@ -32,6 +32,7 @@ class LatentForecaster(nn.Module):
         self.transformer = transformer
         self.decoder = decoder
         self.freeze_representation = freeze_representation
+        self.flow_matcher: Optional[nn.Module] = None
 
         if freeze_representation:
             for p in self.encoder.parameters():
@@ -313,4 +314,156 @@ class LatentForecaster(nn.Module):
             )
         for p in self.transformer.variance_head.parameters():
             p.requires_grad = True
+
+    def attach_flow_matcher(self, flow_matcher: nn.Module) -> None:
+        """Attach a LatentFlowMatcher module to the forecaster."""
+        self.flow_matcher = flow_matcher
+
+    @property
+    def has_flow_matcher(self) -> bool:
+        """Return True if a flow matcher is attached."""
+        return self.flow_matcher is not None
+
+    def freeze_for_flow_matching_training(self) -> None:
+        """Freeze representation and Transformer backbone; enable grads only on LatentFlowMatcher.
+
+        Flow Matching Governance Invariant:
+        Guarantees that deterministic mean dynamics (D0), spatial positional embeddings,
+        conditioning projections, and encoder/decoder representations remain immutable.
+        """
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+        for p in self.decoder.parameters():
+            p.requires_grad = False
+        for p in self.transformer.parameters():
+            p.requires_grad = False
+
+        if self.flow_matcher is None:
+            raise RuntimeError(
+                "Cannot freeze_for_flow_matching_training: forecaster has no attached flow_matcher."
+            )
+        for p in self.flow_matcher.parameters():
+            p.requires_grad = True
+
+    def sample_rollout_flow_matching(
+        self,
+        q_hist: torch.Tensor,
+        re: Optional[torch.Tensor] = None,
+        sc: Optional[torch.Tensor] = None,
+        horizon: int = 30,
+        num_samples: int = 8,
+        num_flow_steps: int = 10,
+        solver: str = "midpoint",
+        noise_scale: float = 1.0,
+        seed: Optional[int] = 42,
+        generator: Optional[torch.Generator] = None,
+        flow_matcher: Optional[nn.Module] = None,
+        decode_samples: bool = True,
+    ) -> Dict[str, torch.Tensor]:
+        """Execute single-source multi-trajectory rollout in latent space using Flow Matching.
+
+        Ensures each sample trajectory k in {1..num_samples} maintains its own isolated
+        autoregressive history buffer without cross-trajectory contamination.
+
+        Args:
+            q_hist: History physical fields of shape (B, L, C, Ny, Nx).
+            re: Optional Reynolds number tensor (B,).
+            sc: Optional Schmidt number tensor (B,).
+            horizon: Prediction horizon H (default: 30).
+            num_samples: Number of sample trajectories K to generate (default: 8).
+            num_flow_steps: ODE integration steps per rollout step (default: 10).
+            solver: Numerical ODE solver ('euler', 'midpoint', 'heun', 'rk4').
+            noise_scale: Base noise standard deviation multiplier (default: 1.0).
+            seed: Optional integer seed for reproducibility (default: 42).
+            generator: Optional PyTorch Generator.
+            flow_matcher: Optional flow matcher override.
+            decode_samples: If True, decodes sample latent trajectories to physical space.
+
+        Returns:
+            Dictionary containing:
+                - "deterministic_rollout": (B, H, C, Ny, Nx) physical fields from deterministic mean.
+                - "sample_trajectories": (B, K, H, C, Ny, Nx) decoded physical fields (if decode_samples=True).
+                - "ensemble_mean": (B, H, C, Ny, Nx) mean across K physical trajectories (if decode_samples=True).
+                - "latent_samples": (B, K, H, C_z, H_z, W_z) sampled latent trajectories.
+        """
+        fm = flow_matcher if flow_matcher is not None else self.flow_matcher
+        if fm is None:
+            raise RuntimeError(
+                "No flow matcher attached. Call attach_flow_matcher() or pass flow_matcher explicitly."
+            )
+
+        b, l, c_in, ny, nx = q_hist.shape
+        k = num_samples
+
+        if self.freeze_representation:
+            with torch.no_grad():
+                z_hist = self.encoder(q_hist)
+        else:
+            z_hist = self.encoder(q_hist)
+
+        c_z, hz, wz = z_hist.shape[2], z_hist.shape[3], z_hist.shape[4]
+
+        # 1. Deterministic baseline rollout for reference
+        buf_det = HistoryBuffer(history_length=l)
+        buf_det.reset(z_hist)
+
+        def det_step(hz_in, _c=None):
+            return self.transformer(hz_in, re=re, sc=sc)
+
+        z_det_rollout = buf_det.rollout(det_step, steps=horizon, noise_std=0.0)
+        q_det_rollout = self.decoder(z_det_rollout)
+
+        # 2. Multi-sample probabilistic rollout via Flow Matching
+        z_hist_exp = z_hist.repeat_interleave(k, dim=0)  # (B * K, L, C_z, Hz, Wz)
+        re_exp = re.repeat_interleave(k, dim=0) if re is not None else None
+        sc_exp = sc.repeat_interleave(k, dim=0) if sc is not None else None
+
+        if seed is not None and generator is None:
+            gen = torch.Generator(device=q_hist.device if q_hist.device.type != "mps" else "cpu")
+            gen.manual_seed(seed)
+        else:
+            gen = generator
+
+        buf_prob = HistoryBuffer(history_length=l)
+        buf_prob.reset(z_hist_exp)
+
+        sampled_latents = []
+
+        for step in range(horizon):
+            curr_hist = buf_prob.current  # (B * K, L, C_z, Hz, Wz)
+            mu_t = self.transformer(curr_hist, re=re_exp, sc=sc_exp)  # (B * K, 1, C_z, Hz, Wz)
+
+            z_sample_t = fm.sample_next_latent(
+                mu=mu_t,
+                re=re_exp,
+                sc=sc_exp,
+                num_steps=num_flow_steps,
+                solver=solver,
+                noise_scale=noise_scale,
+                generator=gen,
+            )  # (B * K, 1, C_z, Hz, Wz)
+
+            buf_prob.push(z_sample_t)
+            sampled_latents.append(z_sample_t)
+
+        # Concat along horizon dimension: (B * K, H, C_z, Hz, Wz)
+        z_samples_all = torch.cat(sampled_latents, dim=1)
+
+        # Reshape to (B, K, H, C_z, Hz, Wz)
+        z_samples_reshaped = z_samples_all.view(b, k, horizon, c_z, hz, wz)
+
+        results = {
+            "deterministic_rollout": q_det_rollout,
+            "latent_samples": z_samples_reshaped,
+        }
+
+        if decode_samples:
+            flat_z = z_samples_all.view(b * k * horizon, c_z, hz, wz).unsqueeze(1)
+            q_samples_flat = self.decoder(flat_z).squeeze(1)  # (B*K*H, C_in, Ny, Nx)
+            q_samples = q_samples_flat.view(b, k, horizon, c_in, ny, nx)
+            results["sample_trajectories"] = q_samples
+            results["ensemble_mean"] = q_samples.mean(dim=1)
+
+        return results
+
 

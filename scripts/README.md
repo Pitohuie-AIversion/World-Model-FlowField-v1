@@ -27,11 +27,12 @@
                                 │
                                 ├───────────────────────────────┐
                                 ▼                               ▼
-[ 4. 概率潜流形动力学与不确定性量化 ]             [ 5. 偏微分方程 (PDE) 动力学残差受控训练 ]
+[ 4. 概率潜流形动力学与流匹配 ]
   ├── compute_latent_statistics.py (潜残差审计)     ├── audit_pde_residuals.py (PDE 残差基线审计)
   ├── verify_latent_audit_contract.py (契约指纹)    ├── probe_pde_gradient_scales.py (梯度范数探测)
   ├── train_prob_latent_variance.py (方差头训练)    ├── run_pde_controlled_training.py (受控训练微调)
-  ├── evaluate_prob_latent_phase3.py (自回归评测)   └── evaluate_pde_controlled_candidates.py (验证集基准评测)
+  ├── train_latent_flow_matching.py (流匹配训练)    └── evaluate_pde_controlled_candidates.py (验证集基准评测)
+  ├── evaluate_prob_latent_phase3.py (自回归评测)
   └── plot_prob_latent_phase3.py (出版矢量图/校准)
                                 │
                                 ▼
@@ -98,6 +99,7 @@
 | [compute_latent_statistics.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/compute_latent_statistics.py) | 审计确定性底座的单步潜转移残差统计量 (均值/方差/极值) | 输出 `outputs/normalization/latent_residual_stats.json` |
 | [verify_latent_audit_contract.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/verify_latent_audit_contract.py) | 校验潜残差审计契约完整性、哈希指纹与版本一致性 | 输出 `outputs/normalization/latent_audit_verification_record.json` |
 | [train_prob_latent_variance.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/train_prob_latent_variance.py) | 训练潜空间对角高斯异方差头 (基于高斯负对数似然 NLL 损失) | 输出检查点及 `outputs/normalization/phase2_variance_training_record.json` |
+| [train_latent_flow_matching.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/train_latent_flow_matching.py) | 训练潜空间最优传输连续流匹配模型 (Latent OT-CFM) | 输出检查点及 `outputs/models/probabilistic/flow_matching/` |
 | [evaluate_prob_latent_phase3.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/evaluate_prob_latent_phase3.py) | 概率潜空间多步自回归推演、不确定性区间校准与 Spread-Skill 评估 | 输出 `outputs/metrics/phase3_probabilistic_evaluation.json` |
 | [plot_prob_latent_phase3.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/scripts/plot_prob_latent_phase3.py) | 渲染出版级概率评估图表（VRMSE 演化、区间校准曲线、Spread-Skill 与概览） | 输出 `outputs/figures/probabilistic/` (PNG & 矢量 PDF) |
 

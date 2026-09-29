@@ -202,6 +202,7 @@ p_{\text{proj}}(x, y) = p(x, y) - \frac{1}{|\Omega|}\iint_\Omega p(x', y') \, dx
 - [ADR-004: 多尺度动能谱损失与课程自回归推前训练架构](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-004-multiscale-spectral-loss-and-curriculum-pushforward.md)
 - [ADR-005: 概率潜流形方差建模与不确定性量化治理架构](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-005-probabilistic-latent-dynamics-and-calibration.md)
 - [ADR-006: 连续 Navier-Stokes 与示踪剂偏微分方程残差约束受控训练](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-006-navier-stokes-pde-residuals-and-controlled-training.md)
+- [ADR-007: 潜空间最优传输连续流匹配架构](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-007-latent-flow-matching-world-model.md)
 
 详见 [docs/adr/README.md](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/README.md)。
 
@@ -258,5 +259,28 @@ p_{\text{proj}}(x, y) = p(x, y) - \frac{1}{|\Omega|}\iint_\Omega p(x', y') \, dx
 
 ### 11.3 梯度探测与受控微调机制 (Controlled Training)
 在微调阶段引入自适应梯度探测（`scripts/probe_pde_gradient_scales.py`），精确定位物理残差与场值损失的梯度范数比，确保物理约束项不会压制主流场表征收敛。在全验证集 1110 个滑动窗口的评测证实，受控模型相较基线显著抑制了动量残差与标量输运残差。
+
+---
+
+## 12. 潜空间最优传输连续流匹配架构 (Latent Optimal Transport Conditional Flow Matching, OT-CFM)
+
+为了从根本上克服对角高斯独立白噪声带来的空间连续性破坏（不可压缩散度激增）、单峰对称假设无法拟合失稳间歇性尖峰、以及随机扰动脱离吸引子流形的缺陷，系统在 [src/models/latent_flow_matching.py](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/models/latent_flow_matching.py) 中落地了潜空间最优传输连续归一化流：
+
+### 12.1 均值先验引导的残差最优传输路径 (Residual OT-CFM)
+保持确定性主干 $D_0$ 与自编码器绝对冻结，以残差 $x_1 = r_t = Z_{t+1} - \mu_t$ 为生成目标，基分布为标准高斯 $x_0 \sim \mathcal{N}(0, I)$。
+最优传输直路径：
+\[
+x_\tau = (1 - (1 - \sigma_{\min}) \tau) x_0 + \tau x_1, \quad \tau \in [0, 1]
+\]
+目标条件速度场为常数：$u_\tau = x_1 - (1 - \sigma_{\min}) x_0$。通过均方误差损失 $\mathcal{L}_{\text{CFM}} = \| v_\theta(x_\tau, \tau, \text{cond}) - u_\tau \|_2^2$ 高效回归训练。
+
+### 12.2 二维双向周期性残差速度网络 (`LatentVelocityNet2D`)
+- **正弦流时间编码**：连续时间参数 $\tau$ 经 `SinusoidalTimeEmbedding` 频域映射为稠密特征；
+- **全周期性拓扑保持**：全部内部卷积层严格采用 `padding_mode="circular"`，契约性契合剪切流在潜流形上的二维环面拓扑；
+- **多尺度空间相干性**：通过残差卷积与轻量空间注意力机制（`LatentSpatialAttention2D`），显式重构非局部空间相干流场结构，根除独立白噪声造成的高频虚假噪点；
+- **零初始化零误差平价**：输出头权重与偏置采用零初始化，结合残差建模，在无噪声或初值状态下严格退化为确定性主干 $\mu_t$。
+
+### 12.3 高精度常微分方程数值求解器 (`ODESolver`)
+提供并行化的数值求解器（`euler`, `midpoint`, `heun`, `rk4`），支持从 $\tau=0$ 到 $\tau=1$ 积分生成下一时刻潜状态。支持 `noise_scale` 动态温度调节与单源多轨迹隔离自回归推演（`sample_rollout_flow_matching`）。
 
 
