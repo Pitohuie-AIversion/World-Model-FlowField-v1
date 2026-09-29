@@ -6,21 +6,26 @@ Governance Contracts Verified:
    - Empirical CRPS converges to analytical Gaussian CRPS.
    - Strict non-negativity.
 2. PICP nominal-level prediction interval calibration contract.
-3. Same K and RNG reproducibility contract across runs.
-4. Phase 3-compatible Pooled Spread-Skill Ratio contract:
+3. Phase 3-compatible Pooled Spread-Skill Ratio contract:
    - Bessel correction (ddof=1)
    - Finite-K inflation factor sqrt((K+1)/K)
-5. Common Random Numbers (CRN) across temperature sweep.
-6. Trajectory-aware rollout evaluation manifest:
-   - Covers requested unique trajectories rather than batch-0 sliding windows.
-   - max_trajectories counts trajectory IDs, not window counts.
-7. Autoregressive rollout target is strictly Ground Truth (GT), not D0.
-8. Physical metrics aggregate across ALL K ensemble members and ensemble mean:
-   - Sample and ensemble RMS divergence vs GT
-   - Sample and ensemble vorticity RMSE vs GT
-9. Spectral energy comparison aggregates across multiple windows with mean ± std.
-10. Rollout compares FM temp 1.0 and calibrated candidate (temp 0.7).
-11. Cryptographic provenance verification fails closed on D0, split_hash, or normalizer mismatch.
+4. Same K, RNG reproducibility, and Common Random Numbers (CRN) across temperature sweep:
+   - test_temperature_sweep_reuses_common_base_noise
+   - test_temperature_cli_preserves_common_random_numbers
+5. Trajectory-aware rollout evaluation manifest:
+   - test_rollout_manifest_covers_requested_unique_trajectories
+   - test_max_trajectories_counts_trajectory_ids_not_windows
+6. Cryptographic provenance fail-closed contract:
+   - test_evaluator_rejects_g0_normalizer_mismatch
+   - test_evaluator_rejects_g1_normalizer_mismatch
+   - test_evaluator_rejects_fm_normalizer_mismatch
+   - test_evaluator_rejects_missing_seed
+   - test_evaluator_rejects_checkpoint_parent_d0_mismatch
+7. Comparative Validation Benchmark Integrity:
+   - test_same_validation_manifest_across_all_models
+   - test_divergence_and_vorticity_aggregate_all_ensemble_members
+   - test_individual_member_spectral_error_is_not_mean_spectrum_error
+   - test_spectrum_aggregates_multiple_windows
 """
 
 import math
@@ -48,6 +53,7 @@ from src.models.decoder import Decoder2D
 from src.models.probabilistic_latent_dynamics import VarianceHead2D
 from src.models.latent_flow_matching import LatentFlowMatcher
 from src.data.normalization import FieldNormalizer
+from src.utils.provenance import compute_file_sha256, compute_split_hash_from_file, compute_normalizer_hash
 
 
 class DummySyntheticEvalDataset(Dataset):
@@ -148,7 +154,6 @@ class TestPhase3PooledSSRContract:
         k = 8
         b = 2
         ny, nx = 16, 16
-        # Generate samples with known variance and mean error
         generator = torch.Generator().manual_seed(42)
         target = torch.zeros(b, 4, ny, nx)
         std_true = 0.5
@@ -161,12 +166,9 @@ class TestPhase3PooledSSRContract:
         expected_finite_k = math.sqrt((k + 1.0) / k)
         assert math.isclose(ssr_res["finite_k_inflation_factor"], expected_finite_k, rel_tol=1e-5)
 
-        # Spread should be close to std_true
         assert abs(ssr_res["pooled_rms_spread"] - std_true) < 0.05
-        # RMSE should be close to sqrt(mean_offset^2 + (std_true/sqrt(K))^2) ~ 0.53
         assert ssr_res["pooled_rmse"] > 0.45
 
-        # SSR = spread / RMSE
         expected_ssr = ssr_res["pooled_rms_spread"] / ssr_res["pooled_rmse"]
         assert math.isclose(ssr_res["spread_skill_ratio"], expected_ssr, rel_tol=1e-5)
         assert math.isclose(ssr_res["finite_k_adjusted_ssr"], expected_ssr * expected_finite_k, rel_tol=1e-5)
@@ -197,12 +199,10 @@ class TestSameKAndRNGContract:
         re = torch.tensor([1000.0, 2000.0])
         sc = torch.tensor([0.5, 0.7])
 
-        # Generate common base noise
         base_x0 = torch.randn(2 * 4, 8, 4, 4)
         samps_10 = fm.sample_ensemble(mu=mu, re=re, sc=sc, num_samples=4, noise_scale=1.0, custom_x0=base_x0)
         samps_07 = fm.sample_ensemble(mu=mu, re=re, sc=sc, num_samples=4, noise_scale=0.7, custom_x0=base_x0)
 
-        # Different temperatures produce correlated but different outputs
         assert not torch.allclose(samps_10, samps_07)
         assert samps_10.shape == samps_07.shape
 
@@ -214,14 +214,13 @@ class TestRolloutManifestAndTrajectoryCoverage:
         dataset = DummySyntheticEvalDataset(num_samples=16, num_trajs=4)
         manifest, indices = build_rollout_manifest(dataset, windows_per_traj=2, max_trajectories=3)
 
-        assert len(indices) == 6  # 3 trajectories * 2 windows
+        assert len(indices) == 6
         unique_trajs = set(r["traj_idx"] for r in manifest)
         assert len(unique_trajs) == 3
         assert unique_trajs == {0, 1, 2}
 
     def test_max_trajectories_counts_trajectory_ids_not_windows(self):
         dataset = DummySyntheticEvalDataset(num_samples=16, num_trajs=4)
-        # Select 4 windows per trajectory for max 2 trajectories -> 8 windows total
         manifest, indices = build_rollout_manifest(dataset, windows_per_traj=4, max_trajectories=2)
 
         assert len(indices) == 8
@@ -232,29 +231,95 @@ class TestRolloutManifestAndTrajectoryCoverage:
 class TestProvenanceFailClosedContract:
     """Verify cryptographic fail-closed checks on checkpoints and protocol."""
 
-    def test_evaluator_rejects_checkpoint_parent_d0_mismatch(self, tmp_path):
+    @pytest.fixture
+    def valid_checkpoints(self, tmp_path):
         d0_path = tmp_path / "d0.pt"
         torch.save({"dummy": 1}, d0_path)
-        g0_path = tmp_path / "g0.pt"
-        torch.save({"provenance": {"d0_checkpoint": {"sha256": "wrong_sha"}}}, g0_path)
-        g1_path = tmp_path / "g1.pt"
-        torch.save({"provenance": {"d0_checkpoint": {"sha256": "wrong_sha"}}}, g1_path)
-        fm_path = tmp_path / "fm.pt"
-        torch.save({"provenance": {"d0_checkpoint": {"sha256": "wrong_sha"}}}, fm_path)
+        d0_sha = compute_file_sha256(str(d0_path))
+
         split_path = tmp_path / "split.json"
         split_path.write_text('{"train": [], "valid": []}')
+        split_hash = compute_split_hash_from_file(str(split_path))
 
         normalizer = FieldNormalizer()
+        normalizer.mean = torch.zeros(4)
+        normalizer.std = torch.ones(4)
+        norm_hash = compute_normalizer_hash(normalizer)
 
-        with pytest.raises(ValueError, match="Cryptographic provenance verification FAILED"):
-            verify_checkpoint_provenance(
-                d0_checkpoint_path=str(d0_path),
-                g0_checkpoint_path=str(g0_path),
-                g1_checkpoint_path=str(g1_path),
-                fm_checkpoint_path=str(fm_path),
-                split_file_path=str(split_path),
-                normalizer=normalizer,
-            )
+        g0_path = tmp_path / "g0.pt"
+        torch.save({
+            "provenance": {
+                "d0_checkpoint": {"sha256": d0_sha},
+                "data_protocol": {"split_hash": split_hash, "normalizer_hash": norm_hash},
+                "seed": 42,
+            }
+        }, g0_path)
+
+        g1_path = tmp_path / "g1.pt"
+        torch.save({
+            "provenance": {
+                "d0_checkpoint": {"sha256": d0_sha},
+                "data_protocol": {"split_hash": split_hash, "normalizer_hash": norm_hash},
+                "seed": 42,
+            }
+        }, g1_path)
+
+        fm_path = tmp_path / "fm.pt"
+        torch.save({
+            "provenance": {
+                "d0_checkpoint": {"sha256": d0_sha},
+                "residual_statistics": {"d0_sha256": d0_sha},
+                "data_protocol": {"split_hash": split_hash, "normalizer_hash": norm_hash},
+                "seed": 42,
+            }
+        }, fm_path)
+
+        return str(d0_path), str(g0_path), str(g1_path), str(fm_path), str(split_path), normalizer
+
+    def test_evaluator_passes_on_valid_checkpoints(self, valid_checkpoints):
+        d0, g0, g1, fm, split, norm = valid_checkpoints
+        rep = verify_checkpoint_provenance(d0, g0, g1, fm, split, norm, expected_seed=42)
+        assert rep["status"] == "PASSED"
+
+    def test_evaluator_rejects_g0_normalizer_mismatch(self, valid_checkpoints):
+        d0, g0, g1, fm, split, norm = valid_checkpoints
+        data = torch.load(g0, map_location="cpu")
+        data["provenance"]["data_protocol"]["normalizer_hash"] = "tampered_norm_hash"
+        torch.save(data, g0)
+        with pytest.raises(ValueError, match="G0 normalizer_hash mismatch"):
+            verify_checkpoint_provenance(d0, g0, g1, fm, split, norm, expected_seed=42)
+
+    def test_evaluator_rejects_g1_normalizer_mismatch(self, valid_checkpoints):
+        d0, g0, g1, fm, split, norm = valid_checkpoints
+        data = torch.load(g1, map_location="cpu")
+        data["provenance"]["data_protocol"]["normalizer_hash"] = "tampered_norm_hash"
+        torch.save(data, g1)
+        with pytest.raises(ValueError, match="G1 normalizer_hash mismatch"):
+            verify_checkpoint_provenance(d0, g0, g1, fm, split, norm, expected_seed=42)
+
+    def test_evaluator_rejects_fm_normalizer_mismatch(self, valid_checkpoints):
+        d0, g0, g1, fm, split, norm = valid_checkpoints
+        data = torch.load(fm, map_location="cpu")
+        data["provenance"]["data_protocol"]["normalizer_hash"] = "tampered_norm_hash"
+        torch.save(data, fm)
+        with pytest.raises(ValueError, match="FM normalizer_hash mismatch"):
+            verify_checkpoint_provenance(d0, g0, g1, fm, split, norm, expected_seed=42)
+
+    def test_evaluator_rejects_missing_seed(self, valid_checkpoints):
+        d0, g0, g1, fm, split, norm = valid_checkpoints
+        data = torch.load(fm, map_location="cpu")
+        del data["provenance"]["seed"]
+        torch.save(data, fm)
+        with pytest.raises(ValueError, match="FM seed mismatch"):
+            verify_checkpoint_provenance(d0, g0, g1, fm, split, norm, expected_seed=42)
+
+    def test_evaluator_rejects_checkpoint_parent_d0_mismatch(self, valid_checkpoints):
+        d0, g0, g1, fm, split, norm = valid_checkpoints
+        data = torch.load(g0, map_location="cpu")
+        data["provenance"]["d0_checkpoint"]["sha256"] = "wrong_sha"
+        torch.save(data, g0)
+        with pytest.raises(ValueError, match="G0 parent D0 SHA mismatch"):
+            verify_checkpoint_provenance(d0, g0, g1, fm, split, norm, expected_seed=42)
 
 
 class TestComparativeValidationBenchmarkIntegrity:
@@ -306,6 +371,29 @@ class TestComparativeValidationBenchmarkIntegrity:
         for m in ["D0", "G0", "G1", "FM_temp_1.0", "FM_temp_0.8"]:
             assert m in step1
 
+    def test_temperature_cli_preserves_common_random_numbers(self, setup_synthetic_models_and_loader):
+        forecaster, g0_head, g1_head, fm, dataloader, normalizer, device = setup_synthetic_models_and_loader
+
+        step1 = evaluate_one_step_comparative(
+            forecaster=forecaster,
+            g0_head=g0_head,
+            g1_head=g1_head,
+            fm=fm,
+            dataloader=dataloader,
+            normalizer=normalizer,
+            device=device,
+            num_samples_K=4,
+            fm_temperatures=[1.0, 0.8, 0.7, 0.6, 0.5, 0.4],
+            seed=42,
+        )
+
+        assert step1["common_random_numbers"] is True
+        for t in [1.0, 0.8, 0.7, 0.6, 0.5, 0.4]:
+            m_key = f"FM_temp_{t}"
+            assert m_key in step1
+            assert "physical_intervals_per_channel" in step1[m_key]
+            assert set(step1[m_key]["physical_intervals_per_channel"].keys()) == {"u", "v", "p", "s"}
+
     def test_divergence_and_vorticity_aggregate_all_ensemble_members(self, setup_synthetic_models_and_loader):
         forecaster, g0_head, g1_head, fm, dataloader, normalizer, device = setup_synthetic_models_and_loader
 
@@ -319,6 +407,7 @@ class TestComparativeValidationBenchmarkIntegrity:
             device=device,
             horizons=[5, 10],
             num_samples_K=4,
+            rollout_temperatures=[1.0, 0.7],
             windows_per_traj=2,
             max_trajectories=2,
             seed=42,
@@ -327,7 +416,6 @@ class TestComparativeValidationBenchmarkIntegrity:
         assert "h5" in step2
         assert "h10" in step2
 
-        # Check all models present including FM_temp_1.0 and FM_temp_0.7
         for m in ["D0", "G0", "G1", "FM_temp_1.0", "FM_temp_0.7"]:
             assert m in step2["h5"]
             m_metrics = step2["h5"][m]
@@ -342,6 +430,33 @@ class TestComparativeValidationBenchmarkIntegrity:
             assert m_metrics["sample_rms_divergence"] > 0.0
             assert m_metrics["sample_vorticity_rmse_vs_gt"] >= 0.0
 
+    def test_individual_member_spectral_error_is_not_mean_spectrum_error(self, setup_synthetic_models_and_loader):
+        forecaster, g0_head, g1_head, fm, dataloader, normalizer, device = setup_synthetic_models_and_loader
+
+        step2 = evaluate_rollout_physics_comparative(
+            forecaster=forecaster,
+            g0_head=g0_head,
+            g1_head=g1_head,
+            fm=fm,
+            dataloader=dataloader,
+            normalizer=normalizer,
+            device=device,
+            horizons=[5, 10],
+            num_samples_K=4,
+            rollout_temperatures=[1.0, 0.7],
+            windows_per_traj=2,
+            max_trajectories=2,
+            seed=42,
+        )
+
+        spec = step2["spectral_relative_error_vs_gt_h10"]["FM_temp_1.0"]
+        assert "ensemble_mean_field_spectrum_rel_error_mean" in spec
+        assert "mean_member_spectrum_rel_error_mean" in spec
+        assert "individual_member_spectrum_rel_error_mean" in spec
+        assert spec["ensemble_mean_field_spectrum_rel_error_mean"] >= 0.0
+        assert spec["mean_member_spectrum_rel_error_mean"] >= 0.0
+        assert spec["individual_member_spectrum_rel_error_mean"] >= 0.0
+
     def test_spectrum_aggregates_multiple_windows(self, setup_synthetic_models_and_loader):
         forecaster, g0_head, g1_head, fm, dataloader, normalizer, device = setup_synthetic_models_and_loader
 
@@ -355,6 +470,7 @@ class TestComparativeValidationBenchmarkIntegrity:
             device=device,
             horizons=[5, 10],
             num_samples_K=4,
+            rollout_temperatures=[1.0, 0.7],
             windows_per_traj=2,
             max_trajectories=2,
             seed=42,
@@ -364,13 +480,12 @@ class TestComparativeValidationBenchmarkIntegrity:
         spec_errs = step2["spectral_relative_error_vs_gt_h10"]
         for m in ["D0", "G0", "G1", "FM_temp_1.0", "FM_temp_0.7"]:
             assert m in spec_errs
-            assert "ensemble_mean_rel_error_mean" in spec_errs[m]
-            assert "ensemble_mean_rel_error_std" in spec_errs[m]
-            assert "sample_members_rel_error_mean" in spec_errs[m]
-            assert "sample_members_rel_error_std" in spec_errs[m]
-            assert isinstance(spec_errs[m]["ensemble_mean_rel_error_mean"], float)
+            assert "ensemble_mean_field_spectrum_rel_error_mean" in spec_errs[m]
+            assert "mean_member_spectrum_rel_error_mean" in spec_errs[m]
+            assert "individual_member_spectrum_rel_error_mean" in spec_errs[m]
+            assert isinstance(spec_errs[m]["ensemble_mean_field_spectrum_rel_error_mean"], float)
 
         spectra = step2["energy_spectra_first_25_modes"]
         assert "GT" in spectra
-        assert "FM_temp_1.0_ensemble_mean" in spectra
-        assert "FM_temp_0.7_ensemble_mean" in spectra
+        assert "FM_temp_1.0_ensemble_mean_field" in spectra
+        assert "FM_temp_0.7_ensemble_mean_field" in spectra

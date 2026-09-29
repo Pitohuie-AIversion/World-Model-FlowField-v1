@@ -5,22 +5,24 @@ Strictly executes identical A/B evaluation protocol on the EXACT SAME VALIDATION
    - D0 deterministic baseline (mean error)
    - G0 homoscedastic baseline (analytical Gaussian & K-sample empirical)
    - G1 heteroscedastic baseline (analytical Gaussian & K-sample empirical)
-   - FM (OT-CFM Pilot @ noise_scale=1.0)
-   - FM calibrated variants (@ noise_scale=0.8, 0.7)
+   - FM (OT-CFM Pilot with full temperature sweep: 1.0, 0.8, 0.7, 0.6, 0.5, 0.4)
    - Common Random Numbers (CRN) across sampling runs
    - Phase 3 Pooled Spread-Skill Ratio (Bessel ddof=1, finite-K adjusted)
    - Metrics: Latent CRPS, Physical CRPS (per-channel u, v, p, s and mean),
-     Quantile PICP (50%, 80%, 90%, 95%), MPIW, Pooled Spread, and Pooled SSR
+     Quantile PICP (50%, 80%, 90%, 95%) pooled AND per physical channel, MPIW,
+     Pooled Spread, and Pooled SSR
 2. Multi-step Autoregressive Rollout & Physical Evaluation vs GROUND TRUTH (H=5, 10):
    - Trajectory-aware evaluation manifest covering all unique validation trajectories
-   - Evaluates D0, G0, G1, FM_temp_1.0, and FM_temp_0.7
+   - Evaluates D0, G0, G1, and FM temperature sweep (1.0, 0.7, 0.5, 0.4)
    - Ensemble Mean VRMSE vs GT (and D0 vs GT)
    - Sample Mean VRMSE vs GT across all K ensemble members
    - RMS Divergence across all K ensemble members and ensemble mean vs GT
    - Vorticity RMSE across all K ensemble members and ensemble mean vs GT
    - Radial Energy Spectrum E(k) aggregated across windows and ensemble members:
-     mean and std of relative L2 errors vs GT
-3. Fail-closed cryptographic provenance verification across all checkpoints and data protocol.
+     distinguishing ensemble-mean-field spectrum error, mean-member-spectrum error,
+     and individual member spectral error mean ± std vs GT.
+3. Fail-closed cryptographic provenance verification across all checkpoints and data protocol:
+   - Enforces D0 SHA, split_hash, normalizer_hash, and seed consistency across G0, G1, and FM.
 """
 
 from datetime import datetime, timezone
@@ -250,7 +252,7 @@ def verify_checkpoint_provenance(
     normalizer: FieldNormalizer,
     expected_seed: int = 42,
 ) -> Dict[str, Any]:
-    """Strict fail-closed cryptographic identity and parent lineage check."""
+    """Strict fail-closed cryptographic identity, parent lineage, and protocol check."""
     runtime_d0_sha = compute_file_sha256(d0_checkpoint_path)
     runtime_split_hash = compute_split_hash_from_file(split_file_path)
     runtime_norm_hash = compute_normalizer_hash(normalizer)
@@ -264,34 +266,49 @@ def verify_checkpoint_provenance(
     # Check G0
     g0_prov = g0_data.get("provenance", {})
     g0_d0_sha = g0_prov.get("d0_checkpoint", {}).get("sha256")
-    if not hash_matches(runtime_d0_sha, g0_d0_sha, min_prefix_len=16):
+    if not g0_d0_sha or not hash_matches(runtime_d0_sha, g0_d0_sha, min_prefix_len=16):
         errors.append(f"G0 parent D0 SHA mismatch: runtime={runtime_d0_sha[:12]}, G0={str(g0_d0_sha)[:12]}")
     g0_split = g0_prov.get("data_protocol", {}).get("split_hash")
-    if not hash_matches(runtime_split_hash, g0_split, min_prefix_len=16):
+    if not g0_split or not hash_matches(runtime_split_hash, g0_split, min_prefix_len=16):
         errors.append(f"G0 split_hash mismatch: runtime={runtime_split_hash[:12]}, G0={str(g0_split)[:12]}")
+    g0_norm = g0_prov.get("data_protocol", {}).get("normalizer_hash")
+    if not g0_norm or not hash_matches(runtime_norm_hash, g0_norm, min_prefix_len=16):
+        errors.append(f"G0 normalizer_hash mismatch: runtime={runtime_norm_hash[:12]}, G0={str(g0_norm)[:12]}")
+    g0_seed = g0_prov.get("seed")
+    if g0_seed is None or g0_seed != expected_seed:
+        errors.append(f"G0 seed mismatch: expected {expected_seed}, got {g0_seed}")
 
     # Check G1
     g1_prov = g1_data.get("provenance", {})
     g1_d0_sha = g1_prov.get("d0_checkpoint", {}).get("sha256")
-    if not hash_matches(runtime_d0_sha, g1_d0_sha, min_prefix_len=16):
+    if not g1_d0_sha or not hash_matches(runtime_d0_sha, g1_d0_sha, min_prefix_len=16):
         errors.append(f"G1 parent D0 SHA mismatch: runtime={runtime_d0_sha[:12]}, G1={str(g1_d0_sha)[:12]}")
     g1_split = g1_prov.get("data_protocol", {}).get("split_hash")
-    if not hash_matches(runtime_split_hash, g1_split, min_prefix_len=16):
+    if not g1_split or not hash_matches(runtime_split_hash, g1_split, min_prefix_len=16):
         errors.append(f"G1 split_hash mismatch: runtime={runtime_split_hash[:12]}, G1={str(g1_split)[:12]}")
+    g1_norm = g1_prov.get("data_protocol", {}).get("normalizer_hash")
+    if not g1_norm or not hash_matches(runtime_norm_hash, g1_norm, min_prefix_len=16):
+        errors.append(f"G1 normalizer_hash mismatch: runtime={runtime_norm_hash[:12]}, G1={str(g1_norm)[:12]}")
+    g1_seed = g1_prov.get("seed")
+    if g1_seed is None or g1_seed != expected_seed:
+        errors.append(f"G1 seed mismatch: expected {expected_seed}, got {g1_seed}")
 
     # Check FM
     fm_prov = fm_data.get("provenance", {})
     fm_d0_sha = fm_prov.get("d0_checkpoint", {}).get("sha256")
-    if not hash_matches(runtime_d0_sha, fm_d0_sha, min_prefix_len=16):
+    if not fm_d0_sha or not hash_matches(runtime_d0_sha, fm_d0_sha, min_prefix_len=16):
         errors.append(f"FM parent D0 SHA mismatch: runtime={runtime_d0_sha[:12]}, FM={str(fm_d0_sha)[:12]}")
     fm_stats_d0_sha = fm_prov.get("residual_statistics", {}).get("d0_sha256")
-    if not hash_matches(runtime_d0_sha, fm_stats_d0_sha, min_prefix_len=16):
+    if not fm_stats_d0_sha or not hash_matches(runtime_d0_sha, fm_stats_d0_sha, min_prefix_len=16):
         errors.append(f"FM stats D0 SHA mismatch: runtime={runtime_d0_sha[:12]}, FM stats={str(fm_stats_d0_sha)[:12]}")
     fm_split = fm_prov.get("data_protocol", {}).get("split_hash")
-    if not hash_matches(runtime_split_hash, fm_split, min_prefix_len=16):
+    if not fm_split or not hash_matches(runtime_split_hash, fm_split, min_prefix_len=16):
         errors.append(f"FM split_hash mismatch: runtime={runtime_split_hash[:12]}, FM={str(fm_split)[:12]}")
+    fm_norm = fm_prov.get("data_protocol", {}).get("normalizer_hash")
+    if not fm_norm or not hash_matches(runtime_norm_hash, fm_norm, min_prefix_len=16):
+        errors.append(f"FM normalizer_hash mismatch: runtime={runtime_norm_hash[:12]}, FM={str(fm_norm)[:12]}")
     fm_seed = fm_prov.get("seed")
-    if fm_seed is not None and fm_seed != expected_seed:
+    if fm_seed is None or fm_seed != expected_seed:
         errors.append(f"FM seed mismatch: expected {expected_seed}, got {fm_seed}")
 
     if errors:
@@ -457,7 +474,7 @@ def evaluate_one_step_comparative(
     normalizer: FieldNormalizer,
     device: torch.device,
     num_samples_K: int = 32,
-    fm_temperatures: List[float] = [1.0, 0.8, 0.7],
+    fm_temperatures: List[float] = [1.0, 0.8, 0.7, 0.6, 0.5, 0.4],
     seed: int = 42,
 ) -> Dict[str, Any]:
     """Execute rigorous one-step probabilistic comparison with Common Random Numbers."""
@@ -587,37 +604,50 @@ def evaluate_one_step_comparative(
                 pooled_phys_samps[m_key].append(q_fm_phys.squeeze(2).cpu())
 
                 records[m_key]["lat_samples"].append(z_samps_fm[:, :, :, :, ::2, ::2].reshape(num_samples_K, -1).cpu())
-                records[m_key]["phys_samples"].append(q_fm_phys[:, :, :, :, ::4, ::4].reshape(num_samples_K, -1).cpu())
+                # Store unflattened channel-wise subsample for per-channel PICP
+                records[m_key]["phys_samples"].append(q_fm_phys[:, :, 0, :, ::4, ::4].cpu())
 
             records["G0"]["lat_samples"].append(z_samps_g0[:, :, :, :, ::2, ::2].reshape(num_samples_K, -1).cpu())
-            records["G0"]["phys_samples"].append(q_g0_phys[:, :, :, :, ::4, ::4].reshape(num_samples_K, -1).cpu())
+            records["G0"]["phys_samples"].append(q_g0_phys[:, :, 0, :, ::4, ::4].cpu())
             records["G1"]["lat_samples"].append(z_samps_g1[:, :, :, :, ::2, ::2].reshape(num_samples_K, -1).cpu())
-            records["G1"]["phys_samples"].append(q_g1_phys[:, :, :, :, ::4, ::4].reshape(num_samples_K, -1).cpu())
+            records["G1"]["phys_samples"].append(q_g1_phys[:, :, 0, :, ::4, ::4].cpu())
 
             lat_targets_sub.append(z_target[:, :, :, ::2, ::2].reshape(-1).cpu())
-            phys_targets_sub.append(q_target_phys[:, :, :, ::4, ::4].reshape(-1).cpu())
+            phys_targets_sub.append(q_target_phys[:, 0, :, ::4, ::4].cpu())
 
     # Compile Summary
     summary = {
         "validation_windows_evaluated": total_windows,
         "ensemble_size_K": num_samples_K,
         "common_random_numbers": True,
+        "fm_temperatures_scanned": fm_temperatures,
         "D0": {
             "physical_rmse": math.sqrt(sum(records["D0"]["mse_phys"]) / total_windows),
         },
     }
 
     all_lat_targets = torch.cat(lat_targets_sub, dim=0)
-    all_phys_targets = torch.cat(phys_targets_sub, dim=0)
+    all_phys_targets = torch.cat(phys_targets_sub, dim=0)  # (N, 4, Ny_sub, Nx_sub)
     full_phys_target = torch.cat(pooled_phys_targets, dim=0)  # (N, 4, Ny, Nx)
 
     for m in all_models:
         all_m_lat = torch.cat(records[m]["lat_samples"], dim=1)
-        all_m_phys = torch.cat(records[m]["phys_samples"], dim=1)
+        all_m_phys = torch.cat(records[m]["phys_samples"], dim=1)  # (K, N, 4, Ny_sub, Nx_sub)
         full_m_samps = torch.cat(pooled_phys_samps[m], dim=1)  # (K, N, 4, Ny, Nx)
 
         # Pooled Spread-Skill Ratio according to Phase 3 contract
         spread_skill = compute_pooled_spread_skill(samples=full_m_samps, target=full_phys_target)
+
+        # Per-channel physical intervals
+        phys_intervals_per_channel = {}
+        for c_idx, c_name in enumerate(channel_names):
+            c_samps = all_m_phys[:, :, c_idx].reshape(num_samples_K, -1)
+            c_target = all_phys_targets[:, c_idx].reshape(-1)
+            phys_intervals_per_channel[c_name] = compute_quantile_coverage_and_width(c_samps, c_target)
+
+        # Pooled physical intervals
+        pooled_samps = all_m_phys.reshape(num_samples_K, -1)
+        pooled_target = all_phys_targets.reshape(-1)
 
         m_dict = {
             "latent_crps_empirical": sum(records[m]["crps_lat_emp"]) / total_windows,
@@ -625,7 +655,8 @@ def evaluate_one_step_comparative(
             "physical_crps_mean": sum(records[m]["crps_phys"]) / total_windows,
             "physical_crps_per_channel": {c: sum(phys_crps_by_channel[m][c]) / total_windows for c in channel_names},
             "phase3_pooled_spread_skill": spread_skill,
-            "physical_intervals": compute_quantile_coverage_and_width(all_m_phys, all_phys_targets),
+            "physical_intervals": compute_quantile_coverage_and_width(pooled_samps, pooled_target),
+            "physical_intervals_per_channel": phys_intervals_per_channel,
         }
         if "crps_lat_ana" in records[m]:
             m_dict["latent_crps_analytical"] = sum(records[m]["crps_lat_ana"]) / total_windows
@@ -645,12 +676,13 @@ def evaluate_rollout_physics_comparative(
     device: torch.device,
     horizons: List[int] = [5, 10],
     num_samples_K: int = 8,
+    rollout_temperatures: List[float] = [1.0, 0.7, 0.5, 0.4],
     windows_per_traj: Optional[int] = None,
     max_trajectories: Optional[int] = None,
     seed: int = 42,
     batch_size: int = 8,
 ) -> Dict[str, Any]:
-    """Execute multi-step autoregressive rollout comparing D0, G0, G1, FM1.0, and FM0.7 against GT."""
+    """Execute multi-step autoregressive rollout comparing D0, G0, G1, and FM temperature variants against GT."""
     max_h = max(horizons)
     dataset = dataloader.dataset
 
@@ -664,10 +696,10 @@ def evaluate_rollout_physics_comparative(
     unique_trajs = set((r["source_file"], r["traj_idx"]) for r in manifest_records)
     unique_clusters = set(r["cluster_id"] for r in manifest_records)
 
-    models = ["D0", "G0", "G1", "FM_temp_1.0", "FM_temp_0.7"]
+    fm_model_names = [f"FM_temp_{t}" for t in rollout_temperatures]
+    models = ["D0", "G0", "G1"] + fm_model_names
 
     # Metrics storage
-    # Horizon metrics per model
     h_metrics = {m: {h: {
         "ens_vrmse": [], "samp_vrmse": [],
         "ens_div_sq": [], "samp_div_sq": [],
@@ -680,13 +712,14 @@ def evaluate_rollout_physics_comparative(
     spectra_k_bins = None
     window_gt_spectra = []
     window_ens_spectra = {m: [] for m in models}
-    window_samp_spectra = {m: [] for m in models}
+    window_mean_member_spectra = {m: [] for m in models}
+
     window_ens_rel_errors = {m: [] for m in models}
-    window_samp_rel_errors = {m: [] for m in models}
+    window_mean_member_rel_errors = {m: [] for m in models}
+    window_indiv_member_rel_errors = {m: [] for m in models}
 
     total_windows = len(selected_indices)
 
-    # Process in batches
     with torch.no_grad():
         for b_start in range(0, total_windows, batch_size):
             b_indices = selected_indices[b_start: b_start + batch_size]
@@ -716,32 +749,26 @@ def evaluate_rollout_physics_comparative(
                 variance_head=g1_head, decode_samples=True,
             )
 
-            # 2. FM @ tau=1.0 and tau=0.7
-            rollout_fm_10 = forecaster.sample_rollout_flow_matching(
-                q_hist=q_hist, re=re, sc=sc, horizon=max_h,
-                num_samples=num_samples_K, seed=w_seed,
-                flow_matcher=fm, noise_scale=1.0, decode_samples=True,
-            )
-            rollout_fm_07 = forecaster.sample_rollout_flow_matching(
-                q_hist=q_hist, re=re, sc=sc, horizon=max_h,
-                num_samples=num_samples_K, seed=w_seed,
-                flow_matcher=fm, noise_scale=0.7, decode_samples=True,
-            )
-
-            # Decode & denormalize all physical fields
             d0_phys = apply_pressure_gauge(normalizer.denormalize(rollout_g0["deterministic_rollout"]))  # (B, H, 4, Ny, Nx)
             g0_samps = apply_pressure_gauge(normalizer.denormalize(rollout_g0["sample_trajectories"].permute(1, 0, 2, 3, 4, 5)).permute(1, 0, 2, 3, 4, 5))
             g1_samps = apply_pressure_gauge(normalizer.denormalize(rollout_g1["sample_trajectories"].permute(1, 0, 2, 3, 4, 5)).permute(1, 0, 2, 3, 4, 5))
-            fm10_samps = apply_pressure_gauge(normalizer.denormalize(rollout_fm_10["sample_trajectories"].permute(1, 0, 2, 3, 4, 5)).permute(1, 0, 2, 3, 4, 5))
-            fm07_samps = apply_pressure_gauge(normalizer.denormalize(rollout_fm_07["sample_trajectories"].permute(1, 0, 2, 3, 4, 5)).permute(1, 0, 2, 3, 4, 5))
 
             rollout_data = {
                 "D0": {"mean": d0_phys, "samps": d0_phys.unsqueeze(1)},
                 "G0": {"mean": g0_samps.mean(dim=1), "samps": g0_samps},
                 "G1": {"mean": g1_samps.mean(dim=1), "samps": g1_samps},
-                "FM_temp_1.0": {"mean": fm10_samps.mean(dim=1), "samps": fm10_samps},
-                "FM_temp_0.7": {"mean": fm07_samps.mean(dim=1), "samps": fm07_samps},
             }
+
+            # 2. FM @ all requested rollout temperatures
+            for temp in rollout_temperatures:
+                m_key = f"FM_temp_{temp}"
+                r_fm = forecaster.sample_rollout_flow_matching(
+                    q_hist=q_hist, re=re, sc=sc, horizon=max_h,
+                    num_samples=num_samples_K, seed=w_seed,
+                    flow_matcher=fm, noise_scale=temp, decode_samples=True,
+                )
+                fm_samps = apply_pressure_gauge(normalizer.denormalize(r_fm["sample_trajectories"].permute(1, 0, 2, 3, 4, 5)).permute(1, 0, 2, 3, 4, 5))
+                rollout_data[m_key] = {"mean": fm_samps.mean(dim=1), "samps": fm_samps}
 
             for h in horizons:
                 gt_h = q_gt_phys[:, h - 1]  # (B, 4, Ny, Nx)
@@ -798,6 +825,7 @@ def evaluate_rollout_physics_comparative(
                 gt_norm = np.linalg.norm(e_gt_arr) + 1e-8
 
                 for m in models:
+                    # 1. Ensemble-mean-field spectrum
                     u_ens_w = rollout_data[m]["mean"][b_idx, max_h - 1, 0]
                     v_ens_w = rollout_data[m]["mean"][b_idx, max_h - 1, 1]
                     _, e_ens = compute_radial_energy_spectrum(u_ens_w, v_ens_w)
@@ -806,18 +834,24 @@ def evaluate_rollout_physics_comparative(
                     rel_err_ens = float(np.linalg.norm(e_ens_arr - e_gt_arr) / gt_norm)
                     window_ens_rel_errors[m].append(rel_err_ens)
 
-                    # K-sample member spectra
+                    # 2. Member spectra & individual member errors
                     k_samps = rollout_data[m]["samps"].shape[1]
                     k_spec_list = []
+                    k_indiv_rel_errs = []
                     for k_idx in range(k_samps):
                         u_k_w = rollout_data[m]["samps"][b_idx, k_idx, max_h - 1, 0]
                         v_k_w = rollout_data[m]["samps"][b_idx, k_idx, max_h - 1, 1]
                         _, e_k = compute_radial_energy_spectrum(u_k_w, v_k_w)
-                        k_spec_list.append(e_k[:25].cpu().numpy())
+                        e_k_arr = e_k[:25].cpu().numpy()
+                        k_spec_list.append(e_k_arr)
+                        rel_err_k = float(np.linalg.norm(e_k_arr - e_gt_arr) / gt_norm)
+                        k_indiv_rel_errs.append(rel_err_k)
+
                     e_samp_avg = np.mean(k_spec_list, axis=0)
-                    window_samp_spectra[m].append(e_samp_avg)
-                    rel_err_samp = float(np.linalg.norm(e_samp_avg - e_gt_arr) / gt_norm)
-                    window_samp_rel_errors[m].append(rel_err_samp)
+                    window_mean_member_spectra[m].append(e_samp_avg)
+                    rel_err_mean_member = float(np.linalg.norm(e_samp_avg - e_gt_arr) / gt_norm)
+                    window_mean_member_rel_errors[m].append(rel_err_mean_member)
+                    window_indiv_member_rel_errors[m].append(float(np.mean(k_indiv_rel_errs)))
 
     # Compile Rollout Summary
     avg_spectra = {
@@ -825,22 +859,25 @@ def evaluate_rollout_physics_comparative(
         "GT": [float(x) for x in np.mean(window_gt_spectra, axis=0)],
     }
     for m in models:
-        avg_spectra[f"{m}_ensemble_mean"] = [float(x) for x in np.mean(window_ens_spectra[m], axis=0)]
-        avg_spectra[f"{m}_sample_members"] = [float(x) for x in np.mean(window_samp_spectra[m], axis=0)]
+        avg_spectra[f"{m}_ensemble_mean_field"] = [float(x) for x in np.mean(window_ens_spectra[m], axis=0)]
+        avg_spectra[f"{m}_mean_member"] = [float(x) for x in np.mean(window_mean_member_spectra[m], axis=0)]
 
     spectral_stats = {}
     for m in models:
         spectral_stats[m] = {
-            "ensemble_mean_rel_error_mean": float(np.mean(window_ens_rel_errors[m])),
-            "ensemble_mean_rel_error_std": float(np.std(window_ens_rel_errors[m])),
-            "sample_members_rel_error_mean": float(np.mean(window_samp_rel_errors[m])),
-            "sample_members_rel_error_std": float(np.std(window_samp_rel_errors[m])),
+            "ensemble_mean_field_spectrum_rel_error_mean": float(np.mean(window_ens_rel_errors[m])),
+            "ensemble_mean_field_spectrum_rel_error_std": float(np.std(window_ens_rel_errors[m])),
+            "mean_member_spectrum_rel_error_mean": float(np.mean(window_mean_member_rel_errors[m])),
+            "mean_member_spectrum_rel_error_std": float(np.std(window_mean_member_rel_errors[m])),
+            "individual_member_spectrum_rel_error_mean": float(np.mean(window_indiv_member_rel_errors[m])),
+            "individual_member_spectrum_rel_error_std": float(np.std(window_indiv_member_rel_errors[m])),
         }
 
     rollout_summary = {
         "total_windows_evaluated": total_windows,
         "unique_trajectories_evaluated": len(unique_trajs),
         "unique_clusters_evaluated": len(unique_clusters),
+        "rollout_temperatures_evaluated": rollout_temperatures,
         "window_manifest": manifest_records,
         "spectral_relative_error_vs_gt_h10": spectral_stats,
         "energy_spectra_first_25_modes": avg_spectra,
@@ -884,16 +921,22 @@ def main():
     parser.add_argument("--output-json", type=str, default="outputs/metrics/flow_matching_pilot3ep_evaluation.json")
     parser.add_argument("--num-samples-k", type=int, default=32, help="Ensemble K for one-step probability")
     parser.add_argument("--num-samples-rollout", type=int, default=8, help="Ensemble K for rollout trajectories")
+    parser.add_argument("--fm-temperatures", type=str, default="1.0,0.8,0.7,0.6,0.5,0.4", help="Comma-separated temperature sweep for one-step")
+    parser.add_argument("--rollout-temperatures", type=str, default="1.0,0.7,0.5,0.4", help="Comma-separated temperature sweep for rollout")
     parser.add_argument("--rollout-windows-per-traj", type=int, default=-1, help="Windows per trajectory for rollout (-1 for all)")
     parser.add_argument("--max-rollout-trajectories", type=int, default=6, help="Max trajectories for rollout")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
+    fm_temps = [float(t.strip()) for t in args.fm_temperatures.split(",") if t.strip()]
+    rollout_temps = [float(t.strip()) for t in args.rollout_temperatures.split(",") if t.strip()]
+
     device = torch.device(args.device)
     print("=" * 70)
     print("=== PROBABILISTIC WORLD MODEL RIGOROUS A/B BENCHMARK (ON VALIDATION SET) ===")
     print(f"Device: {device} | Seed: {args.seed} | One-step K: {args.num_samples_k} | Rollout K: {args.num_samples_rollout}")
+    print(f"One-step Temperatures: {fm_temps} | Rollout Temperatures: {rollout_temps}")
     print("=" * 70)
 
     # 1. Load Data
@@ -952,14 +995,14 @@ def main():
         normalizer=normalizer,
         device=device,
         num_samples_K=args.num_samples_k,
-        fm_temperatures=[1.0, 0.8, 0.7],
+        fm_temperatures=fm_temps,
         seed=args.seed,
     )
 
     print("\n--- ONE-STEP PROBABILISTIC COMPARISON (ON SAME 144 VALIDATION WINDOWS) ---")
     print(f"{'Model':<12} | {'Latent CRPS':<11} | {'Phys CRPS':<13} | {'Pooled Spread':<13} | {'Pooled RMSE':<11} | {'Pooled SSR':<10} | {'PICP 50%':<8} | {'PICP 90%':<8}")
     print("-" * 110)
-    for m in ["G0", "G1", "FM_temp_1.0", "FM_temp_0.8", "FM_temp_0.7"]:
+    for m in ["G0", "G1"] + [f"FM_temp_{t}" for t in fm_temps]:
         m_res = step1_results[m]
         p_ss = m_res["phase3_pooled_spread_skill"]
         p_ints = m_res["physical_intervals"]
@@ -979,11 +1022,13 @@ def main():
         device=device,
         horizons=[5, 10],
         num_samples_K=args.num_samples_rollout,
+        rollout_temperatures=rollout_temps,
         windows_per_traj=args.rollout_windows_per_traj,
         max_trajectories=args.max_rollout_trajectories,
         seed=args.seed,
     )
 
+    rollout_models = ["D0", "G0", "G1"] + [f"FM_temp_{t}" for t in rollout_temps]
     print("\n--- MULTI-STEP PHYSICAL PERFORMANCE VS GROUND TRUTH ---")
     for h in [5, 10]:
         h_res = step2_results[f"h{h}"]
@@ -991,20 +1036,21 @@ def main():
         print(f"\n[ Horizon h={h} ] Ground Truth RMS Divergence = {gt_div:.5f}")
         print(f"{'Model':<12} | {'Ens VRMSE vs GT':<16} | {'Samp VRMSE vs GT':<16} | {'Samp Divergence':<15} | {'Div / GT Ratio':<14} | {'Samp Vorticity RMSE':<18}")
         print("-" * 105)
-        for m in ["D0", "G0", "G1", "FM_temp_1.0", "FM_temp_0.7"]:
+        for m in rollout_models:
             m_res = h_res[m]
             print(f"{m:<12} | {m_res['ensemble_mean_vrmse_vs_gt']:<16.4f} | {m_res['sample_mean_vrmse_vs_gt']:<16.4f} | {m_res['sample_rms_divergence']:<15.4f} | {m_res['divergence_ratio_vs_gt']:<13.1f}x | {m_res['sample_vorticity_rmse_vs_gt']:<18.4f}")
 
     print("\n--- RADIAL ENERGY SPECTRUM RELATIVE L2 ERROR VS GROUND TRUTH (h=10) ---")
     spec_res = step2_results["spectral_relative_error_vs_gt_h10"]
-    for m in ["D0", "G0", "G1", "FM_temp_1.0", "FM_temp_0.7"]:
+    for m in rollout_models:
         m_s = spec_res[m]
-        print(f"  {m:<12}: Ens Mean L2 Err = {m_s['ensemble_mean_rel_error_mean']*100:.2f}% ± {m_s['ensemble_mean_rel_error_std']*100:.2f}%, "
-              f"Samp L2 Err = {m_s['sample_members_rel_error_mean']*100:.2f}% ± {m_s['sample_members_rel_error_std']*100:.2f}%")
+        print(f"  {m:<12}: Ens Field L2 Err = {m_s['ensemble_mean_field_spectrum_rel_error_mean']*100:.2f}% ± {m_s['ensemble_mean_field_spectrum_rel_error_std']*100:.2f}%, "
+              f"Mean Member L2 Err = {m_s['mean_member_spectrum_rel_error_mean']*100:.2f}% ± {m_s['mean_member_spectrum_rel_error_std']*100:.2f}%, "
+              f"Indiv Member L2 Err = {m_s['individual_member_spectrum_rel_error_mean']*100:.2f}% ± {m_s['individual_member_spectrum_rel_error_std']*100:.2f}%")
 
     eval_script_sha = compute_file_sha256(__file__)
     full_report = {
-        "evaluation_protocol": "STRICT_SAME_VALIDATION_SPLIT_AB_TEST_V2",
+        "evaluation_protocol": "STRICT_SAME_VALIDATION_SPLIT_AB_TEST_V3_TEMPERATURE_DIAGNOSTIC",
         "evaluated_at_utc": datetime.now(timezone.utc).isoformat(),
         "git_commit": get_git_commit(str(PROJECT_ROOT)),
         "is_git_dirty": is_git_dirty(str(PROJECT_ROOT)),
