@@ -463,10 +463,21 @@ class LatentFlowMatcher(nn.Module):
             scale: Tensor or sequence of shape (C_z,) or (1, C_z, 1, 1).
         """
         scale_tensor = torch.as_tensor(scale, dtype=torch.float32)
+        if scale_tensor.numel() != self.latent_channels:
+            raise ValueError(
+                f"residual_scale must have {self.latent_channels} elements, got {scale_tensor.numel()}"
+            )
+        if not torch.isfinite(scale_tensor).all():
+            raise ValueError("residual_scale contains non-finite values (NaN or Inf)")
+        if (scale_tensor <= 0).any():
+            raise ValueError("residual_scale values must be strictly positive (> 0) for all channels")
+
         if scale_tensor.ndim == 1:
             scale_tensor = scale_tensor.view(1, -1, 1, 1)
         elif scale_tensor.ndim == 5:
             scale_tensor = scale_tensor.squeeze(1)
+        elif scale_tensor.ndim == 4 and scale_tensor.shape[0] != 1:
+            scale_tensor = scale_tensor.view(1, -1, 1, 1)
         self.register_buffer("residual_scale", scale_tensor)
 
     @classmethod
@@ -478,8 +489,19 @@ class LatentFlowMatcher(nn.Module):
         **kwargs,
     ) -> "LatentFlowMatcher":
         """Instantiate LatentFlowMatcher with residual scale from Phase 0 statistics."""
+        if not isinstance(stats_data, dict) or "statistics" not in stats_data:
+            raise ValueError("stats_data missing required 'statistics' dictionary")
+        if "channel_residual_second_moment_g0" not in stats_data["statistics"]:
+            raise ValueError("stats_data missing required 'statistics.channel_residual_second_moment_g0'")
+
         second_moments = stats_data["statistics"]["channel_residual_second_moment_g0"]
-        scale = torch.sqrt(torch.tensor(second_moments, dtype=torch.float32) + eps)
+        second_moments_tensor = torch.as_tensor(second_moments, dtype=torch.float32)
+        if not torch.isfinite(second_moments_tensor).all():
+            raise ValueError("channel_residual_second_moment_g0 contains non-finite values")
+        if (second_moments_tensor < 0).any():
+            raise ValueError("channel_residual_second_moment_g0 contains negative values")
+
+        scale = torch.sqrt(second_moments_tensor + eps)
         return cls(latent_channels=latent_channels, residual_scale=scale, **kwargs)
 
     def _resolve_condition(

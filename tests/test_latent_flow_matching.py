@@ -576,6 +576,35 @@ class TestLatentFlowMatcherContracts:
         expected_scale = torch.tensor([0.3, 0.5, 0.7, 0.9]).view(1, 4, 1, 1)
         assert torch.allclose(matcher.residual_scale, expected_scale, atol=1e-5)
 
+    def test_residual_scale_invalid_length_raises_value_error(self):
+        matcher = LatentFlowMatcher(latent_channels=4, cond_dim=8, hidden_channels=8, num_blocks=1)
+        with pytest.raises(ValueError, match="residual_scale must have 4 elements, got 3"):
+            matcher.set_residual_scale([1.0, 2.0, 3.0])
+
+    def test_residual_scale_non_finite_raises_value_error(self):
+        matcher = LatentFlowMatcher(latent_channels=4, cond_dim=8, hidden_channels=8, num_blocks=1)
+        with pytest.raises(ValueError, match="residual_scale contains non-finite values"):
+            matcher.set_residual_scale([1.0, float("nan"), 2.0, 3.0])
+        with pytest.raises(ValueError, match="residual_scale contains non-finite values"):
+            matcher.set_residual_scale([1.0, float("inf"), 2.0, 3.0])
+
+    def test_residual_scale_non_positive_raises_value_error(self):
+        matcher = LatentFlowMatcher(latent_channels=4, cond_dim=8, hidden_channels=8, num_blocks=1)
+        with pytest.raises(ValueError, match="strictly positive"):
+            matcher.set_residual_scale([1.0, 0.0, 2.0, 3.0])
+        with pytest.raises(ValueError, match="strictly positive"):
+            matcher.set_residual_scale([1.0, -0.5, 2.0, 3.0])
+
+    def test_residual_scale_from_stats_validation(self):
+        with pytest.raises(ValueError, match="missing required 'statistics'"):
+            LatentFlowMatcher.from_residual_stats({}, latent_channels=4)
+
+        with pytest.raises(ValueError, match="contains negative values"):
+            LatentFlowMatcher.from_residual_stats(
+                {"statistics": {"channel_residual_second_moment_g0": [1.0, -0.1, 1.0, 1.0]}},
+                latent_channels=4,
+            )
+
 
 class TestLatentForecasterFlowMatchingIntegration:
     """Verify LatentForecaster integration with LatentFlowMatcher."""

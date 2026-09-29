@@ -30,6 +30,7 @@ from scripts.train_latent_flow_matching import (
     build_and_freeze_flow_matching_model,
     evaluate_flow_matching_loss,
     train_latent_flow_matching,
+    clip_and_validate_gradients,
 )
 from src.models.latent_forecaster import LatentForecaster
 from src.models.latent_transformer import LatentSTTransformer
@@ -210,9 +211,9 @@ class TestPreflightContractFailClosed:
                 manifest_path=None,
             )
 
-    def test_hash_mismatch_fails_closed_on_residual_stats(self, tmp_path):
+    def test_stats_d0_mismatch_fails_closed(self, tmp_path):
         from src.data.normalization import FieldNormalizer
-        from src.utils.provenance import compute_normalizer_hash, compute_split_hash_from_file
+        from src.utils.provenance import compute_normalizer_hash, compute_split_hash_from_file, compute_file_sha256
 
         norm = FieldNormalizer()
         norm.mean = torch.zeros(4)
@@ -236,14 +237,16 @@ class TestPreflightContractFailClosed:
             },
             d0_path,
         )
+        actual_d0_sha = compute_file_sha256(str(d0_path))
 
-        # Residual stats with mismatched split_hash
-        stats_path = tmp_path / "stats_mismatch.json"
+        # Stats generated from a different D0
+        stats_path = tmp_path / "stats_d0_mismatch.json"
         with open(stats_path, "w") as f:
             json.dump(
                 {
+                    "d0_checkpoint": {"sha256": "different_d0_sha_00000000000000000000000000000000"},
                     "data_protocol": {
-                        "split_hash": "mismatched_split_hash_0000000000000000",
+                        "split_hash": runtime_split_hash,
                         "normalizer_hash": norm_hash,
                     },
                     "statistics": {"channel_residual_second_moment_g0": [1.0] * 64},
@@ -251,7 +254,7 @@ class TestPreflightContractFailClosed:
                 f,
             )
 
-        with pytest.raises(ValueError, match="Residual stats split_hash mismatch"):
+        with pytest.raises(ValueError, match="Residual stats D0 checkpoint SHA mismatch"):
             verify_flow_matching_preflight_contract(
                 d0_checkpoint_path=str(d0_path),
                 normalizer_path=str(norm_path),
@@ -260,9 +263,156 @@ class TestPreflightContractFailClosed:
                 manifest_path=None,
             )
 
+    def test_missing_stats_hash_fails_closed(self, tmp_path):
+        from src.data.normalization import FieldNormalizer
+        from src.utils.provenance import compute_normalizer_hash, compute_split_hash_from_file, compute_file_sha256
+
+        norm = FieldNormalizer()
+        norm.mean = torch.zeros(4)
+        norm.std = torch.ones(4)
+        norm_path = tmp_path / "normalizer.pt"
+        torch.save(norm.state_dict(), norm_path)
+        norm_hash = compute_normalizer_hash(norm)
+
+        split_path = tmp_path / "split.json"
+        with open(split_path, "w") as f:
+            json.dump({"train": ["sim_001"]}, f)
+        runtime_split_hash = compute_split_hash_from_file(str(split_path))
+
+        d0_path = tmp_path / "d0_valid.pt"
+        torch.save(
+            {
+                "split_hash": runtime_split_hash,
+                "normalizer_hash": norm_hash,
+                "seed": 42,
+                "config": {},
+            },
+            d0_path,
+        )
+        actual_d0_sha = compute_file_sha256(str(d0_path))
+
+        # 1. Missing d0_checkpoint.sha256
+        stats_no_d0_sha = tmp_path / "stats_no_d0_sha.json"
+        with open(stats_no_d0_sha, "w") as f:
+            json.dump(
+                {
+                    "d0_checkpoint": {},
+                    "data_protocol": {"split_hash": runtime_split_hash, "normalizer_hash": norm_hash},
+                    "statistics": {"channel_residual_second_moment_g0": [1.0] * 64},
+                },
+                f,
+            )
+        with pytest.raises(ValueError, match="missing required 'd0_checkpoint.sha256'"):
+            verify_flow_matching_preflight_contract(
+                d0_checkpoint_path=str(d0_path),
+                normalizer_path=str(norm_path),
+                split_file=str(split_path),
+                residual_stats_path=str(stats_no_d0_sha),
+                manifest_path=None,
+            )
+
+        # 2. Missing data_protocol.split_hash
+        stats_no_split = tmp_path / "stats_no_split.json"
+        with open(stats_no_split, "w") as f:
+            json.dump(
+                {
+                    "d0_checkpoint": {"sha256": actual_d0_sha},
+                    "data_protocol": {"normalizer_hash": norm_hash},
+                    "statistics": {"channel_residual_second_moment_g0": [1.0] * 64},
+                },
+                f,
+            )
+        with pytest.raises(ValueError, match="missing required 'data_protocol.split_hash'"):
+            verify_flow_matching_preflight_contract(
+                d0_checkpoint_path=str(d0_path),
+                normalizer_path=str(norm_path),
+                split_file=str(split_path),
+                residual_stats_path=str(stats_no_split),
+                manifest_path=None,
+            )
+
+        # 3. Missing data_protocol.normalizer_hash
+        stats_no_norm = tmp_path / "stats_no_norm.json"
+        with open(stats_no_norm, "w") as f:
+            json.dump(
+                {
+                    "d0_checkpoint": {"sha256": actual_d0_sha},
+                    "data_protocol": {"split_hash": runtime_split_hash},
+                    "statistics": {"channel_residual_second_moment_g0": [1.0] * 64},
+                },
+                f,
+            )
+        with pytest.raises(ValueError, match="missing required 'data_protocol.normalizer_hash'"):
+            verify_flow_matching_preflight_contract(
+                d0_checkpoint_path=str(d0_path),
+                normalizer_path=str(norm_path),
+                split_file=str(split_path),
+                residual_stats_path=str(stats_no_norm),
+                manifest_path=None,
+            )
+
+    def test_missing_seed_fails_closed(self, tmp_path):
+        from src.data.normalization import FieldNormalizer
+        from src.utils.provenance import compute_normalizer_hash, compute_split_hash_from_file
+
+        norm = FieldNormalizer()
+        norm.mean = torch.zeros(4)
+        norm.std = torch.ones(4)
+        norm_path = tmp_path / "normalizer.pt"
+        torch.save(norm.state_dict(), norm_path)
+        norm_hash = compute_normalizer_hash(norm)
+
+        split_path = tmp_path / "split.json"
+        with open(split_path, "w") as f:
+            json.dump({"train": ["sim_001"]}, f)
+        runtime_split_hash = compute_split_hash_from_file(str(split_path))
+
+        # Checkpoint missing seed entirely
+        d0_no_seed_path = tmp_path / "d0_no_seed.pt"
+        torch.save(
+            {
+                "split_hash": runtime_split_hash,
+                "normalizer_hash": norm_hash,
+                "config": {},
+            },
+            d0_no_seed_path,
+        )
+
+        with pytest.raises(ValueError, match="missing required 'seed'"):
+            verify_flow_matching_preflight_contract(
+                d0_checkpoint_path=str(d0_no_seed_path),
+                normalizer_path=str(norm_path),
+                split_file=str(split_path),
+                expected_seed=42,
+                manifest_path=None,
+            )
+
+    def test_missing_residual_stats_fails_closed(self, tmp_path):
+        # 1. residual_stats_path is None without explicit disable flag
+        with pytest.raises(ValueError, match="residual_stats_path must be specified"):
+            train_latent_flow_matching(
+                d0_checkpoint=str(tmp_path / "d0.pt"),
+                normalizer_path=str(tmp_path / "norm.pt"),
+                split_file=str(tmp_path / "split.json"),
+                output_dir=str(tmp_path / "out"),
+                residual_stats_path=None,
+                disable_residual_normalization=False,
+            )
+
+        # 2. residual_stats_path does not exist
+        with pytest.raises(FileNotFoundError, match="Residual statistics file not found"):
+            train_latent_flow_matching(
+                d0_checkpoint=str(tmp_path / "d0.pt"),
+                normalizer_path=str(tmp_path / "norm.pt"),
+                split_file=str(tmp_path / "split.json"),
+                output_dir=str(tmp_path / "out"),
+                residual_stats_path=str(tmp_path / "non_existent_stats.json"),
+                disable_residual_normalization=False,
+            )
+
 
 class TestGradientNonfiniteFailClosed:
-    """Verify non-finite gradients immediately fail-closed before optimizer.step()."""
+    """Verify non-finite gradients immediately fail-closed via shared production function."""
 
     def test_gradient_nonfinite_detected_by_clip_norm(self):
         matcher = LatentFlowMatcher(
@@ -277,12 +427,8 @@ class TestGradientNonfiniteFailClosed:
         first_param = next(matcher.parameters())
         first_param.grad = torch.full_like(first_param.data, float("nan"))
 
-        total_norm = torch.nn.utils.clip_grad_norm_(matcher.parameters(), max_norm=1.0)
-        assert not torch.isfinite(total_norm)
-
-        with pytest.raises(FloatingPointError, match="Non-finite gradient norm detected"):
-            if not torch.isfinite(total_norm):
-                raise FloatingPointError(f"Non-finite gradient norm detected: {total_norm.item()}")
+        with pytest.raises(FloatingPointError, match="Non-finite gradient norm detected at epoch 1, batch 0"):
+            clip_and_validate_gradients(matcher, max_norm=1.0, epoch=1, batch_idx=0)
 
     def test_gradient_nonfinite_detected_on_inf(self):
         matcher = LatentFlowMatcher(
@@ -296,12 +442,24 @@ class TestGradientNonfiniteFailClosed:
         first_param = next(matcher.parameters())
         first_param.grad = torch.full_like(first_param.data, float("inf"))
 
-        total_norm = torch.nn.utils.clip_grad_norm_(matcher.parameters(), max_norm=1.0)
-        assert not torch.isfinite(total_norm)
-
         with pytest.raises(FloatingPointError, match="Non-finite gradient norm detected"):
-            if not torch.isfinite(total_norm):
-                raise FloatingPointError(f"Non-finite gradient norm detected: {total_norm.item()}")
+            clip_and_validate_gradients(matcher, max_norm=1.0, epoch=2, batch_idx=3)
+
+    def test_gradient_finite_returns_valid_norm(self):
+        matcher = LatentFlowMatcher(
+            latent_channels=8,
+            cond_dim=16,
+            hidden_channels=16,
+            num_blocks=1,
+            zero_init=False,
+        )
+
+        for p in matcher.parameters():
+            p.grad = torch.ones_like(p.data) * 0.05
+
+        total_norm = clip_and_validate_gradients(matcher, max_norm=1.0)
+        assert torch.isfinite(total_norm)
+        assert total_norm.item() > 0.0
 
 
 class TestOverwritePreflightSafetyOrder:
@@ -320,6 +478,7 @@ class TestOverwritePreflightSafetyOrder:
                 normalizer_path=str(tmp_path / "norm.pt"),
                 split_file=str(tmp_path / "split.json"),
                 output_dir=str(out_dir),
+                disable_residual_normalization=True,
                 overwrite=True,
             )
 

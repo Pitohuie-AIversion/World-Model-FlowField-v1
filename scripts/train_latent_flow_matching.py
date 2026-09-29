@@ -24,7 +24,7 @@ from pathlib import Path
 import random
 import shutil
 import sys
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, Union
 
 import numpy as np
 import torch
@@ -51,6 +51,27 @@ from src.utils.provenance import (
     get_git_commit,
     is_git_dirty,
 )
+
+
+def clip_and_validate_gradients(
+    model_or_parameters: Union[nn.Module, Any],
+    max_norm: float = 1.0,
+    epoch: Optional[int] = None,
+    batch_idx: Optional[int] = None,
+) -> torch.Tensor:
+    """Clips parameter gradients and strictly asserts finite norm before optimizer.step().
+
+    Fails closed immediately by raising FloatingPointError if gradient norm is non-finite.
+    Shared production implementation invoked by both training loop and verification tests.
+    """
+    params = model_or_parameters.parameters() if isinstance(model_or_parameters, nn.Module) else model_or_parameters
+    total_norm = torch.nn.utils.clip_grad_norm_(params, max_norm=max_norm)
+    if not torch.isfinite(total_norm):
+        ctx = f" at epoch {epoch}, batch {batch_idx}" if (epoch is not None and batch_idx is not None) else ""
+        raise FloatingPointError(
+            f"Non-finite gradient norm detected{ctx}: total_norm={total_norm.item()}"
+        )
+    return total_norm
 
 
 def verify_flow_matching_preflight_contract(
@@ -106,10 +127,14 @@ def verify_flow_matching_preflight_contract(
             f"but runtime normalizer has {runtime_norm_hash[:16]}..."
         )
 
-    if expected_seed is not None and d0_seed is not None and d0_seed != expected_seed:
-        errors.append(f"Seed mismatch: D0 has seed={d0_seed}, expected {expected_seed}")
+    # Strict fail-closed check on D0 seed
+    if expected_seed is not None:
+        if d0_seed is None:
+            errors.append("D0 checkpoint/manifest is missing required 'seed'")
+        elif d0_seed != expected_seed:
+            errors.append(f"Seed mismatch: D0 has seed={d0_seed}, expected {expected_seed}")
 
-    # 2. Verify optional / required residual stats binding
+    # 2. Verify residual stats binding (D0 SHA-256, split_hash, normalizer_hash, statistics)
     stats_data = None
     if residual_stats_path is not None:
         if not os.path.exists(residual_stats_path):
@@ -117,19 +142,48 @@ def verify_flow_matching_preflight_contract(
         with open(residual_stats_path, "r") as f:
             stats_data = json.load(f)
 
-        stats_data_proto = stats_data.get("data_protocol", {})
-        stats_split_hash = stats_data_proto.get("split_hash")
-        stats_norm_hash = stats_data_proto.get("normalizer_hash")
-        if stats_split_hash and not hash_matches(stats_split_hash, runtime_split_hash, min_prefix_len=16):
-            errors.append(
-                f"Residual stats split_hash mismatch: stats has {stats_split_hash[:16]}..., "
-                f"runtime has {runtime_split_hash[:16]}..."
-            )
-        if stats_norm_hash and not hash_matches(stats_norm_hash, runtime_norm_hash, min_prefix_len=16):
-            errors.append(
-                f"Residual stats normalizer_hash mismatch: stats has {stats_norm_hash[:16]}..., "
-                f"runtime has {runtime_norm_hash[:16]}..."
-            )
+        if not isinstance(stats_data, dict):
+            raise ValueError(f"Residual stats file must contain a JSON object, got {type(stats_data)}")
+
+        # 2a. Cryptographic binding to generating D0 checkpoint
+        stats_d0 = stats_data.get("d0_checkpoint")
+        if not isinstance(stats_d0, dict) or not stats_d0.get("sha256"):
+            errors.append("Residual stats missing required 'd0_checkpoint.sha256'")
+        else:
+            stats_d0_sha = stats_d0["sha256"]
+            if not hash_matches(stats_d0_sha, d0_sha256, min_prefix_len=16):
+                errors.append(
+                    f"Residual stats D0 checkpoint SHA mismatch: stats generated from D0={stats_d0_sha[:16]}..., "
+                    f"but current runtime D0 has SHA={d0_sha256[:16]}..."
+                )
+
+        # 2b. Cryptographic binding to data protocol (split and normalizer)
+        stats_data_proto = stats_data.get("data_protocol")
+        if not isinstance(stats_data_proto, dict):
+            errors.append("Residual stats missing required 'data_protocol' dictionary")
+        else:
+            stats_split_hash = stats_data_proto.get("split_hash")
+            if not stats_split_hash:
+                errors.append("Residual stats missing required 'data_protocol.split_hash'")
+            elif not hash_matches(stats_split_hash, runtime_split_hash, min_prefix_len=16):
+                errors.append(
+                    f"Residual stats split_hash mismatch: stats has {stats_split_hash[:16]}..., "
+                    f"runtime has {runtime_split_hash[:16]}..."
+                )
+
+            stats_norm_hash = stats_data_proto.get("normalizer_hash")
+            if not stats_norm_hash:
+                errors.append("Residual stats missing required 'data_protocol.normalizer_hash'")
+            elif not hash_matches(stats_norm_hash, runtime_norm_hash, min_prefix_len=16):
+                errors.append(
+                    f"Residual stats normalizer_hash mismatch: stats has {stats_norm_hash[:16]}..., "
+                    f"runtime has {runtime_norm_hash[:16]}..."
+                )
+
+        # 2c. Verify statistical second moments presence
+        stats_statistics = stats_data.get("statistics")
+        if not isinstance(stats_statistics, dict) or "channel_residual_second_moment_g0" not in stats_statistics:
+            errors.append("Residual stats missing required 'statistics.channel_residual_second_moment_g0'")
 
     if errors:
         raise ValueError(
@@ -293,6 +347,7 @@ def train_latent_flow_matching(
     split_file: str,
     output_dir: str,
     residual_stats_path: Optional[str] = "outputs/normalization/latent_residual_stats.json",
+    disable_residual_normalization: bool = False,
     data_root: Optional[str] = None,
     epochs: int = 10,
     batch_size: int = 16,
@@ -323,8 +378,23 @@ def train_latent_flow_matching(
     print(f"=== Latent Flow Matching Training ===")
     print(f"Device: {device} | Seed: {seed} | Target Mode: {target_mode}")
 
-    # 2. Pre-flight Verification FIRST (fail-closed before filesystem modifications)
-    actual_stats_path = residual_stats_path if (residual_stats_path and os.path.exists(residual_stats_path)) else None
+    # 2. Strict stats path resolution (fail-closed: never silently downgrade to unnormalized)
+    if target_mode == "residual" and not disable_residual_normalization:
+        if not residual_stats_path:
+            raise ValueError(
+                "residual_stats_path must be specified when target_mode='residual'. "
+                "To train unnormalized residual flow matching, explicitly pass disable_residual_normalization=True."
+            )
+        if not os.path.isfile(residual_stats_path):
+            raise FileNotFoundError(
+                f"Residual statistics file not found at: {residual_stats_path}. "
+                "To train unnormalized residual flow matching, explicitly pass disable_residual_normalization=True."
+            )
+        actual_stats_path = residual_stats_path
+    else:
+        actual_stats_path = None
+
+    # 3. Pre-flight Verification FIRST (fail-closed before filesystem modifications)
     ckpt_data, normalizer, d0_sha256, runtime_split_hash, runtime_norm_hash, stats_data = verify_flow_matching_preflight_contract(
         d0_checkpoint_path=d0_checkpoint,
         normalizer_path=normalizer_path,
@@ -334,7 +404,7 @@ def train_latent_flow_matching(
     )
     print(f"Preflight Verified: D0={d0_sha256[:12]}..., Split={runtime_split_hash[:12]}..., Norm={runtime_norm_hash[:12]}...")
 
-    # 3. Smoke Test Automatic Restrictions
+    # 4. Smoke Test Automatic Restrictions
     if smoke_test:
         print(">>> SMOKE TEST MODE ACTIVATED: Restricting to 1 epoch, 2 train batches, 2 val batches <<<")
         epochs = 1
@@ -343,7 +413,7 @@ def train_latent_flow_matching(
         if output_dir == "outputs/checkpoints/probabilistic/flow_matching":
             output_dir = "outputs/checkpoints/probabilistic/flow_matching_smoke"
 
-    # 4. Artifact Directory Protection (strictly after preflight success)
+    # 5. Artifact Directory Protection (strictly after preflight success)
     out_path = Path(output_dir)
     if out_path.exists():
         existing_files = list(out_path.glob("*.pt")) + list(out_path.glob("*.json"))
@@ -359,7 +429,7 @@ def train_latent_flow_matching(
             print(f"Backed up existing artifacts to {backup_dir}")
     out_path.mkdir(parents=True, exist_ok=True)
 
-    # 5. Residual Scale Normalization Setup (ArchesWeatherGen paradigm)
+    # 6. Residual Scale Normalization Setup (ArchesWeatherGen paradigm)
     residual_scale = None
     if target_mode == "residual" and stats_data is not None and "statistics" in stats_data:
         sec_moments = stats_data["statistics"].get("channel_residual_second_moment_g0")
@@ -370,7 +440,7 @@ def train_latent_flow_matching(
                 f"([min={residual_scale.min():.4f}, max={residual_scale.max():.4f}])"
             )
 
-    # 6. Build Model & Freeze Backbone
+    # 7. Build Model & Freeze Backbone
     forecaster = build_and_freeze_flow_matching_model(
         ckpt_data=ckpt_data,
         device=device,
@@ -384,7 +454,7 @@ def train_latent_flow_matching(
     flow_matcher = forecaster.flow_matcher
     print(f"Model Built: LatentFlowMatcher attached. Hidden channels={hidden_channels}, blocks={num_blocks}")
 
-    # 7. Dataloaders
+    # 8. Dataloaders
     train_loader, valid_loader, _, _ = create_flow_dataloaders(
         split_type="grouped",
         split_file=split_file,
@@ -403,7 +473,7 @@ def train_latent_flow_matching(
     )
     print(f"DataLoaders: Train={len(train_loader.dataset)} windows, Valid={len(valid_loader.dataset)} windows")
 
-    # 8. Optimizer & Scheduler
+    # 9. Optimizer & Scheduler
     optimizer = torch.optim.AdamW(
         flow_matcher.parameters(),
         lr=lr,
@@ -415,7 +485,7 @@ def train_latent_flow_matching(
         eta_min=lr * 0.05,
     )
 
-    # 9. Epoch 0 Audit
+    # 10. Epoch 0 Audit
     print("\n--- Evaluating Epoch 0 Baseline ---")
     epoch0_metrics = evaluate_flow_matching_loss(
         forecaster=forecaster,
@@ -438,7 +508,7 @@ def train_latent_flow_matching(
         epoch0_ckpt_path,
     )
 
-    # 10. Training Loop
+    # 11. Training Loop
     history = []
     best_loss = epoch0_metrics["cfm_loss"]
     best_epoch = 0
@@ -478,12 +548,8 @@ def train_latent_flow_matching(
 
             loss.backward()
 
-            # Fail-closed check: verify gradient norm before optimizer step
-            total_norm = torch.nn.utils.clip_grad_norm_(flow_matcher.parameters(), max_norm=grad_clip)
-            if not torch.isfinite(total_norm):
-                raise FloatingPointError(
-                    f"Non-finite gradient norm detected at epoch {epoch}, batch {batch_idx}: {total_norm.item()}"
-                )
+            # Fail-closed check: verify gradient norm before optimizer step via shared production function
+            clip_and_validate_gradients(flow_matcher, max_norm=grad_clip, epoch=epoch, batch_idx=batch_idx)
 
             optimizer.step()
 
@@ -517,6 +583,19 @@ def train_latent_flow_matching(
             best_loss = val_cfm_loss
             best_epoch = epoch
             best_path = os.path.join(output_dir, "best_latent_flow_matcher.pt")
+
+            residual_stats_info = None
+            if residual_scale is not None and actual_stats_path:
+                stats_sha = compute_file_sha256(actual_stats_path)
+                residual_stats_info = {
+                    "path": actual_stats_path,
+                    "sha256": stats_sha,
+                    "d0_sha256": d0_sha256,
+                    "scale_definition": "sqrt(channel_residual_second_moment_g0 + 1e-6)",
+                    "scale_min": float(residual_scale.min()),
+                    "scale_max": float(residual_scale.max()),
+                }
+
             torch.save(
                 {
                     "flow_matcher_state_dict": flow_matcher.state_dict(),
@@ -540,7 +619,7 @@ def train_latent_flow_matching(
                             "normalizer_file": normalizer_path,
                             "normalizer_hash": runtime_norm_hash,
                         },
-                        "residual_stats_file": actual_stats_path,
+                        "residual_statistics": residual_stats_info,
                         "git_commit": get_git_commit(),
                         "is_git_dirty": is_git_dirty(),
                         "seed": seed,
@@ -551,7 +630,7 @@ def train_latent_flow_matching(
             )
             print(f"  --> Saved new best checkpoint to {best_path} (Val Loss: {val_cfm_loss:.6f})")
 
-    # 11. Final summary with explicit governance status
+    # 12. Final summary with explicit governance status
     selection_status = "IMPROVED" if best_epoch > 0 else "NO_IMPROVEMENT_OVER_EPOCH0"
     selected_ckpt = "best_latent_flow_matcher.pt" if best_epoch > 0 else "epoch0_baseline.pt"
     summary = {
@@ -586,6 +665,11 @@ def main():
         default="outputs/normalization/latent_residual_stats.json",
         help="Path to Phase 0 latent residual statistics JSON for scale normalization",
     )
+    parser.add_argument(
+        "--disable-residual-normalization",
+        action="store_true",
+        help="Explicitly disable residual scale normalization for ablation experiments",
+    )
     default_data_root = os.environ.get(
         "SHEAR_FLOW_DATA_DIR",
         "/root/autodl-tmp/datasets/shear_flow" if os.path.exists("/root/autodl-tmp/datasets/shear_flow") else None,
@@ -613,6 +697,7 @@ def main():
         normalizer_path=args.normalizer_path,
         split_file=args.split_file,
         residual_stats_path=args.residual_stats_path,
+        disable_residual_normalization=args.disable_residual_normalization,
         output_dir=args.output_dir,
         data_root=args.data_root,
         epochs=args.epochs,
