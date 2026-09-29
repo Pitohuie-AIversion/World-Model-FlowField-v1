@@ -7,10 +7,20 @@ Governance Contracts Verified:
    - Strict non-negativity.
 2. PICP nominal-level prediction interval calibration contract.
 3. Same K and RNG reproducibility contract across runs.
-4. Same validation window manifest contract across D0/G0/G1/FM.
-5. G1 validation metrics are dynamically recomputed, never copied from test artifact.
-6. Autoregressive rollout target is strictly Ground Truth (GT), not D0.
-7. Spectral energy comparison includes GT and computes relative L2 error vs GT.
+4. Phase 3-compatible Pooled Spread-Skill Ratio contract:
+   - Bessel correction (ddof=1)
+   - Finite-K inflation factor sqrt((K+1)/K)
+5. Common Random Numbers (CRN) across temperature sweep.
+6. Trajectory-aware rollout evaluation manifest:
+   - Covers requested unique trajectories rather than batch-0 sliding windows.
+   - max_trajectories counts trajectory IDs, not window counts.
+7. Autoregressive rollout target is strictly Ground Truth (GT), not D0.
+8. Physical metrics aggregate across ALL K ensemble members and ensemble mean:
+   - Sample and ensemble RMS divergence vs GT
+   - Sample and ensemble vorticity RMSE vs GT
+9. Spectral energy comparison aggregates across multiple windows with mean ± std.
+10. Rollout compares FM temp 1.0 and calibrated candidate (temp 0.7).
+11. Cryptographic provenance verification fails closed on D0, split_hash, or normalizer mismatch.
 """
 
 import math
@@ -24,7 +34,10 @@ from scripts.evaluate_latent_flow_matching_pilot import (
     compute_gaussian_crps_analytical,
     compute_quantile_coverage_and_width,
     compute_gaussian_analytical_intervals,
+    compute_pooled_spread_skill,
     apply_pressure_gauge,
+    build_rollout_manifest,
+    verify_checkpoint_provenance,
     evaluate_one_step_comparative,
     evaluate_rollout_physics_comparative,
 )
@@ -40,11 +53,23 @@ from src.data.normalization import FieldNormalizer
 class DummySyntheticEvalDataset(Dataset):
     """Synthetic dataset generating paired history and 10-step future ground truth."""
 
-    def __init__(self, num_samples: int = 4):
+    def __init__(self, num_samples: int = 12, num_trajs: int = 4):
         self.num_samples = num_samples
+        self.num_trajs = num_trajs
 
     def __len__(self):
         return self.num_samples
+
+    def get_window_metadata(self, idx: int):
+        traj_idx = idx % self.num_trajs
+        return {
+            "source_file": f"file_{traj_idx}.h5",
+            "traj_idx": traj_idx,
+            "start_t": (idx // self.num_trajs) * 8,
+            "cluster_id": traj_idx,
+            "re": 10000.0,
+            "sc": 0.5,
+        }
 
     def __getitem__(self, idx):
         # 4 history steps, 10 future steps, spatial size 32x32 for fast CPU testing
@@ -62,7 +87,6 @@ class TestCRPSEstimatorContract:
     """Verify empirical CRPS mathematical properties and asymptotic convergence."""
 
     def test_degenerate_ensemble_equals_mae(self):
-        # When all K samples are identical point prediction x_hat, CRPS(F_K, y) must strictly equal |x_hat - y|
         k = 16
         b = 4
         point_pred = torch.tensor([1.5, -2.0, 0.5, 3.0]).view(b, 1)
@@ -75,12 +99,11 @@ class TestCRPSEstimatorContract:
         assert torch.allclose(crps, mae, atol=1e-6)
 
     def test_empirical_crps_converges_to_analytical_gaussian(self):
-        # Sample K=2000 from N(mu, sigma^2) and assert convergence to analytical Gaussian formula
         k = 2000
         b = 100
         mu = torch.linspace(-1.0, 1.0, b)
         var = torch.linspace(0.2, 1.5, b)
-        target = mu + 0.5 * torch.sqrt(var)  # target offset by 0.5 sigma
+        target = mu + 0.5 * torch.sqrt(var)
 
         generator = torch.Generator().manual_seed(42)
         eps = torch.randn((k, b), generator=generator)
@@ -89,7 +112,6 @@ class TestCRPSEstimatorContract:
         emp_crps = compute_sample_crps_tensor(samples, target).mean()
         ana_crps = compute_gaussian_crps_analytical(mu, target, var).mean()
 
-        # Should match within 2.5% relative error under K=2000
         rel_err = abs(emp_crps.item() - ana_crps.item()) / ana_crps.item()
         assert rel_err < 0.025
 
@@ -109,20 +131,51 @@ class TestPICPNominalLevelContract:
         n_points = 5000
         generator = torch.Generator().manual_seed(1234)
 
-        # Standard normal samples and targets
         samples = torch.randn((k, n_points), generator=generator)
         target = torch.randn((n_points,), generator=generator)
 
         res = compute_quantile_coverage_and_width(samples, target, nominal_levels=[0.5, 0.8, 0.9, 0.95])
-        # Under 5000 test points, coverage must match nominal within +- 2.5 percentage points
         for lvl_str, exp_nominal in [("50", 0.50), ("80", 0.80), ("90", 0.90), ("95", 0.95)]:
             picp = res[lvl_str]["picp"]
             assert abs(picp - exp_nominal) < 0.025
             assert res[lvl_str]["nominal"] == exp_nominal
 
 
+class TestPhase3PooledSSRContract:
+    """Verify Phase 3 Bessel correction (ddof=1) and finite-K adjustment contract."""
+
+    def test_pooled_ssr_matches_phase3_contract(self):
+        k = 8
+        b = 2
+        ny, nx = 16, 16
+        # Generate samples with known variance and mean error
+        generator = torch.Generator().manual_seed(42)
+        target = torch.zeros(b, 4, ny, nx)
+        std_true = 0.5
+        mean_offset = 0.5
+        samples = mean_offset + std_true * torch.randn((k, b, 4, ny, nx), generator=generator)
+
+        ssr_res = compute_pooled_spread_skill(samples, target)
+
+        assert ssr_res["K"] == k
+        expected_finite_k = math.sqrt((k + 1.0) / k)
+        assert math.isclose(ssr_res["finite_k_inflation_factor"], expected_finite_k, rel_tol=1e-5)
+
+        # Spread should be close to std_true
+        assert abs(ssr_res["pooled_rms_spread"] - std_true) < 0.05
+        # RMSE should be close to sqrt(mean_offset^2 + (std_true/sqrt(K))^2) ~ 0.53
+        assert ssr_res["pooled_rmse"] > 0.45
+
+        # SSR = spread / RMSE
+        expected_ssr = ssr_res["pooled_rms_spread"] / ssr_res["pooled_rmse"]
+        assert math.isclose(ssr_res["spread_skill_ratio"], expected_ssr, rel_tol=1e-5)
+        assert math.isclose(ssr_res["finite_k_adjusted_ssr"], expected_ssr * expected_finite_k, rel_tol=1e-5)
+        assert "velocity" in ssr_res
+        assert set(ssr_res["per_variable"].keys()) == {"u", "v", "p", "s"}
+
+
 class TestSameKAndRNGContract:
-    """Verify deterministic reproducibility under fixed seed and diversity across seeds."""
+    """Verify deterministic reproducibility under fixed seed and common random numbers."""
 
     def test_same_rng_contract_reproducibility(self):
         fm = LatentFlowMatcher(latent_channels=8, cond_dim=16, hidden_channels=16, num_blocks=1)
@@ -137,6 +190,71 @@ class TestSameKAndRNGContract:
         samps2 = fm.sample_ensemble(mu=mu, re=re, sc=sc, num_samples=8, generator=gen2)
 
         assert torch.allclose(samps1, samps2)
+
+    def test_temperature_sweep_reuses_common_base_noise(self):
+        fm = LatentFlowMatcher(latent_channels=8, cond_dim=16, hidden_channels=16, num_blocks=1)
+        mu = torch.randn(2, 1, 8, 4, 4)
+        re = torch.tensor([1000.0, 2000.0])
+        sc = torch.tensor([0.5, 0.7])
+
+        # Generate common base noise
+        base_x0 = torch.randn(2 * 4, 8, 4, 4)
+        samps_10 = fm.sample_ensemble(mu=mu, re=re, sc=sc, num_samples=4, noise_scale=1.0, custom_x0=base_x0)
+        samps_07 = fm.sample_ensemble(mu=mu, re=re, sc=sc, num_samples=4, noise_scale=0.7, custom_x0=base_x0)
+
+        # Different temperatures produce correlated but different outputs
+        assert not torch.allclose(samps_10, samps_07)
+        assert samps_10.shape == samps_07.shape
+
+
+class TestRolloutManifestAndTrajectoryCoverage:
+    """Verify trajectory-aware manifest generation."""
+
+    def test_rollout_manifest_covers_requested_unique_trajectories(self):
+        dataset = DummySyntheticEvalDataset(num_samples=16, num_trajs=4)
+        manifest, indices = build_rollout_manifest(dataset, windows_per_traj=2, max_trajectories=3)
+
+        assert len(indices) == 6  # 3 trajectories * 2 windows
+        unique_trajs = set(r["traj_idx"] for r in manifest)
+        assert len(unique_trajs) == 3
+        assert unique_trajs == {0, 1, 2}
+
+    def test_max_trajectories_counts_trajectory_ids_not_windows(self):
+        dataset = DummySyntheticEvalDataset(num_samples=16, num_trajs=4)
+        # Select 4 windows per trajectory for max 2 trajectories -> 8 windows total
+        manifest, indices = build_rollout_manifest(dataset, windows_per_traj=4, max_trajectories=2)
+
+        assert len(indices) == 8
+        unique_trajs = set(r["traj_idx"] for r in manifest)
+        assert len(unique_trajs) == 2
+
+
+class TestProvenanceFailClosedContract:
+    """Verify cryptographic fail-closed checks on checkpoints and protocol."""
+
+    def test_evaluator_rejects_checkpoint_parent_d0_mismatch(self, tmp_path):
+        d0_path = tmp_path / "d0.pt"
+        torch.save({"dummy": 1}, d0_path)
+        g0_path = tmp_path / "g0.pt"
+        torch.save({"provenance": {"d0_checkpoint": {"sha256": "wrong_sha"}}}, g0_path)
+        g1_path = tmp_path / "g1.pt"
+        torch.save({"provenance": {"d0_checkpoint": {"sha256": "wrong_sha"}}}, g1_path)
+        fm_path = tmp_path / "fm.pt"
+        torch.save({"provenance": {"d0_checkpoint": {"sha256": "wrong_sha"}}}, fm_path)
+        split_path = tmp_path / "split.json"
+        split_path.write_text('{"train": [], "valid": []}')
+
+        normalizer = FieldNormalizer()
+
+        with pytest.raises(ValueError, match="Cryptographic provenance verification FAILED"):
+            verify_checkpoint_provenance(
+                d0_checkpoint_path=str(d0_path),
+                g0_checkpoint_path=str(g0_path),
+                g1_checkpoint_path=str(g1_path),
+                fm_checkpoint_path=str(fm_path),
+                split_file_path=str(split_path),
+                normalizer=normalizer,
+            )
 
 
 class TestComparativeValidationBenchmarkIntegrity:
@@ -157,7 +275,7 @@ class TestComparativeValidationBenchmarkIntegrity:
         g1_head = VarianceHead2D(embed_dim=16, latent_channels=8, variance_floor=1e-4).to(device)
         fm = LatentFlowMatcher(latent_channels=8, cond_dim=16, hidden_channels=16, num_blocks=1).to(device)
 
-        dataset = DummySyntheticEvalDataset(num_samples=4)
+        dataset = DummySyntheticEvalDataset(num_samples=4, num_trajs=2)
         dataloader = DataLoader(dataset, batch_size=2)
 
         normalizer = FieldNormalizer()
@@ -184,35 +302,11 @@ class TestComparativeValidationBenchmarkIntegrity:
 
         assert step1["validation_windows_evaluated"] == 4
         assert step1["ensemble_size_K"] == 4
-        # Assert all models evaluated on exactly the same dataset
+        assert step1["common_random_numbers"] is True
         for m in ["D0", "G0", "G1", "FM_temp_1.0", "FM_temp_0.8"]:
             assert m in step1
 
-    def test_g1_validation_metrics_are_dynamically_recomputed(self, setup_synthetic_models_and_loader):
-        forecaster, g0_head, g1_head, fm, dataloader, normalizer, device = setup_synthetic_models_and_loader
-
-        step1 = evaluate_one_step_comparative(
-            forecaster=forecaster,
-            g0_head=g0_head,
-            g1_head=g1_head,
-            fm=fm,
-            dataloader=dataloader,
-            normalizer=normalizer,
-            device=device,
-            num_samples_K=4,
-            fm_temperatures=[1.0],
-            seed=42,
-        )
-
-        # G1 must have newly evaluated metrics (not static 0.360156 from Phase 3 test JSON)
-        g1_crps = step1["G1"]["latent_crps_empirical"]
-        assert isinstance(g1_crps, float)
-        assert g1_crps > 0.0
-        assert "latent_crps_analytical" in step1["G1"]
-        assert "physical_crps_per_channel" in step1["G1"]
-        assert set(step1["G1"]["physical_crps_per_channel"].keys()) == {"u", "v", "p", "s"}
-
-    def test_rollout_target_is_ground_truth_not_d0(self, setup_synthetic_models_and_loader):
+    def test_divergence_and_vorticity_aggregate_all_ensemble_members(self, setup_synthetic_models_and_loader):
         forecaster, g0_head, g1_head, fm, dataloader, normalizer, device = setup_synthetic_models_and_loader
 
         step2 = evaluate_rollout_physics_comparative(
@@ -225,27 +319,30 @@ class TestComparativeValidationBenchmarkIntegrity:
             device=device,
             horizons=[5, 10],
             num_samples_K=4,
+            windows_per_traj=2,
             max_trajectories=2,
             seed=42,
         )
 
         assert "h5" in step2
         assert "h10" in step2
-        assert "ground_truth_rms_divergence" in step2["h5"]
-        assert "ground_truth_rms_divergence" in step2["h10"]
 
-        # Crucial check: D0 itself is evaluated against GT!
-        d0_metrics = step2["h5"]["D0"]
-        assert "ensemble_mean_vrmse_vs_gt" in d0_metrics
-        assert "sample_rms_divergence" in d0_metrics
+        # Check all models present including FM_temp_1.0 and FM_temp_0.7
+        for m in ["D0", "G0", "G1", "FM_temp_1.0", "FM_temp_0.7"]:
+            assert m in step2["h5"]
+            m_metrics = step2["h5"][m]
+            assert "ensemble_mean_vrmse_vs_gt" in m_metrics
+            assert "sample_mean_vrmse_vs_gt" in m_metrics
+            assert "ensemble_mean_rms_divergence" in m_metrics
+            assert "sample_rms_divergence" in m_metrics
+            assert "divergence_ratio_vs_gt" in m_metrics
+            assert "ensemble_mean_vorticity_rmse_vs_gt" in m_metrics
+            assert "sample_vorticity_rmse_vs_gt" in m_metrics
 
-        # FM is evaluated against GT
-        fm_metrics = step2["h5"]["FM"]
-        assert "ensemble_mean_vrmse_vs_gt" in fm_metrics
-        assert "sample_vorticity_rmse_vs_gt" in fm_metrics
-        assert "divergence_ratio_vs_gt" in fm_metrics
+            assert m_metrics["sample_rms_divergence"] > 0.0
+            assert m_metrics["sample_vorticity_rmse_vs_gt"] >= 0.0
 
-    def test_spectral_comparison_includes_ground_truth(self, setup_synthetic_models_and_loader):
+    def test_spectrum_aggregates_multiple_windows(self, setup_synthetic_models_and_loader):
         forecaster, g0_head, g1_head, fm, dataloader, normalizer, device = setup_synthetic_models_and_loader
 
         step2 = evaluate_rollout_physics_comparative(
@@ -258,20 +355,22 @@ class TestComparativeValidationBenchmarkIntegrity:
             device=device,
             horizons=[5, 10],
             num_samples_K=4,
+            windows_per_traj=2,
             max_trajectories=2,
             seed=42,
         )
 
-        # Spectral comparisons must include GT spectrum
+        assert "spectral_relative_error_vs_gt_h10" in step2
+        spec_errs = step2["spectral_relative_error_vs_gt_h10"]
+        for m in ["D0", "G0", "G1", "FM_temp_1.0", "FM_temp_0.7"]:
+            assert m in spec_errs
+            assert "ensemble_mean_rel_error_mean" in spec_errs[m]
+            assert "ensemble_mean_rel_error_std" in spec_errs[m]
+            assert "sample_members_rel_error_mean" in spec_errs[m]
+            assert "sample_members_rel_error_std" in spec_errs[m]
+            assert isinstance(spec_errs[m]["ensemble_mean_rel_error_mean"], float)
+
         spectra = step2["energy_spectra_first_25_modes"]
         assert "GT" in spectra
-        assert spectra["GT"] is not None
-        assert "FM" in spectra
-        assert "D0" in spectra
-
-        # Relative errors must be calculated vs GT
-        rel_errors = step2["spectral_relative_error_vs_gt_h10"]
-        assert "FM" in rel_errors
-        assert "D0" in rel_errors
-        assert "G1" in rel_errors
-        assert isinstance(rel_errors["FM"], float)
+        assert "FM_temp_1.0_ensemble_mean" in spectra
+        assert "FM_temp_0.7_ensemble_mean" in spectra

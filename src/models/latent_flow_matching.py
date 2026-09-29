@@ -745,6 +745,7 @@ class LatentFlowMatcher(nn.Module):
         deterministic_fallback: bool = False,
         generator: Optional[torch.Generator] = None,
         seed: Optional[int] = None,
+        custom_x0: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Sample an ensemble of K independent trajectories in parallel.
 
@@ -759,6 +760,8 @@ class LatentFlowMatcher(nn.Module):
             deterministic_fallback: If True, strictly returns mu without ODE sampling.
             generator: Optional PyTorch Generator.
             seed: Optional integer seed.
+            custom_x0: Optional standard normal base noise tensor for Common Random Numbers.
+                       Can be (B, K, 1, C_z, Hz, Wz) or (B * K, 1, C_z, Hz, Wz) or (B * K, C_z, Hz, Wz).
 
         Returns:
             z_ensemble: Sampled tensor of shape (B, K, 1, C_z, H_z, W_z).
@@ -774,6 +777,16 @@ class LatentFlowMatcher(nn.Module):
         re_exp = re.repeat_interleave(k, dim=0) if re is not None else None
         sc_exp = sc.repeat_interleave(k, dim=0) if sc is not None else None
 
+        flat_custom_x0 = None
+        if custom_x0 is not None:
+            if custom_x0.ndim == 6:  # (B, K, 1, C_z, Hz, Wz)
+                c_z, hz, wz = custom_x0.shape[3], custom_x0.shape[4], custom_x0.shape[5]
+                flat_custom_x0 = custom_x0.view(b * k, c_z, hz, wz)
+            elif custom_x0.ndim == 5:  # (B * K, 1, C_z, Hz, Wz)
+                flat_custom_x0 = custom_x0.squeeze(1)
+            elif custom_x0.ndim == 4:  # (B * K, C_z, Hz, Wz)
+                flat_custom_x0 = custom_x0
+
         z_samples_flat = self.sample_next_latent(
             mu=mu_exp,
             re=re_exp,
@@ -784,6 +797,7 @@ class LatentFlowMatcher(nn.Module):
             deterministic_fallback=False,
             generator=generator,
             seed=seed,
+            custom_x0=flat_custom_x0,
             return_trajectory=False,
         )  # (B * K, 1, C_z, H_z, W_z)
 
