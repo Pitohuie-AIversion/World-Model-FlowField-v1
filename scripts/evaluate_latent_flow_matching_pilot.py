@@ -358,7 +358,10 @@ def load_all_models_for_evaluation(
     # FM Flow Matcher
     fm_data = torch.load(fm_checkpoint_path, map_location="cpu", weights_only=False)
     fm_cfg = fm_data.get("config", {})
-    residual_scale = fm_data.get("provenance", {}).get("residual_scale", None)
+    fm_sd = strip_compiled_prefix(fm_data["flow_matcher_state_dict"])
+    residual_scale = fm_sd.get("residual_scale", None)
+    if residual_scale is None:
+        residual_scale = fm_data.get("provenance", {}).get("residual_scale", None)
     if residual_scale is None and "residual_statistics" in fm_data.get("provenance", {}):
         residual_scale = fm_data["provenance"]["residual_statistics"].get("scale_vector")
     fm = LatentFlowMatcher(
@@ -368,7 +371,7 @@ def load_all_models_for_evaluation(
         num_blocks=fm_cfg.get("num_blocks", 4),
         residual_scale=residual_scale,
     ).to(device)
-    fm.load_state_dict(strip_compiled_prefix(fm_data["flow_matcher_state_dict"]), strict=True)
+    fm.load_state_dict(fm_sd, strict=True)
     fm.eval()
 
     return forecaster, g0_head, g1_head, fm
