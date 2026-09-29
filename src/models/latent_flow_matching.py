@@ -463,9 +463,12 @@ class LatentFlowMatcher(nn.Module):
             scale: Tensor or sequence of shape (C_z,) or (1, C_z, 1, 1).
         """
         scale_tensor = torch.as_tensor(scale, dtype=torch.float32)
-        if scale_tensor.numel() != self.latent_channels:
+        valid_1d = (scale_tensor.ndim == 1 and scale_tensor.shape[0] == self.latent_channels)
+        valid_4d = (scale_tensor.ndim == 4 and scale_tensor.shape == (1, self.latent_channels, 1, 1))
+        if not (valid_1d or valid_4d):
             raise ValueError(
-                f"residual_scale must have {self.latent_channels} elements, got {scale_tensor.numel()}"
+                f"residual_scale must have shape ({self.latent_channels},) or (1, {self.latent_channels}, 1, 1), "
+                f"got shape {tuple(scale_tensor.shape)}"
             )
         if not torch.isfinite(scale_tensor).all():
             raise ValueError("residual_scale contains non-finite values (NaN or Inf)")
@@ -473,10 +476,6 @@ class LatentFlowMatcher(nn.Module):
             raise ValueError("residual_scale values must be strictly positive (> 0) for all channels")
 
         if scale_tensor.ndim == 1:
-            scale_tensor = scale_tensor.view(1, -1, 1, 1)
-        elif scale_tensor.ndim == 5:
-            scale_tensor = scale_tensor.squeeze(1)
-        elif scale_tensor.ndim == 4 and scale_tensor.shape[0] != 1:
             scale_tensor = scale_tensor.view(1, -1, 1, 1)
         self.register_buffer("residual_scale", scale_tensor)
 

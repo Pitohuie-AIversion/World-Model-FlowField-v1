@@ -341,6 +341,71 @@ def evaluate_flow_matching_loss(
     }
 
 
+def build_flow_matching_checkpoint_payload(
+    flow_matcher: LatentFlowMatcher,
+    epoch: int,
+    val_cfm_loss: float,
+    hidden_channels: int,
+    num_blocks: int,
+    target_mode: str,
+    use_spatial_attn: bool,
+    residual_scale: Optional[torch.Tensor],
+    d0_checkpoint: str,
+    d0_sha256: str,
+    split_file: str,
+    runtime_split_hash: str,
+    normalizer_path: str,
+    runtime_norm_hash: str,
+    actual_stats_path: Optional[str],
+    seed: int,
+) -> Dict[str, Any]:
+    """Construct unified governed checkpoint payload for Latent Flow Matching models.
+
+    Ensures 100% schema alignment across epoch0_baseline.pt and best_latent_flow_matcher.pt.
+    """
+    residual_stats_info = None
+    if residual_scale is not None and actual_stats_path:
+        stats_sha = compute_file_sha256(actual_stats_path)
+        residual_stats_info = {
+            "path": actual_stats_path,
+            "sha256": stats_sha,
+            "d0_sha256": d0_sha256,
+            "scale_definition": "sqrt(channel_residual_second_moment_g0 + 1e-6)",
+            "scale_min": float(residual_scale.min()),
+            "scale_max": float(residual_scale.max()),
+        }
+
+    return {
+        "flow_matcher_state_dict": flow_matcher.state_dict(),
+        "epoch": int(epoch),
+        "val_cfm_loss": float(val_cfm_loss),
+        "config": {
+            "hidden_channels": hidden_channels,
+            "num_blocks": num_blocks,
+            "target_mode": target_mode,
+            "use_spatial_attn": use_spatial_attn,
+            "sigma_min": flow_matcher.sigma_min,
+            "num_flow_steps": 10,
+            "solver": "midpoint",
+            "residual_scale_applied": residual_scale is not None,
+        },
+        "provenance": {
+            "d0_checkpoint": {"path": d0_checkpoint, "sha256": d0_sha256},
+            "data_protocol": {
+                "split_file": split_file,
+                "split_hash": runtime_split_hash,
+                "normalizer_file": normalizer_path,
+                "normalizer_hash": runtime_norm_hash,
+            },
+            "residual_statistics": residual_stats_info,
+            "git_commit": get_git_commit(),
+            "is_git_dirty": is_git_dirty(),
+            "seed": seed,
+            "saved_at_utc": datetime.now(timezone.utc).isoformat(),
+        },
+    }
+
+
 def train_latent_flow_matching(
     d0_checkpoint: str,
     normalizer_path: str,
@@ -497,16 +562,25 @@ def train_latent_flow_matching(
     print(f"Epoch 0 Baseline CFM Loss: {epoch0_metrics['cfm_loss']:.6f}")
 
     epoch0_ckpt_path = os.path.join(output_dir, "epoch0_baseline.pt")
-    torch.save(
-        {
-            "flow_matcher_state_dict": flow_matcher.state_dict(),
-            "epoch": 0,
-            "val_cfm_loss": epoch0_metrics["cfm_loss"],
-            "d0_sha256": d0_sha256,
-            "residual_scale_applied": residual_scale is not None,
-        },
-        epoch0_ckpt_path,
+    epoch0_payload = build_flow_matching_checkpoint_payload(
+        flow_matcher=flow_matcher,
+        epoch=0,
+        val_cfm_loss=epoch0_metrics["cfm_loss"],
+        hidden_channels=hidden_channels,
+        num_blocks=num_blocks,
+        target_mode=target_mode,
+        use_spatial_attn=use_spatial_attn,
+        residual_scale=residual_scale,
+        d0_checkpoint=d0_checkpoint,
+        d0_sha256=d0_sha256,
+        split_file=split_file,
+        runtime_split_hash=runtime_split_hash,
+        normalizer_path=normalizer_path,
+        runtime_norm_hash=runtime_norm_hash,
+        actual_stats_path=actual_stats_path,
+        seed=seed,
     )
+    torch.save(epoch0_payload, epoch0_ckpt_path)
 
     # 11. Training Loop
     history = []
@@ -583,51 +657,25 @@ def train_latent_flow_matching(
             best_loss = val_cfm_loss
             best_epoch = epoch
             best_path = os.path.join(output_dir, "best_latent_flow_matcher.pt")
-
-            residual_stats_info = None
-            if residual_scale is not None and actual_stats_path:
-                stats_sha = compute_file_sha256(actual_stats_path)
-                residual_stats_info = {
-                    "path": actual_stats_path,
-                    "sha256": stats_sha,
-                    "d0_sha256": d0_sha256,
-                    "scale_definition": "sqrt(channel_residual_second_moment_g0 + 1e-6)",
-                    "scale_min": float(residual_scale.min()),
-                    "scale_max": float(residual_scale.max()),
-                }
-
-            torch.save(
-                {
-                    "flow_matcher_state_dict": flow_matcher.state_dict(),
-                    "epoch": epoch,
-                    "val_cfm_loss": val_cfm_loss,
-                    "config": {
-                        "hidden_channels": hidden_channels,
-                        "num_blocks": num_blocks,
-                        "target_mode": target_mode,
-                        "use_spatial_attn": use_spatial_attn,
-                        "sigma_min": flow_matcher.sigma_min,
-                        "num_flow_steps": 10,
-                        "solver": "midpoint",
-                        "residual_scale_applied": residual_scale is not None,
-                    },
-                    "provenance": {
-                        "d0_checkpoint": {"path": d0_checkpoint, "sha256": d0_sha256},
-                        "data_protocol": {
-                            "split_file": split_file,
-                            "split_hash": runtime_split_hash,
-                            "normalizer_file": normalizer_path,
-                            "normalizer_hash": runtime_norm_hash,
-                        },
-                        "residual_statistics": residual_stats_info,
-                        "git_commit": get_git_commit(),
-                        "is_git_dirty": is_git_dirty(),
-                        "seed": seed,
-                        "saved_at_utc": datetime.now(timezone.utc).isoformat(),
-                    },
-                },
-                best_path,
+            best_payload = build_flow_matching_checkpoint_payload(
+                flow_matcher=flow_matcher,
+                epoch=epoch,
+                val_cfm_loss=val_cfm_loss,
+                hidden_channels=hidden_channels,
+                num_blocks=num_blocks,
+                target_mode=target_mode,
+                use_spatial_attn=use_spatial_attn,
+                residual_scale=residual_scale,
+                d0_checkpoint=d0_checkpoint,
+                d0_sha256=d0_sha256,
+                split_file=split_file,
+                runtime_split_hash=runtime_split_hash,
+                normalizer_path=normalizer_path,
+                runtime_norm_hash=runtime_norm_hash,
+                actual_stats_path=actual_stats_path,
+                seed=seed,
             )
+            torch.save(best_payload, best_path)
             print(f"  --> Saved new best checkpoint to {best_path} (Val Loss: {val_cfm_loss:.6f})")
 
     # 12. Final summary with explicit governance status

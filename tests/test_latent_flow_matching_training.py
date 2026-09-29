@@ -31,6 +31,13 @@ from scripts.train_latent_flow_matching import (
     evaluate_flow_matching_loss,
     train_latent_flow_matching,
     clip_and_validate_gradients,
+    build_flow_matching_checkpoint_payload,
+)
+from src.data.normalization import FieldNormalizer
+from src.utils.provenance import (
+    compute_file_sha256,
+    compute_normalizer_hash,
+    compute_split_hash_from_file,
 )
 from src.models.latent_forecaster import LatentForecaster
 from src.models.latent_transformer import LatentSTTransformer
@@ -575,3 +582,319 @@ class TestBuildAndFreezeModelGovernance:
             assert not p.requires_grad
         for p in frozen_model.flow_matcher.parameters():
             assert p.requires_grad
+
+
+class TestModelSelectionGovernance:
+    """Verify model selection branch contracts, specifically NO_IMPROVEMENT_OVER_EPOCH0."""
+
+    def test_no_improvement_selects_full_governed_epoch0_checkpoint(self, tmp_path, monkeypatch):
+        # 1. Setup cryptographic contracts
+        norm = FieldNormalizer()
+        norm.mean = torch.zeros(4)
+        norm.std = torch.ones(4)
+        norm_path = tmp_path / "normalizer.pt"
+        torch.save(norm.state_dict(), norm_path)
+        norm_hash = compute_normalizer_hash(norm)
+
+        split_path = tmp_path / "split.json"
+        with open(split_path, "w") as f:
+            json.dump({"train": ["sim_001"], "val": ["sim_002"]}, f)
+        runtime_split_hash = compute_split_hash_from_file(str(split_path))
+
+        # 2. Build minimal valid D0 checkpoint
+        enc = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
+        dec = Decoder2D(latent_channels=64, out_channels=4, base_channels=32)
+        trans = LatentSTTransformer(
+            latent_channels=64,
+            embed_dim=32,
+            cond_dim=128,
+            depth=1,
+            num_heads=2,
+            use_spatial_pos=False,
+        )
+        forecaster = LatentForecaster(enc, trans, dec)
+        d0_path = tmp_path / "d0.pt"
+        torch.save(
+            {
+                "config": {
+                    "embed_dim": 32,
+                    "depth": 1,
+                    "num_heads": 2,
+                    "prediction_mode": "direct",
+                    "use_spatial_pos": False,
+                },
+                "model_state_dict": forecaster.state_dict(),
+                "split_hash": runtime_split_hash,
+                "normalizer_hash": norm_hash,
+                "seed": 42,
+            },
+            d0_path,
+        )
+        d0_sha = compute_file_sha256(str(d0_path))
+
+        # 3. Build valid residual statistics JSON matching D0 and data protocol
+        stats_path = tmp_path / "residual_stats.json"
+        with open(stats_path, "w") as f:
+            json.dump(
+                {
+                    "d0_checkpoint": {"sha256": d0_sha},
+                    "data_protocol": {
+                        "split_hash": runtime_split_hash,
+                        "normalizer_hash": norm_hash,
+                    },
+                    "statistics": {
+                        "channel_residual_second_moment_g0": [1.0] * 64,
+                    },
+                },
+                f,
+            )
+        stats_sha = compute_file_sha256(str(stats_path))
+
+        # 4. Mock dataloaders with dummy synthetic flow dataset
+        train_ds = DummySyntheticFlowDataset(num_samples=4)
+        val_ds = DummySyntheticFlowDataset(num_samples=4)
+        train_loader = DataLoader(train_ds, batch_size=2)
+        val_loader = DataLoader(val_ds, batch_size=2)
+        monkeypatch.setattr(
+            "scripts.train_latent_flow_matching.create_flow_dataloaders",
+            lambda *args, **kwargs: (train_loader, val_loader, None, None),
+        )
+
+        # 5. Mock evaluate_flow_matching_loss such that Epoch 0 (1.20) < Epoch 1 (1.50)
+        eval_call_count = 0
+
+        def mock_eval(*args, **kwargs):
+            nonlocal eval_call_count
+            eval_call_count += 1
+            if eval_call_count == 1:
+                # Baseline at epoch 0
+                return {"cfm_loss": 1.20, "windows_evaluated": 4, "is_valid": True}
+            else:
+                # Worse loss at epoch 1
+                return {"cfm_loss": 1.50, "windows_evaluated": 4, "is_valid": True}
+
+        monkeypatch.setattr(
+            "scripts.train_latent_flow_matching.evaluate_flow_matching_loss",
+            mock_eval,
+        )
+
+        # 6. Execute training
+        out_dir = tmp_path / "output_no_improvement"
+        summary = train_latent_flow_matching(
+            d0_checkpoint=str(d0_path),
+            normalizer_path=str(norm_path),
+            split_file=str(split_path),
+            residual_stats_path=str(stats_path),
+            output_dir=str(out_dir),
+            epochs=1,
+            batch_size=2,
+            hidden_channels=16,
+            num_blocks=1,
+            seed=42,
+        )
+
+        # 7. Assert model selection summary contract
+        assert summary["best_epoch"] == 0
+        assert summary["epoch0_val_cfm_loss"] == pytest.approx(1.20)
+        assert summary["best_val_cfm_loss"] == pytest.approx(1.20)
+        assert summary["selection_status"] == "NO_IMPROVEMENT_OVER_EPOCH0"
+        assert summary["selected_checkpoint"] == "epoch0_baseline.pt"
+
+        # Checkpoint files on disk
+        epoch0_ckpt_path = out_dir / "epoch0_baseline.pt"
+        best_ckpt_path = out_dir / "best_latent_flow_matcher.pt"
+        assert epoch0_ckpt_path.exists()
+        assert not best_ckpt_path.exists(), "best_latent_flow_matcher.pt must not exist when best_epoch is 0"
+
+        # 8. Load epoch0 checkpoint and assert full governed schema
+        ckpt = torch.load(epoch0_ckpt_path, weights_only=False)
+
+        assert "flow_matcher_state_dict" in ckpt
+        assert ckpt["epoch"] == 0
+        assert ckpt["val_cfm_loss"] == pytest.approx(1.20)
+        assert "config" in ckpt
+        assert "provenance" in ckpt
+
+        # Config assertions
+        cfg = ckpt["config"]
+        assert cfg["hidden_channels"] == 16
+        assert cfg["num_blocks"] == 1
+        assert cfg["target_mode"] == "residual"
+        assert cfg["solver"] == "midpoint"
+        assert cfg["residual_scale_applied"] is True
+
+        # Provenance assertions
+        prov = ckpt["provenance"]
+        assert prov["d0_checkpoint"]["sha256"] == d0_sha
+        assert prov["data_protocol"]["split_hash"] == runtime_split_hash
+        assert prov["data_protocol"]["normalizer_hash"] == norm_hash
+        assert prov["residual_statistics"]["sha256"] == stats_sha
+        assert prov["residual_statistics"]["d0_sha256"] == d0_sha
+        assert prov["residual_statistics"]["scale_definition"] == "sqrt(channel_residual_second_moment_g0 + 1e-6)"
+        assert prov["seed"] == 42
+        assert "git_commit" in prov
+        assert "is_git_dirty" in prov
+        assert "saved_at_utc" in prov
+
+        # 9. Schema equivalence check between epoch0 checkpoint and governed payload reference
+        dummy_fm = LatentFlowMatcher(
+            latent_channels=64,
+            cond_dim=128,
+            hidden_channels=16,
+            num_blocks=1,
+            residual_scale=torch.ones(64),
+        )
+        ref_payload = build_flow_matching_checkpoint_payload(
+            flow_matcher=dummy_fm,
+            epoch=1,
+            val_cfm_loss=1.10,
+            hidden_channels=16,
+            num_blocks=1,
+            target_mode="residual",
+            use_spatial_attn=True,
+            residual_scale=torch.ones(64),
+            d0_checkpoint=str(d0_path),
+            d0_sha256=d0_sha,
+            split_file=str(split_path),
+            runtime_split_hash=runtime_split_hash,
+            normalizer_path=str(norm_path),
+            runtime_norm_hash=norm_hash,
+            actual_stats_path=str(stats_path),
+            seed=42,
+        )
+
+        def extract_nested_keys(d, prefix=""):
+            keys = set()
+            for k, v in d.items():
+                cur = f"{prefix}.{k}" if prefix else k
+                keys.add(cur)
+                if isinstance(v, dict):
+                    keys.update(extract_nested_keys(v, cur))
+            return keys
+
+        assert extract_nested_keys(ckpt) == extract_nested_keys(ref_payload)
+
+    def test_improved_training_selects_best_checkpoint_with_matching_schema(self, tmp_path, monkeypatch):
+        # 1. Setup cryptographic contracts
+        norm = FieldNormalizer()
+        norm.mean = torch.zeros(4)
+        norm.std = torch.ones(4)
+        norm_path = tmp_path / "normalizer.pt"
+        torch.save(norm.state_dict(), norm_path)
+        norm_hash = compute_normalizer_hash(norm)
+
+        split_path = tmp_path / "split.json"
+        with open(split_path, "w") as f:
+            json.dump({"train": ["sim_001"], "val": ["sim_002"]}, f)
+        runtime_split_hash = compute_split_hash_from_file(str(split_path))
+
+        # 2. Build D0 checkpoint
+        enc = Encoder2D(in_channels=4, latent_channels=64, base_channels=32)
+        dec = Decoder2D(latent_channels=64, out_channels=4, base_channels=32)
+        trans = LatentSTTransformer(
+            latent_channels=64,
+            embed_dim=32,
+            cond_dim=128,
+            depth=1,
+            num_heads=2,
+            use_spatial_pos=False,
+        )
+        forecaster = LatentForecaster(enc, trans, dec)
+        d0_path = tmp_path / "d0.pt"
+        torch.save(
+            {
+                "config": {
+                    "embed_dim": 32,
+                    "depth": 1,
+                    "num_heads": 2,
+                    "prediction_mode": "direct",
+                    "use_spatial_pos": False,
+                },
+                "model_state_dict": forecaster.state_dict(),
+                "split_hash": runtime_split_hash,
+                "normalizer_hash": norm_hash,
+                "seed": 42,
+            },
+            d0_path,
+        )
+        d0_sha = compute_file_sha256(str(d0_path))
+
+        # 3. Residual stats
+        stats_path = tmp_path / "residual_stats.json"
+        with open(stats_path, "w") as f:
+            json.dump(
+                {
+                    "d0_checkpoint": {"sha256": d0_sha},
+                    "data_protocol": {
+                        "split_hash": runtime_split_hash,
+                        "normalizer_hash": norm_hash,
+                    },
+                    "statistics": {
+                        "channel_residual_second_moment_g0": [1.0] * 64,
+                    },
+                },
+                f,
+            )
+
+        # 4. Mock dataloaders
+        train_ds = DummySyntheticFlowDataset(num_samples=4)
+        val_ds = DummySyntheticFlowDataset(num_samples=4)
+        train_loader = DataLoader(train_ds, batch_size=2)
+        val_loader = DataLoader(val_ds, batch_size=2)
+        monkeypatch.setattr(
+            "scripts.train_latent_flow_matching.create_flow_dataloaders",
+            lambda *args, **kwargs: (train_loader, val_loader, None, None),
+        )
+
+        # 5. Mock evaluation: Epoch 0 (1.50) > Epoch 1 (1.10) (improvement)
+        eval_call_count = 0
+
+        def mock_eval(*args, **kwargs):
+            nonlocal eval_call_count
+            eval_call_count += 1
+            if eval_call_count == 1:
+                return {"cfm_loss": 1.50, "windows_evaluated": 4, "is_valid": True}
+            else:
+                return {"cfm_loss": 1.10, "windows_evaluated": 4, "is_valid": True}
+
+        monkeypatch.setattr(
+            "scripts.train_latent_flow_matching.evaluate_flow_matching_loss",
+            mock_eval,
+        )
+
+        # 6. Execute training
+        out_dir = tmp_path / "output_improved"
+        summary = train_latent_flow_matching(
+            d0_checkpoint=str(d0_path),
+            normalizer_path=str(norm_path),
+            split_file=str(split_path),
+            residual_stats_path=str(stats_path),
+            output_dir=str(out_dir),
+            epochs=1,
+            batch_size=2,
+            hidden_channels=16,
+            num_blocks=1,
+            seed=42,
+        )
+
+        # 7. Assert model selection
+        assert summary["best_epoch"] == 1
+        assert summary["selection_status"] == "IMPROVED"
+        assert summary["selected_checkpoint"] == "best_latent_flow_matcher.pt"
+        assert (out_dir / "epoch0_baseline.pt").exists()
+        assert (out_dir / "best_latent_flow_matcher.pt").exists()
+
+        # 8. Load both and verify 100% schema parity across actual saved files
+        epoch0_ckpt = torch.load(out_dir / "epoch0_baseline.pt", weights_only=False)
+        best_ckpt = torch.load(out_dir / "best_latent_flow_matcher.pt", weights_only=False)
+
+        def extract_nested_keys(d, prefix=""):
+            keys = set()
+            for k, v in d.items():
+                cur = f"{prefix}.{k}" if prefix else k
+                keys.add(cur)
+                if isinstance(v, dict):
+                    keys.update(extract_nested_keys(v, cur))
+            return keys
+
+        assert extract_nested_keys(epoch0_ckpt) == extract_nested_keys(best_ckpt)

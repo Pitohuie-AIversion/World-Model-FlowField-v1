@@ -578,8 +578,11 @@ class TestLatentFlowMatcherContracts:
 
     def test_residual_scale_invalid_length_raises_value_error(self):
         matcher = LatentFlowMatcher(latent_channels=4, cond_dim=8, hidden_channels=8, num_blocks=1)
-        with pytest.raises(ValueError, match="residual_scale must have 4 elements, got 3"):
+        with pytest.raises(ValueError, match=r"residual_scale must have shape \(4,\) or \(1, 4, 1, 1\)"):
             matcher.set_residual_scale([1.0, 2.0, 3.0])
+        # Also verify 2D shape (2, 2) which has numel=4 is strictly rejected
+        with pytest.raises(ValueError, match=r"residual_scale must have shape \(4,\) or \(1, 4, 1, 1\)"):
+            matcher.set_residual_scale(torch.ones(2, 2))
 
     def test_residual_scale_non_finite_raises_value_error(self):
         matcher = LatentFlowMatcher(latent_channels=4, cond_dim=8, hidden_channels=8, num_blocks=1)
