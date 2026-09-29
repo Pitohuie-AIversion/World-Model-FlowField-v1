@@ -1,0 +1,45 @@
+{
+  "branch": "R2_A",
+  "best_epoch": 1,
+  "best_val_cfm_loss": 1.181289981206258,
+  "epoch0_val_cfm_loss": 1.2569341309865316,
+  "history": [
+    {
+      "epoch": 1,
+      "train_total_cfm_loss": 1.2194645336902503,
+      "train_step1_cfm_loss": 1.0832901259624597,
+      "train_step2_cfm_loss": 1.3556389298583522,
+      "val_total_cfm_loss": 1.181289981206258,
+      "val_step1_cfm_loss": 1.059059025446574,
+      "val_step2_cfm_loss": 1.3035209703445434,
+      "lr": 1e-05
+    }
+  ],
+  "provenance": {
+    "d0_checkpoint": {
+      "path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H12/latent_transformer/best_long_vrmse.pt",
+      "sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6"
+    },
+    "parent_fm_checkpoint": {
+      "path": "outputs/checkpoints/probabilistic/flow_matching_pilot3ep/best_latent_flow_matcher.pt",
+      "sha256": "0a2ac5dc8af8e9f6d532d8e4c0452a9e679f238d4e6470d323bd21b2c473c7ec"
+    },
+    "data_protocol": {
+      "split_file": "outputs/splits/grouped_split.json",
+      "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+      "normalizer_file": "outputs/normalization/stats_grouped.pt",
+      "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec"
+    },
+    "residual_statistics": {
+      "path": "outputs/normalization/latent_residual_stats.json",
+      "sha256": "448b2c338d7ec9e3eb05c1fb1ca4d0ca2088eae2e7e6bec5fd2fab0c27978f36",
+      "d0_sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6",
+      "scale_min": 0.3063662648200989,
+      "scale_max": 1.7961349487304688
+    },
+    "git_commit": "a848578db5fc6550a7da96fc47daea5a9bb78d9c",
+    "is_git_dirty": false,
+    "seed": 42,
+    "saved_at_utc": "2026-09-29T09:53:18.538703+00:00"
+  }
+}
