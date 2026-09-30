@@ -85,6 +85,10 @@ $$\boxed{\text{Robustness of the C2 vs R2-A fine-tuning treatment} \mid \text{Fi
 | | R2-A (Treatment) | 43 | `cuda:1` | `outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/43/R2_A` |
 | **Seed 44** | C2 (Control) | 44 | **`cuda:1`** | `outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/44/C2` |
 | | R2-A (Treatment) | 44 | **`cuda:0`** | `outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/44/R2_A` |
+| **Seed 45** | C2 (Control) | 45 | **`cuda:0`** | `outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/45/C2` |
+| | R2-A (Treatment) | 45 | **`cuda:1`** | `outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/45/R2_A` |
+| **Seed 46** | C2 (Control) | 46 | **`cuda:1`** | `outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/46/C2` |
+| | R2-A (Treatment) | 46 | **`cuda:0`** | `outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/46/R2_A` |
 
 ---
 
@@ -94,16 +98,13 @@ $$\boxed{\text{Robustness of the C2 vs R2-A fine-tuning treatment} \mid \text{Fi
 严禁将验证集中的 144 个重叠滑动窗口当成 144 个独立样本进行统计假设检验。数据具有严格的层级结构：
 $$\boxed{\text{Training Seed } s \rightarrow \text{Physical Trajectory } j \in \{1,\dots,6\} \rightarrow \text{Overlapping Windows (轨迹内聚合)}}$$
 
-### 2. 成对效应差分计算
+同一训练种子下的 6 条物理轨迹共享同一对微调模型（$C2_s$ 与 $R2A_s$），因此存在强烈的 within-seed 相关性。真正的最高层独立随机实现（independent realizations）是训练种子本身。
+
+### 2. 成对效应差分计算与双重检验规避（No Double-Dipping）
 对每个训练种子 $s$ 与物理验证轨迹 $j$，计算配对差异：
 $$\Delta_{s, j} = M_{s, j}^{R2A} - M_{s, j}^{C2}$$
-- 3 种子设计（Seeds 42, 43, 44）共计产生 $3 \times 6 = 18$ 个轨迹级配对观测值；
-- 5 种子设计（Seeds 42–46）共计产生 $5 \times 6 = 30$ 个轨迹级配对观测值。
 
-### 3. 统计推断与验收标准
-- **Within-Seed 相关性控制**：同一 seed 下的 6 条轨迹共享同一训练权重，在估计标准误时采用聚类稳健标准误（Cluster-Robust SE）；
-- **科学结论成立判据**：
-  - 核心要求是总体期望效应方向为负：$E[\Delta_{h10}] < 0$ 且置信区间支持优势方向；
-  - 径向能谱 L2 相对误差效应量稳定处于 $-10\% \sim -20\%$ 的显著区间；
-  - 短程 $h=5$ 上保持小幅度或可控的局部精度代价（证实 trade-off 特征）；
-  - 不强求所有种子、所有轨迹呈现机械化的 100% 严格同号，以效应量分布与层级均值为最终发表依据。
+- **Discovery 隔离**：Seed 42 作为先导探索集，用于发现能谱改善现象并确立 Primary Endpoints；在证实性统计检验中，严禁将 Seed 42 混入 Confirmatory $p$-value 检验，以消除选择性偏倚（Selection Bias / Double-Dipping）。
+- **Confirmatory Replication 集**：由 Seeds 43, 44, 45, 46 构成独立的证实性复现集合（$G=4$ 个独立集群，$N_{\mathrm{rep}} = 24$ 个轨迹级配对样本）。
+- **推断稳健性**：在小集群（Very Few Clusters）场景下，根据 Cameron & Miller (2015) 统计标准，常规渐近聚类稳健标准误存在小样本偏倚风险；通过将复现种子扩展至 4 个（$G=4, df=3$），为正式证实性假设检验提供统计支撑。
+- **等价性判别规范**：普通无差异假设检验（$H_0: \Delta=0$）的非显著结果（如 $p=0.88$）仅代表“未检测到显著差异（No Detectable Difference）”，在未预先规定等价性边界（Equivalence Margin）进行双单侧检验（TOST）前，严禁宣称“统计等价（Equivalent）”。
