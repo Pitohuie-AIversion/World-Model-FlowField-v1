@@ -501,3 +501,66 @@ class TestComparativeValidationBenchmarkIntegrity:
             with patch("scripts.evaluate_latent_flow_matching_pilot.is_git_dirty", return_value=True):
                 with pytest.raises(RuntimeError, match="Formal evaluation requires a clean git worktree at launch"):
                     main()
+
+    def test_evaluator_toctou_script_mutation_fails_closed(self):
+        """Verify evaluator raises RuntimeError if script file SHA changes during execution."""
+        from unittest.mock import MagicMock, patch
+        import sys
+        from scripts.evaluate_latent_flow_matching_pilot import main
+
+        test_args = [
+            "evaluate_latent_flow_matching_pilot.py",
+            "--device", "cpu",
+            "--allow-dirty",
+            "--fm-temperatures", "0.5",
+            "--rollout-temperatures", "0.5",
+        ]
+        # Mock compute_file_sha256 to return different SHA at start and end
+        sha_sequence = iter(["sha_start_aaa", "sha_end_bbb"])
+        
+        mock_step1_item = {
+            "latent_crps_empirical": 0.1,
+            "physical_crps_mean": 0.01,
+            "phase3_pooled_spread_skill": {
+                "pooled_rms_spread": 0.01,
+                "pooled_rmse": 0.01,
+                "spread_skill_ratio": 1.0,
+            },
+            "physical_intervals": {
+                "50": {"picp": 0.5},
+                "90": {"picp": 0.9},
+            },
+        }
+        mock_step1 = {"G0": mock_step1_item, "G1": mock_step1_item, "FM_temp_0.5": mock_step1_item}
+        
+        mock_rollout_item = {
+            "ensemble_mean_vrmse_vs_gt": 0.5,
+            "sample_mean_vrmse_vs_gt": 0.8,
+            "sample_rms_divergence": 0.1,
+            "divergence_ratio_vs_gt": 10.0,
+            "sample_vorticity_rmse_vs_gt": 0.5,
+        }
+        mock_spec_item = {
+            "ensemble_mean_field_spectrum_rel_error_mean": 0.05,
+            "ensemble_mean_field_spectrum_rel_error_std": 0.01,
+            "mean_member_spectrum_rel_error_mean": 0.05,
+            "mean_member_spectrum_rel_error_std": 0.01,
+            "individual_member_spectrum_rel_error_mean": 0.05,
+            "individual_member_spectrum_rel_error_std": 0.01,
+        }
+        mock_step2 = {
+            "h5": {"ground_truth_rms_divergence": 0.002, "D0": mock_rollout_item, "G0": mock_rollout_item, "G1": mock_rollout_item, "FM_temp_0.5": mock_rollout_item},
+            "h10": {"ground_truth_rms_divergence": 0.002, "D0": mock_rollout_item, "G0": mock_rollout_item, "G1": mock_rollout_item, "FM_temp_0.5": mock_rollout_item},
+            "spectral_relative_error_vs_gt_h10": {"D0": mock_spec_item, "G0": mock_spec_item, "G1": mock_spec_item, "FM_temp_0.5": mock_spec_item},
+        }
+
+        with patch.object(sys, "argv", test_args):
+            with patch("scripts.evaluate_latent_flow_matching_pilot.compute_file_sha256", side_effect=lambda _: next(sha_sequence)):
+                with patch("scripts.evaluate_latent_flow_matching_pilot.verify_checkpoint_provenance"):
+                    with patch("scripts.evaluate_latent_flow_matching_pilot.load_all_models_for_evaluation", return_value=(MagicMock(), MagicMock(), MagicMock(), MagicMock())):
+                        with patch("scripts.evaluate_latent_flow_matching_pilot.create_flow_dataloaders", return_value=(None, MagicMock(), None, None)):
+                            with patch("scripts.evaluate_latent_flow_matching_pilot.evaluate_one_step_comparative", return_value=mock_step1):
+                                with patch("scripts.evaluate_latent_flow_matching_pilot.evaluate_rollout_physics_comparative", return_value=mock_step2):
+                                    with patch("torch.load"):
+                                        with pytest.raises(RuntimeError, match="Evaluator source changed during evaluation \\(TOCTOU violation\\)"):
+                                            main()

@@ -930,6 +930,7 @@ def main():
     parser.add_argument("--allow-dirty", action="store_true", help="Allow dirty working tree for development runs")
     args = parser.parse_args()
 
+    eval_script_sha_at_start = compute_file_sha256(__file__)
     eval_git_commit = get_git_commit(str(PROJECT_ROOT))
     eval_git_dirty_at_start = is_git_dirty(str(PROJECT_ROOT))
     if eval_git_dirty_at_start and not args.allow_dirty:
@@ -1054,14 +1055,17 @@ def main():
               f"Mean Member L2 Err = {m_s['mean_member_spectrum_rel_error_mean']*100:.2f}% ± {m_s['mean_member_spectrum_rel_error_std']*100:.2f}%, "
               f"Indiv Member L2 Err = {m_s['individual_member_spectrum_rel_error_mean']*100:.2f}% ± {m_s['individual_member_spectrum_rel_error_std']*100:.2f}%")
 
-    eval_script_sha = compute_file_sha256(__file__)
+    eval_script_sha_at_end = compute_file_sha256(__file__)
+    if eval_script_sha_at_end != eval_script_sha_at_start:
+        raise RuntimeError("Evaluator source changed during evaluation (TOCTOU violation).")
+
     full_report = {
         "evaluation_protocol": "STRICT_SAME_VALIDATION_SPLIT_AB_TEST_V3_TEMPERATURE_DIAGNOSTIC",
         "evaluated_at_utc": datetime.now(timezone.utc).isoformat(),
         "git_commit": eval_git_commit,
         "is_git_dirty": eval_git_dirty_at_start,
         "git_dirty_at_start": eval_git_dirty_at_start,
-        "evaluation_script_sha256": eval_script_sha,
+        "evaluation_script_sha256": eval_script_sha_at_start,
         "provenance_verification": prov_report,
         "step1_one_step_probabilistic": step1_results,
         "step2_rollout_physics": step2_results,
