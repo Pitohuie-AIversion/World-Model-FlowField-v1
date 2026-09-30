@@ -6,7 +6,6 @@ import numpy as np
 import scipy.stats as stats
 import torch
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -23,8 +22,7 @@ from scripts.evaluate_latent_flow_matching_pilot import (
     apply_pressure_gauge,
 )
 
-def evaluate_single_checkpoint(args_tuple):
-    seed, branch, ckpt_path, device = args_tuple
+def evaluate_single_checkpoint(seed: int, branch: str, ckpt_path: str, device: str = "cuda:0"):
     print(f"[{device}] Starting evaluation for Seed {seed} - {branch}...")
     
     dev = torch.device(device)
@@ -177,10 +175,10 @@ def evaluate_single_checkpoint(args_tuple):
         }
 
     print(f"[{device}] Finished evaluation for Seed {seed} - {branch}.")
-    return seed, branch, aggregated
+    return aggregated
 
-def compute_paired_statistics(deltas_by_seed):
-    # deltas_by_seed is dict: seed -> list of 6 trajectory deltas
+def compute_group_statistics(deltas_by_seed):
+    # deltas_by_seed is dict: seed -> list of trajectory deltas
     all_deltas = []
     cluster_means = []
     for s, deltas in deltas_by_seed.items():
@@ -189,34 +187,34 @@ def compute_paired_statistics(deltas_by_seed):
 
     N = len(all_deltas)
     mean_delta = float(np.mean(all_deltas))
-    std_delta = float(np.std(all_deltas, ddof=1))
-    se_standard = std_delta / math.sqrt(N)
+    std_delta = float(np.std(all_deltas, ddof=1)) if N > 1 else 0.0
+    se_standard = std_delta / math.sqrt(N) if N > 0 else 0.0
     
-    # Standard paired t-test (N=18, df=17)
-    t_stat = mean_delta / (se_standard + 1e-12)
-    p_val = float(2 * (1 - stats.t.cdf(abs(t_stat), df=N - 1)))
+    t_stat = mean_delta / (se_standard + 1e-12) if se_standard > 0 else 0.0
+    p_val = float(2 * (1 - stats.t.cdf(abs(t_stat), df=N - 1))) if N > 1 else 1.0
     ci_95_standard = [
-        mean_delta - stats.t.ppf(0.975, df=N - 1) * se_standard,
-        mean_delta + stats.t.ppf(0.975, df=N - 1) * se_standard
+        mean_delta - stats.t.ppf(0.975, df=N - 1) * se_standard if N > 1 else mean_delta,
+        mean_delta + stats.t.ppf(0.975, df=N - 1) * se_standard if N > 1 else mean_delta
     ]
 
-    # Cluster-robust standard error (G=3 clusters)
     G = len(cluster_means)
-    cluster_var = float(np.var(cluster_means, ddof=1))
-    se_cluster = math.sqrt(cluster_var / G)
+    cluster_var = float(np.var(cluster_means, ddof=1)) if G > 1 else 0.0
+    se_cluster = math.sqrt(cluster_var / G) if G > 0 else 0.0
     ci_95_cluster = [
-        mean_delta - stats.t.ppf(0.975, df=G - 1) * se_cluster,
-        mean_delta + stats.t.ppf(0.975, df=G - 1) * se_cluster
+        mean_delta - stats.t.ppf(0.975, df=G - 1) * se_cluster if G > 1 else mean_delta,
+        mean_delta + stats.t.ppf(0.975, df=G - 1) * se_cluster if G > 1 else mean_delta
     ]
-    p_val_cluster = float(2 * (1 - stats.t.cdf(abs(mean_delta / (se_cluster + 1e-12)), df=G - 1)))
+    p_val_cluster = float(2 * (1 - stats.t.cdf(abs(mean_delta / (se_cluster + 1e-12)), df=G - 1))) if G > 1 else 1.0
 
     return {
         "mean_delta": mean_delta,
         "std_delta": std_delta,
+        "n_trajectories": N,
         "standard_se": se_standard,
         "standard_t_stat": t_stat,
         "standard_p_value": p_val,
         "standard_ci_95": ci_95_standard,
+        "n_clusters": G,
         "cluster_means": cluster_means,
         "cluster_se": se_cluster,
         "cluster_p_value": p_val_cluster,
@@ -224,44 +222,30 @@ def compute_paired_statistics(deltas_by_seed):
     }
 
 def main():
+    seeds = [42, 43, 44, 45, 46]
+    branches = ["C2", "R2_A"]
+
     checkpoints = {
-        (42, "C2"): ("outputs/checkpoints/probabilistic/flow_matching_r2_alpha05/C2/best_latent_flow_matcher.pt", "cuda:0"),
-        (42, "R2_A"): ("outputs/checkpoints/probabilistic/flow_matching_r2_alpha05/R2_A/best_latent_flow_matcher.pt", "cuda:0"),
-        (43, "C2"): ("outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/43/C2/best_latent_flow_matcher.pt", "cuda:0"),
-        (43, "R2_A"): ("outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/43/R2_A/best_latent_flow_matcher.pt", "cuda:1"),
-        (44, "C2"): ("outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/44/C2/best_latent_flow_matcher.pt", "cuda:1"),
-        (44, "R2_A"): ("outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/44/R2_A/best_latent_flow_matcher.pt", "cuda:1"),
+        (42, "C2"): "outputs/checkpoints/probabilistic/flow_matching_r2_alpha05/C2/best_latent_flow_matcher.pt",
+        (42, "R2_A"): "outputs/checkpoints/probabilistic/flow_matching_r2_alpha05/R2_A/best_latent_flow_matcher.pt",
+        (43, "C2"): "outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/43/C2/best_latent_flow_matcher.pt",
+        (43, "R2_A"): "outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/43/R2_A/best_latent_flow_matcher.pt",
+        (44, "C2"): "outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/44/C2/best_latent_flow_matcher.pt",
+        (44, "R2_A"): "outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/44/R2_A/best_latent_flow_matcher.pt",
+        (45, "C2"): "outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/45/C2/best_latent_flow_matcher.pt",
+        (45, "R2_A"): "outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/45/R2_A/best_latent_flow_matcher.pt",
+        (46, "C2"): "outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/46/C2/best_latent_flow_matcher.pt",
+        (46, "R2_A"): "outputs/checkpoints/probabilistic/flow_matching_r2_alpha05_seeds/46/R2_A/best_latent_flow_matcher.pt",
     }
 
-    # Parallel evaluation across GPUs: 3 on cuda:0, 3 on cuda:1
-    tasks_gpu0 = [
-        (42, "C2", checkpoints[(42, "C2")][0], "cuda:0"),
-        (42, "R2_A", checkpoints[(42, "R2_A")][0], "cuda:0"),
-        (43, "C2", checkpoints[(43, "C2")][0], "cuda:0"),
-    ]
-    tasks_gpu1 = [
-        (43, "R2_A", checkpoints[(43, "R2_A")][0], "cuda:1"),
-        (44, "C2", checkpoints[(44, "C2")][0], "cuda:1"),
-        (44, "R2_A", checkpoints[(44, "R2_A")][0], "cuda:1"),
-    ]
-
-    tasks = [
-        (42, "C2", checkpoints[(42, "C2")][0], "cuda:0"),
-        (42, "R2_A", checkpoints[(42, "R2_A")][0], "cuda:0"),
-        (43, "C2", checkpoints[(43, "C2")][0], "cuda:0"),
-        (43, "R2_A", checkpoints[(43, "R2_A")][0], "cuda:0"),
-        (44, "C2", checkpoints[(44, "C2")][0], "cuda:0"),
-        (44, "R2_A", checkpoints[(44, "R2_A")][0], "cuda:0"),
-    ]
-
     results = {}
-    for t in tasks:
-        seed, branch, data = evaluate_single_checkpoint(t)
-        results[(seed, branch)] = data
-        torch.cuda.empty_cache()
+    for s in seeds:
+        for b in branches:
+            ckpt = checkpoints[(s, b)]
+            data = evaluate_single_checkpoint(seed=s, branch=b, ckpt_path=ckpt, device="cuda:0")
+            results[(s, b)] = data
+            torch.cuda.empty_cache()
 
-    # Perform Paired Analysis across Seeds 42, 43, 44
-    seeds = [42, 43, 44]
     metric_keys = [
         ("primary1_h10_ens_vrmse", "Primary 1 (h=10 Ens VRMSE)"),
         ("primary2_h10_ens_spec_rel_err", "Primary 2 (h=10 Ens Spectrum Rel L2 Error)"),
@@ -274,10 +258,12 @@ def main():
 
     paired_report = {
         "metadata": {
-            "seeds": seeds,
-            "branches": ["C2", "R2_A"],
-            "total_physical_trajectories_per_seed": 6,
-            "total_paired_observations": 18,
+            "all_seeds": seeds,
+            "discovery_seed": 42,
+            "replication_seeds": [43, 44, 45, 46],
+            "total_seeds": len(seeds),
+            "trajectories_per_seed": 6,
+            "total_trajectory_pairs": len(seeds) * 6,
             "noise_scale": 0.5,
             "ensemble_K": 8,
         },
@@ -285,7 +271,7 @@ def main():
         "statistical_analysis": {},
     }
 
-    # Detailed per-trajectory deltas
+    # Store individual trajectory details
     for s in seeds:
         paired_report["by_seed_trajectory"][str(s)] = {}
         c2_trajs = results[(s, "C2")]
@@ -314,50 +300,53 @@ def main():
                 }
             paired_report["by_seed_trajectory"][str(s)][t_name] = t_entry
 
-    # Compute Statistical Summaries
+    # Separate inferential analysis into Discovery vs Confirmatory Replication vs Pooled
     for m_key, m_label in metric_keys:
-        deltas_by_seed = {s: [] for s in seeds}
-        c2_values_all = []
-        r2a_values_all = []
+        all_deltas_by_seed = {s: [] for s in seeds}
+        c2_all = []
+        r2a_all = []
         for s in seeds:
             for t_name in sorted(results[(s, "C2")].keys()):
-                c2_val = results[(s, "C2")][t_name][m_key]
-                r2a_val = results[(s, "R2_A")][t_name][m_key]
-                c2_values_all.append(c2_val)
-                r2a_values_all.append(r2a_val)
-                deltas_by_seed[s].append(r2a_val - c2_val)
+                c2_v = results[(s, "C2")][t_name][m_key]
+                r2a_v = results[(s, "R2_A")][t_name][m_key]
+                c2_all.append(c2_v)
+                r2a_all.append(r2a_v)
+                all_deltas_by_seed[s].append(r2a_v - c2_v)
 
-        stats_summary = compute_paired_statistics(deltas_by_seed)
-        stats_summary["label"] = m_label
-        stats_summary["baseline_mean_C2"] = float(np.mean(c2_values_all))
-        stats_summary["treatment_mean_R2_A"] = float(np.mean(r2a_values_all))
-        stats_summary["overall_relative_change_pct"] = (stats_summary["mean_delta"] / stats_summary["baseline_mean_C2"]) * 100
+        # 1. Discovery (Seed 42)
+        disc_stats = compute_group_statistics({42: all_deltas_by_seed[42]})
 
-        # Also breakdown discovery vs replication
-        discovery_deltas = deltas_by_seed[42]
-        replication_deltas = deltas_by_seed[43] + deltas_by_seed[44]
-        stats_summary["breakdown"] = {
-            "discovery_seed42": {
-                "mean_delta": float(np.mean(discovery_deltas)),
-                "std_delta": float(np.std(discovery_deltas, ddof=1)),
-                "n": len(discovery_deltas),
-            },
-            "replication_seeds43_44": {
-                "mean_delta": float(np.mean(replication_deltas)),
-                "std_delta": float(np.std(replication_deltas, ddof=1)),
-                "n": len(replication_deltas),
-                "standard_se": float(np.std(replication_deltas, ddof=1) / math.sqrt(len(replication_deltas))),
-            },
+        # 2. Confirmatory Replication (Seeds 43, 44, 45, 46) - NO DOUBLE DIPPING!
+        rep_seeds = [43, 44, 45, 46]
+        rep_deltas = {s: all_deltas_by_seed[s] for s in rep_seeds}
+        rep_stats = compute_group_statistics(rep_deltas)
+        rep_c2_mean = float(np.mean([results[(s, "C2")][t_name][m_key] for s in rep_seeds for t_name in results[(s, "C2")]]))
+        rep_r2a_mean = float(np.mean([results[(s, "R2_A")][t_name][m_key] for s in rep_seeds for t_name in results[(s, "R2_A")]]))
+        rep_stats["baseline_mean_C2"] = rep_c2_mean
+        rep_stats["treatment_mean_R2_A"] = rep_r2a_mean
+        rep_stats["relative_change_pct"] = (rep_stats["mean_delta"] / rep_c2_mean) * 100 if rep_c2_mean != 0 else 0.0
+
+        # 3. Full Sample Pooled (Seeds 42..46) - DESCRIPTIVE ONLY
+        pooled_stats = compute_group_statistics(all_deltas_by_seed)
+        pooled_c2_mean = float(np.mean(c2_all))
+        pooled_r2a_mean = float(np.mean(r2a_all))
+        pooled_stats["baseline_mean_C2"] = pooled_c2_mean
+        pooled_stats["treatment_mean_R2_A"] = pooled_r2a_mean
+        pooled_stats["relative_change_pct"] = (pooled_stats["mean_delta"] / pooled_c2_mean) * 100 if pooled_c2_mean != 0 else 0.0
+
+        paired_report["statistical_analysis"][m_key] = {
+            "label": m_label,
+            "discovery_seed42": disc_stats,
+            "confirmatory_replication_seeds43_46": rep_stats,
+            "pooled_descriptive_seeds42_46": pooled_stats,
         }
-
-        paired_report["statistical_analysis"][m_key] = stats_summary
 
     out_p = Path("outputs/metrics/fm_r2_multiseed_trajectory_paired_analysis.json")
     out_p.parent.mkdir(parents=True, exist_ok=True)
     with open(out_p, "w") as f:
         json.dump(paired_report, f, indent=2)
 
-    print(f"\nSuccessfully written full trajectory paired analysis to {out_p}")
+    print(f"\nSuccessfully written full 5-seed trajectory paired analysis to {out_p}")
 
 if __name__ == "__main__":
     main()
