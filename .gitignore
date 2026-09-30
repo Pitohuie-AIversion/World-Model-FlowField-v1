@@ -138,6 +138,8 @@ outputs/*
 !outputs/normalization/*.pt
 !outputs/normalization/*.json
 !outputs/figures/**/*.png
+!outputs/figures/**/*.pdf
+!outputs/figures/**/*.svg
 !outputs/figures/**/*.json
 !outputs/figures/**/
 !outputs/figures/README.md
