@@ -1,0 +1,2450 @@
+{
+  "evaluation_protocol": "STRICT_SAME_VALIDATION_SPLIT_AB_TEST_V3_TEMPERATURE_DIAGNOSTIC",
+  "evaluated_at_utc": "2026-09-30T02:39:35.099874+00:00",
+  "git_commit": "b7f2fba5ef9acc60ea4eb44932b3d43fd2de87bb",
+  "is_git_dirty": true,
+  "evaluation_script_sha256": "51fe35b2615c43950f4479b9f98ccde39f21aa8ba11c5d7cb37acc7da41a148c",
+  "provenance_verification": {
+    "status": "PASSED",
+    "runtime_d0_sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6",
+    "runtime_split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+    "runtime_normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+    "expected_seed": 42,
+    "g0_parent_d0_sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6",
+    "g1_parent_d0_sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6",
+    "fm_parent_d0_sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6",
+    "fm_residual_stats_d0_sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6"
+  },
+  "step1_one_step_probabilistic": {
+    "validation_windows_evaluated": 144,
+    "ensemble_size_K": 32,
+    "common_random_numbers": true,
+    "fm_temperatures_scanned": [
+      0.5
+    ],
+    "D0": {
+      "physical_rmse": 0.018247308896820122
+    },
+    "G0": {
+      "latent_crps_empirical": 0.39572011927763623,
+      "latent_intervals": {
+        "50": {
+          "nominal": 0.5,
+          "picp": 0.40843117237091064,
+          "mpiw": 0.8514630198478699,
+          "signed_calibration_error": -0.09156882762908936,
+          "absolute_calibration_error": 0.09156882762908936
+        },
+        "80": {
+          "nominal": 0.8,
+          "picp": 0.7277781367301941,
+          "mpiw": 1.584753155708313,
+          "signed_calibration_error": -0.07222186326980595,
+          "absolute_calibration_error": 0.07222186326980595
+        },
+        "90": {
+          "nominal": 0.9,
+          "picp": 0.8495415449142456,
+          "mpiw": 1.9927573204040527,
+          "signed_calibration_error": -0.05045845508575442,
+          "absolute_calibration_error": 0.05045845508575442
+        },
+        "95": {
+          "nominal": 0.95,
+          "picp": 0.9063796997070312,
+          "mpiw": 2.297334909439087,
+          "signed_calibration_error": -0.043620300292968706,
+          "absolute_calibration_error": 0.043620300292968706
+        }
+      },
+      "physical_crps_mean": 0.009300080723025732,
+      "physical_crps_per_channel": {
+        "u": 0.010449375181148449,
+        "v": 0.005577436493088801,
+        "p": 0.003609071640918652,
+        "s": 0.017564440611749887
+      },
+      "phase3_pooled_spread_skill": {
+        "K": 32,
+        "degrees_of_freedom": "ddof=1 (Bessel corrected unbiased sample variance)",
+        "finite_k_inflation_factor": 1.015504800579495,
+        "pooled_rms_spread": 0.03382682427763939,
+        "finite_k_adjusted_spread": 0.03435130244230181,
+        "pooled_rmse": 0.01992639240302819,
+        "spread_skill_ratio": 1.6975881342483965,
+        "finite_k_adjusted_ssr": 1.7239088997360352,
+        "velocity": {
+          "rms_spread": 0.042188070714473724,
+          "finite_k_adjusted_spread": 0.042842188337735274,
+          "rmse": 0.01731834243148916,
+          "spread_skill_ratio": 2.4360325776582012,
+          "finite_k_adjusted_ssr": 2.473802776979945
+        },
+        "per_variable": {
+          "u": {
+            "mean_var": 0.0014180461876094341,
+            "rms_spread": 0.03765695542097092,
+            "finite_k_adjusted_spread": 0.038240819005204006,
+            "rmse": 0.014902602988109359,
+            "spread_skill_ratio": 2.526869311510472,
+            "finite_k_adjusted_ssr": 2.5660479162758882
+          },
+          "v": {
+            "mean_var": 0.0003617869515437633,
+            "rms_spread": 0.019020697101950645,
+            "finite_k_adjusted_spread": 0.01931560921739937,
+            "rmse": 0.008822550735312002,
+            "spread_skill_ratio": 2.1559156884940385,
+            "finite_k_adjusted_ssr": 2.1893427313103433
+          },
+          "p": {
+            "mean_var": 0.0001573118643136695,
+            "rms_spread": 0.012542402371764183,
+            "finite_k_adjusted_spread": 0.012736869819326173,
+            "rmse": 0.00549793069712073,
+            "spread_skill_ratio": 2.2812909528712515,
+            "finite_k_adjusted_ssr": 2.3166619141593268
+          },
+          "s": {
+            "mean_var": 0.002639870624989271,
+            "rms_spread": 0.051379669457674026,
+            "finite_k_adjusted_spread": 0.052176300986455634,
+            "rmse": 0.03546959590848416,
+            "spread_skill_ratio": 1.4485548441175167,
+            "finite_k_adjusted_ssr": 1.4710143981040202
+          }
+        }
+      },
+      "physical_intervals": {
+        "50": {
+          "nominal": 0.5,
+          "picp": 0.8903130292892456,
+          "mpiw": 0.03709415718913078,
+          "signed_calibration_error": 0.3903130292892456,
+          "absolute_calibration_error": 0.3903130292892456
+        },
+        "80": {
+          "nominal": 0.8,
+          "picp": 0.9803687334060669,
+          "mpiw": 0.06910043954849243,
+          "signed_calibration_error": 0.18036873340606685,
+          "absolute_calibration_error": 0.18036873340606685
+        },
+        "90": {
+          "nominal": 0.9,
+          "picp": 0.9896605014801025,
+          "mpiw": 0.08696269243955612,
+          "signed_calibration_error": 0.08966050148010252,
+          "absolute_calibration_error": 0.08966050148010252
+        },
+        "95": {
+          "nominal": 0.95,
+          "picp": 0.9929139614105225,
+          "mpiw": 0.10033845901489258,
+          "signed_calibration_error": 0.042913961410522505,
+          "absolute_calibration_error": 0.042913961410522505
+        }
+      },
+      "physical_intervals_per_channel": {
+        "u": {
+          "50": {
+            "nominal": 0.5,
+            "picp": 0.9012620449066162,
+            "mpiw": 0.04573286697268486,
+            "signed_calibration_error": 0.4012620449066162,
+            "absolute_calibration_error": 0.4012620449066162
+          },
+          "80": {
+            "nominal": 0.8,
+            "picp": 0.9908210039138794,
+            "mpiw": 0.08524081110954285,
+            "signed_calibration_error": 0.19082100391387935,
+            "absolute_calibration_error": 0.19082100391387935
+          },
+          "90": {
+            "nominal": 0.9,
+            "picp": 0.9966328740119934,
+            "mpiw": 0.10732600092887878,
+            "signed_calibration_error": 0.09663287401199339,
+            "absolute_calibration_error": 0.09663287401199339
+          },
+          "95": {
+            "nominal": 0.95,
+            "picp": 0.9983317255973816,
+            "mpiw": 0.12387114018201828,
+            "signed_calibration_error": 0.048331725597381636,
+            "absolute_calibration_error": 0.048331725597381636
+          }
+        },
+        "v": {
+          "50": {
+            "nominal": 0.5,
+            "picp": 0.9008721113204956,
+            "mpiw": 0.023548513650894165,
+            "signed_calibration_error": 0.4008721113204956,
+            "absolute_calibration_error": 0.4008721113204956
+          },
+          "80": {
+            "nominal": 0.8,
+            "picp": 0.9849209189414978,
+            "mpiw": 0.04394005984067917,
+            "signed_calibration_error": 0.18492091894149776,
+            "absolute_calibration_error": 0.18492091894149776
+          },
+          "90": {
+            "nominal": 0.9,
+            "picp": 0.9932420253753662,
+            "mpiw": 0.055353764444589615,
+            "signed_calibration_error": 0.09324202537536619,
+            "absolute_calibration_error": 0.09324202537536619
+          },
+          "95": {
+            "nominal": 0.95,
+            "picp": 0.9960123896598816,
+            "mpiw": 0.06392759084701538,
+            "signed_calibration_error": 0.046012389659881636,
+            "absolute_calibration_error": 0.046012389659881636
+          }
+        },
+        "p": {
+          "50": {
+            "nominal": 0.5,
+            "picp": 0.9115464687347412,
+            "mpiw": 0.01559567078948021,
+            "signed_calibration_error": 0.4115464687347412,
+            "absolute_calibration_error": 0.4115464687347412
+          },
+          "80": {
+            "nominal": 0.8,
+            "picp": 0.9870402216911316,
+            "mpiw": 0.029070165008306503,
+            "signed_calibration_error": 0.18704022169113155,
+            "absolute_calibration_error": 0.18704022169113155
+          },
+          "90": {
+            "nominal": 0.9,
+            "picp": 0.9943305253982544,
+            "mpiw": 0.03659649193286896,
+            "signed_calibration_error": 0.09433052539825437,
+            "absolute_calibration_error": 0.09433052539825437
+          },
+          "95": {
+            "nominal": 0.95,
+            "picp": 0.9966193437576294,
+            "mpiw": 0.0422239750623703,
+            "signed_calibration_error": 0.04661934375762944,
+            "absolute_calibration_error": 0.04661934375762944
+          }
+        },
+        "s": {
+          "50": {
+            "nominal": 0.5,
+            "picp": 0.8475714921951294,
+            "mpiw": 0.0634995847940445,
+            "signed_calibration_error": 0.3475714921951294,
+            "absolute_calibration_error": 0.3475714921951294
+          },
+          "80": {
+            "nominal": 0.8,
+            "picp": 0.9586927890777588,
+            "mpiw": 0.11815069615840912,
+            "signed_calibration_error": 0.15869278907775874,
+            "absolute_calibration_error": 0.15869278907775874
+          },
+          "90": {
+            "nominal": 0.9,
+            "picp": 0.9744364619255066,
+            "mpiw": 0.14857448637485504,
+            "signed_calibration_error": 0.07443646192550657,
+            "absolute_calibration_error": 0.07443646192550657
+          },
+          "95": {
+            "nominal": 0.95,
+            "picp": 0.9806925654411316,
+            "mpiw": 0.17133112251758575,
+            "signed_calibration_error": 0.030692565441131636,
+            "absolute_calibration_error": 0.030692565441131636
+          }
+        }
+      },
+      "latent_crps_analytical": 0.38410020536846584
+    },
+    "G1": {
+      "latent_crps_empirical": 0.36680500706036884,
+      "latent_intervals": {
+        "50": {
+          "nominal": 0.5,
+          "picp": 0.2734900712966919,
+          "mpiw": 0.7640549540519714,
+          "signed_calibration_error": -0.2265099287033081,
+          "absolute_calibration_error": 0.2265099287033081
+        },
+        "80": {
+          "nominal": 0.8,
+          "picp": 0.7208531498908997,
+          "mpiw": 1.4222427606582642,
+          "signed_calibration_error": -0.07914685010910039,
+          "absolute_calibration_error": 0.07914685010910039
+        },
+        "90": {
+          "nominal": 0.9,
+          "picp": 0.8827149868011475,
+          "mpiw": 1.7882930040359497,
+          "signed_calibration_error": -0.01728501319885256,
+          "absolute_calibration_error": 0.01728501319885256
+        },
+        "95": {
+          "nominal": 0.95,
+          "picp": 0.9392335414886475,
+          "mpiw": 2.061629295349121,
+          "signed_calibration_error": -0.010766458511352495,
+          "absolute_calibration_error": 0.010766458511352495
+        }
+      },
+      "physical_crps_mean": 0.00923878650387956,
+      "physical_crps_per_channel": {
+        "u": 0.010323536401200626,
+        "v": 0.005581895924276776,
+        "p": 0.0035780579912372762,
+        "s": 0.017471655789348815
+      },
+      "phase3_pooled_spread_skill": {
+        "K": 32,
+        "degrees_of_freedom": "ddof=1 (Bessel corrected unbiased sample variance)",
+        "finite_k_inflation_factor": 1.015504800579495,
+        "pooled_rms_spread": 0.03360673040151596,
+        "finite_k_adjusted_spread": 0.03412779605452032,
+        "pooled_rmse": 0.020010719453447717,
+        "spread_skill_ratio": 1.679435548798834,
+        "finite_k_adjusted_ssr": 1.705474862069075,
+        "velocity": {
+          "rms_spread": 0.04200321063399315,
+          "finite_k_adjusted_spread": 0.04265446203857174,
+          "rmse": 0.017445157390994847,
+          "spread_skill_ratio": 2.4077275782217544,
+          "finite_k_adjusted_ssr": 2.4450589141718333
+        },
+        "per_variable": {
+          "u": {
+            "mean_var": 0.0013947720872238278,
+            "rms_spread": 0.037346646189689636,
+            "finite_k_adjusted_spread": 0.037925698491173734,
+            "rmse": 0.014992012623611346,
+            "spread_skill_ratio": 2.4911012427950436,
+            "finite_k_adjusted_ssr": 2.5297252707879134
+          },
+          "v": {
+            "mean_var": 0.0003694977203849703,
+            "rms_spread": 0.01922232285141945,
+            "finite_k_adjusted_spread": 0.01952036113390538,
+            "rmse": 0.008920373273476001,
+            "spread_skill_ratio": 2.1548763390666617,
+            "finite_k_adjusted_ssr": 2.1882872669773628
+          },
+          "p": {
+            "mean_var": 0.00015573535347357392,
+            "rms_spread": 0.012479397468268871,
+            "finite_k_adjusted_spread": 0.012672888037366636,
+            "rmse": 0.00555474873329131,
+            "spread_skill_ratio": 2.2466137716254275,
+            "finite_k_adjusted_ssr": 2.281447070133627
+          },
+          "s": {
+            "mean_var": 0.002597643993794918,
+            "rms_spread": 0.05096708610653877,
+            "finite_k_adjusted_spread": 0.05175732061273861,
+            "rmse": 0.03558829685758344,
+            "spread_skill_ratio": 1.432130118201403,
+            "finite_k_adjusted_ssr": 1.4543350100880044
+          }
+        }
+      },
+      "physical_intervals": {
+        "50": {
+          "nominal": 0.5,
+          "picp": 0.8911107182502747,
+          "mpiw": 0.036803457885980606,
+          "signed_calibration_error": 0.39111071825027466,
+          "absolute_calibration_error": 0.39111071825027466
+        },
+        "80": {
+          "nominal": 0.8,
+          "picp": 0.9812554121017456,
+          "mpiw": 0.06857806444168091,
+          "signed_calibration_error": 0.18125541210174556,
+          "absolute_calibration_error": 0.18125541210174556
+        },
+        "90": {
+          "nominal": 0.9,
+          "picp": 0.9905268549919128,
+          "mpiw": 0.08632414788007736,
+          "signed_calibration_error": 0.09052685499191282,
+          "absolute_calibration_error": 0.09052685499191282
+        },
+        "95": {
+          "nominal": 0.95,
+          "picp": 0.9935836791992188,
+          "mpiw": 0.09962652623653412,
+          "signed_calibration_error": 0.043583679199218794,
+          "absolute_calibration_error": 0.043583679199218794
+        }
+      },
+      "physical_intervals_per_channel": {
+        "u": {
+          "50": {
+            "nominal": 0.5,
+            "picp": 0.900604248046875,
+            "mpiw": 0.04506184160709381,
+            "signed_calibration_error": 0.400604248046875,
+            "absolute_calibration_error": 0.400604248046875
+          },
+          "80": {
+            "nominal": 0.8,
+            "picp": 0.9911634922027588,
+            "mpiw": 0.083980992436409,
+            "signed_calibration_error": 0.19116349220275874,
+            "absolute_calibration_error": 0.19116349220275874
+          },
+          "90": {
+            "nominal": 0.9,
+            "picp": 0.9974161982536316,
+            "mpiw": 0.10573218762874603,
+            "signed_calibration_error": 0.09741619825363157,
+            "absolute_calibration_error": 0.09741619825363157
+          },
+          "95": {
+            "nominal": 0.95,
+            "picp": 0.9988234043121338,
+            "mpiw": 0.12203536927700043,
+            "signed_calibration_error": 0.048823404312133833,
+            "absolute_calibration_error": 0.048823404312133833
+          }
+        },
+        "v": {
+          "50": {
+            "nominal": 0.5,
+            "picp": 0.9035170078277588,
+            "mpiw": 0.023628786206245422,
+            "signed_calibration_error": 0.4035170078277588,
+            "absolute_calibration_error": 0.4035170078277588
+          },
+          "80": {
+            "nominal": 0.8,
+            "picp": 0.9862467646598816,
+            "mpiw": 0.04409721866250038,
+            "signed_calibration_error": 0.18624676465988155,
+            "absolute_calibration_error": 0.18624676465988155
+          },
+          "90": {
+            "nominal": 0.9,
+            "picp": 0.9944118857383728,
+            "mpiw": 0.055556077510118484,
+            "signed_calibration_error": 0.09441188573837278,
+            "absolute_calibration_error": 0.09441188573837278
+          },
+          "95": {
+            "nominal": 0.95,
+            "picp": 0.9969007968902588,
+            "mpiw": 0.06417643278837204,
+            "signed_calibration_error": 0.046900796890258833,
+            "absolute_calibration_error": 0.046900796890258833
+          }
+        },
+        "p": {
+          "50": {
+            "nominal": 0.5,
+            "picp": 0.9120822548866272,
+            "mpiw": 0.015437278896570206,
+            "signed_calibration_error": 0.4120822548866272,
+            "absolute_calibration_error": 0.4120822548866272
+          },
+          "80": {
+            "nominal": 0.8,
+            "picp": 0.9879794716835022,
+            "mpiw": 0.028781674802303314,
+            "signed_calibration_error": 0.18797947168350215,
+            "absolute_calibration_error": 0.18797947168350215
+          },
+          "90": {
+            "nominal": 0.9,
+            "picp": 0.9950663447380066,
+            "mpiw": 0.036235954612493515,
+            "signed_calibration_error": 0.09506634473800657,
+            "absolute_calibration_error": 0.09506634473800657
+          },
+          "95": {
+            "nominal": 0.95,
+            "picp": 0.9972296953201294,
+            "mpiw": 0.041820134967565536,
+            "signed_calibration_error": 0.04722969532012944,
+            "absolute_calibration_error": 0.04722969532012944
+          }
+        },
+        "s": {
+          "50": {
+            "nominal": 0.5,
+            "picp": 0.8482394814491272,
+            "mpiw": 0.06308592855930328,
+            "signed_calibration_error": 0.3482394814491272,
+            "absolute_calibration_error": 0.3482394814491272
+          },
+          "80": {
+            "nominal": 0.8,
+            "picp": 0.9596320390701294,
+            "mpiw": 0.11745238304138184,
+            "signed_calibration_error": 0.15963203907012935,
+            "absolute_calibration_error": 0.15963203907012935
+          },
+          "90": {
+            "nominal": 0.9,
+            "picp": 0.9752129316329956,
+            "mpiw": 0.147772416472435,
+            "signed_calibration_error": 0.07521293163299558,
+            "absolute_calibration_error": 0.07521293163299558
+          },
+          "95": {
+            "nominal": 0.95,
+            "picp": 0.9813808798789978,
+            "mpiw": 0.17047418653964996,
+            "signed_calibration_error": 0.03138087987899785,
+            "absolute_calibration_error": 0.03138087987899785
+          }
+        }
+      },
+      "latent_crps_analytical": 0.35638947288195294
+    },
+    "FM_temp_0.5": {
+      "latent_crps_empirical": 0.1132163264685207,
+      "latent_intervals": {
+        "50": {
+          "nominal": 0.5,
+          "picp": 0.7562713623046875,
+          "mpiw": 0.413487046957016,
+          "signed_calibration_error": 0.2562713623046875,
+          "absolute_calibration_error": 0.2562713623046875
+        },
+        "80": {
+          "nominal": 0.8,
+          "picp": 0.93453049659729,
+          "mpiw": 0.7695173025131226,
+          "signed_calibration_error": 0.13453049659729,
+          "absolute_calibration_error": 0.13453049659729
+        },
+        "90": {
+          "nominal": 0.9,
+          "picp": 0.9658991694450378,
+          "mpiw": 0.9676636457443237,
+          "signed_calibration_error": 0.06589916944503782,
+          "absolute_calibration_error": 0.06589916944503782
+        },
+        "95": {
+          "nominal": 0.95,
+          "picp": 0.9775534868240356,
+          "mpiw": 1.11555016040802,
+          "signed_calibration_error": 0.02755348682403569,
+          "absolute_calibration_error": 0.02755348682403569
+        }
+      },
+      "physical_crps_mean": 0.007438197925997277,
+      "physical_crps_per_channel": {
+        "u": 0.008861135898364915,
+        "v": 0.004095341363507841,
+        "p": 0.0026086054664726057,
+        "s": 0.014187708885098496
+      },
+      "phase3_pooled_spread_skill": {
+        "K": 32,
+        "degrees_of_freedom": "ddof=1 (Bessel corrected unbiased sample variance)",
+        "finite_k_inflation_factor": 1.015504800579495,
+        "pooled_rms_spread": 0.01987358368933201,
+        "finite_k_adjusted_spread": 0.020181719641235007,
+        "pooled_rmse": 0.019865187554186585,
+        "spread_skill_ratio": 1.0004221521141456,
+        "finite_k_adjusted_ssr": 1.0159334980779848,
+        "velocity": {
+          "rms_spread": 0.0243079736828804,
+          "finite_k_adjusted_spread": 0.02468486396732508,
+          "rmse": 0.019891700027666343,
+          "spread_skill_ratio": 1.2220152842099399,
+          "finite_k_adjusted_ssr": 1.2409623874967102
+        },
+        "per_variable": {
+          "u": {
+            "mean_var": 0.00047428853577002883,
+            "rms_spread": 0.0217781662940979,
+            "finite_k_adjusted_spread": 0.02211583241947497,
+            "rmse": 0.018099660811181882,
+            "spread_skill_ratio": 1.2032354909263576,
+            "finite_k_adjusted_ssr": 1.2218914172633417
+          },
+          "v": {
+            "mean_var": 0.00011658904986688867,
+            "rms_spread": 0.01079764124006033,
+            "finite_k_adjusted_spread": 0.010965056514216398,
+            "rmse": 0.008251178281143214,
+            "spread_skill_ratio": 1.3086165134222705,
+            "finite_k_adjusted_ssr": 1.328906351497917
+          },
+          "p": {
+            "mean_var": 5.057131784269586e-05,
+            "rms_spread": 0.0071113514713943005,
+            "finite_k_adjusted_spread": 0.0072216115578089685,
+            "rmse": 0.005222005848566146,
+            "spread_skill_ratio": 1.3618019702768474,
+            "finite_k_adjusted_ssr": 1.3829164382547534
+          },
+          "s": {
+            "mean_var": 0.0009383882861584425,
+            "rms_spread": 0.030633123591542244,
+            "finite_k_adjusted_spread": 0.031108084063956133,
+            "rmse": 0.0339934349315569,
+            "spread_skill_ratio": 0.901147961120728,
+            "finite_k_adjusted_ssr": 0.9151200805505235
+          }
+        }
+      },
+      "physical_intervals": {
+        "50": {
+          "nominal": 0.5,
+          "picp": 0.7347157597541809,
+          "mpiw": 0.021385084837675095,
+          "signed_calibration_error": 0.2347157597541809,
+          "absolute_calibration_error": 0.2347157597541809
+        },
+        "80": {
+          "nominal": 0.8,
+          "picp": 0.9224666953086853,
+          "mpiw": 0.03982003405690193,
+          "signed_calibration_error": 0.12246669530868526,
+          "absolute_calibration_error": 0.12246669530868526
+        },
+        "90": {
+          "nominal": 0.9,
+          "picp": 0.9571312665939331,
+          "mpiw": 0.05009046569466591,
+          "signed_calibration_error": 0.05713126659393308,
+          "absolute_calibration_error": 0.05713126659393308
+        },
+        "95": {
+          "nominal": 0.95,
+          "picp": 0.9703284502029419,
+          "mpiw": 0.05776653066277504,
+          "signed_calibration_error": 0.02032845020294194,
+          "absolute_calibration_error": 0.02032845020294194
+        }
+      },
+      "physical_intervals_per_channel": {
+        "u": {
+          "50": {
+            "nominal": 0.5,
+            "picp": 0.6755337119102478,
+            "mpiw": 0.026156475767493248,
+            "signed_calibration_error": 0.1755337119102478,
+            "absolute_calibration_error": 0.1755337119102478
+          },
+          "80": {
+            "nominal": 0.8,
+            "picp": 0.9061957597732544,
+            "mpiw": 0.04873694106936455,
+            "signed_calibration_error": 0.10619575977325435,
+            "absolute_calibration_error": 0.10619575977325435
+          },
+          "90": {
+            "nominal": 0.9,
+            "picp": 0.9542168378829956,
+            "mpiw": 0.06132231280207634,
+            "signed_calibration_error": 0.05421683788299558,
+            "absolute_calibration_error": 0.05421683788299558
+          },
+          "95": {
+            "nominal": 0.95,
+            "picp": 0.971588134765625,
+            "mpiw": 0.07073557376861572,
+            "signed_calibration_error": 0.021588134765625044,
+            "absolute_calibration_error": 0.021588134765625044
+          }
+        },
+        "v": {
+          "50": {
+            "nominal": 0.5,
+            "picp": 0.7653605341911316,
+            "mpiw": 0.0132863475009799,
+            "signed_calibration_error": 0.2653605341911316,
+            "absolute_calibration_error": 0.2653605341911316
+          },
+          "80": {
+            "nominal": 0.8,
+            "picp": 0.93585205078125,
+            "mpiw": 0.02476475015282631,
+            "signed_calibration_error": 0.13585205078124996,
+            "absolute_calibration_error": 0.13585205078124996
+          },
+          "90": {
+            "nominal": 0.9,
+            "picp": 0.9658881425857544,
+            "mpiw": 0.031166715547442436,
+            "signed_calibration_error": 0.06588814258575437,
+            "absolute_calibration_error": 0.06588814258575437
+          },
+          "95": {
+            "nominal": 0.95,
+            "picp": 0.9773322343826294,
+            "mpiw": 0.03595781326293945,
+            "signed_calibration_error": 0.02733223438262944,
+            "absolute_calibration_error": 0.02733223438262944
+          }
+        },
+        "p": {
+          "50": {
+            "nominal": 0.5,
+            "picp": 0.7941420078277588,
+            "mpiw": 0.008842788636684418,
+            "signed_calibration_error": 0.2941420078277588,
+            "absolute_calibration_error": 0.2941420078277588
+          },
+          "80": {
+            "nominal": 0.8,
+            "picp": 0.949615478515625,
+            "mpiw": 0.01647327095270157,
+            "signed_calibration_error": 0.14961547851562496,
+            "absolute_calibration_error": 0.14961547851562496
+          },
+          "90": {
+            "nominal": 0.9,
+            "picp": 0.9726291298866272,
+            "mpiw": 0.020726479589939117,
+            "signed_calibration_error": 0.07262912988662718,
+            "absolute_calibration_error": 0.07262912988662718
+          },
+          "95": {
+            "nominal": 0.95,
+            "picp": 0.9811909794807434,
+            "mpiw": 0.023904431611299515,
+            "signed_calibration_error": 0.031190979480743453,
+            "absolute_calibration_error": 0.031190979480743453
+          }
+        },
+        "s": {
+          "50": {
+            "nominal": 0.5,
+            "picp": 0.703826904296875,
+            "mpiw": 0.037254735827445984,
+            "signed_calibration_error": 0.203826904296875,
+            "absolute_calibration_error": 0.203826904296875
+          },
+          "80": {
+            "nominal": 0.8,
+            "picp": 0.8982035517692566,
+            "mpiw": 0.0693051815032959,
+            "signed_calibration_error": 0.09820355176925655,
+            "absolute_calibration_error": 0.09820355176925655
+          },
+          "90": {
+            "nominal": 0.9,
+            "picp": 0.935791015625,
+            "mpiw": 0.08714636415243149,
+            "signed_calibration_error": 0.03579101562499998,
+            "absolute_calibration_error": 0.03579101562499998
+          },
+          "95": {
+            "nominal": 0.95,
+            "picp": 0.951202392578125,
+            "mpiw": 0.10046830028295517,
+            "signed_calibration_error": 0.0012023925781250444,
+            "absolute_calibration_error": 0.0012023925781250444
+          }
+        }
+      }
+    }
+  },
+  "step2_rollout_physics": {
+    "total_windows_evaluated": 144,
+    "unique_trajectories_evaluated": 6,
+    "unique_clusters_evaluated": 4,
+    "rollout_temperatures_evaluated": [
+      0.5
+    ],
+    "window_manifest": [
+      {
+        "window_index": 0,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 0,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 1,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 8,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 2,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 16,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 3,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 24,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 4,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 32,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 5,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 40,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 6,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 48,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 7,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 56,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 8,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 64,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 9,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 72,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 10,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 80,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 11,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 88,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 12,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 96,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 13,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 104,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 14,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 112,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 15,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 120,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 16,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 128,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 17,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 136,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 18,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 144,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 19,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 152,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 20,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 160,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 21,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 168,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 22,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 176,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 23,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "start_t": 184,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 24,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 0,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 25,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 8,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 26,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 16,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 27,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 24,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 28,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 32,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 29,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 40,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 30,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 48,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 31,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 56,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 32,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 64,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 33,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 72,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 34,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 80,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 35,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 88,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 36,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 96,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 37,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 104,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 38,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 112,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 39,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 120,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 40,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 128,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 41,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 136,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 42,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 144,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 43,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 152,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 44,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 160,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 45,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 168,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 46,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 176,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 47,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "start_t": 184,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 48,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 0,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 49,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 8,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 50,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 16,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 51,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 24,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 52,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 32,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 53,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 40,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 54,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 48,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 55,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 56,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 56,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 64,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 57,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 72,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 58,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 80,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 59,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 88,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 60,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 96,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 61,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 104,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 62,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 112,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 63,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 120,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 64,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 128,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 65,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 136,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 66,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 144,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 67,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 152,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 68,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 160,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 69,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 168,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 70,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 176,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 71,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "start_t": 184,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 72,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 0,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 73,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 8,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 74,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 16,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 75,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 24,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 76,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 32,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 77,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 40,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 78,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 48,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 79,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 56,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 80,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 64,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 81,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 72,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 82,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 80,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 83,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 88,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 84,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 96,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 85,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 104,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 86,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 112,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 87,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 120,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 88,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 128,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 89,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 136,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 90,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 144,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 91,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 152,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 92,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 160,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 93,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 168,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 94,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 176,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 95,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/train/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "start_t": 184,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1
+      },
+      {
+        "window_index": 96,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 0,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 97,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 8,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 98,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 16,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 99,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 24,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 100,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 32,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 101,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 40,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 102,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 48,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 103,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 56,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 104,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 64,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 105,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 72,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 106,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 80,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 107,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 88,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 108,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 96,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 109,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 104,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 110,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 112,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 111,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 120,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 112,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 128,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 113,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 136,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 114,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 144,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 115,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 152,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 116,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 160,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 117,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 168,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 118,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 176,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 119,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "start_t": 184,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 120,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 0,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 121,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 8,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 122,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 16,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 123,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 24,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 124,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 32,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 125,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 40,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 126,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 48,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 127,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 56,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 128,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 64,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 129,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 72,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 130,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 80,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 131,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 88,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 132,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 96,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 133,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 104,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 134,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 112,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 135,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 120,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 136,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 128,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 137,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 136,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 138,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 144,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 139,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 152,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 140,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 160,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 141,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 168,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 142,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 176,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      },
+      {
+        "window_index": 143,
+        "source_file": "/root/autodl-tmp/datasets/shear_flow/data/valid/shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "start_t": 184,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0
+      }
+    ],
+    "spectral_relative_error_vs_gt_h10": {
+      "D0": {
+        "ensemble_mean_field_spectrum_rel_error_mean": 0.033895120933367356,
+        "ensemble_mean_field_spectrum_rel_error_std": 0.025956638187564253,
+        "mean_member_spectrum_rel_error_mean": 0.03389512009905755,
+        "mean_member_spectrum_rel_error_std": 0.025956636115572564,
+        "individual_member_spectrum_rel_error_mean": 0.03389512009905755,
+        "individual_member_spectrum_rel_error_std": 0.025956636115572564
+      },
+      "G0": {
+        "ensemble_mean_field_spectrum_rel_error_mean": 0.11635993901129243,
+        "ensemble_mean_field_spectrum_rel_error_std": 0.12515727449876352,
+        "mean_member_spectrum_rel_error_mean": 0.11681740148924291,
+        "mean_member_spectrum_rel_error_std": 0.12693700889129997,
+        "individual_member_spectrum_rel_error_mean": 0.11960797344161417,
+        "individual_member_spectrum_rel_error_std": 0.12500258045366008
+      },
+      "G1": {
+        "ensemble_mean_field_spectrum_rel_error_mean": 0.1604095927452565,
+        "ensemble_mean_field_spectrum_rel_error_std": 0.1765381070132168,
+        "mean_member_spectrum_rel_error_mean": 0.16075829847896886,
+        "mean_member_spectrum_rel_error_std": 0.17860881411048776,
+        "individual_member_spectrum_rel_error_mean": 0.16330437601694334,
+        "individual_member_spectrum_rel_error_std": 0.17682494908183188
+      },
+      "FM_temp_0.5": {
+        "ensemble_mean_field_spectrum_rel_error_mean": 0.039125695232845224,
+        "ensemble_mean_field_spectrum_rel_error_std": 0.02721348518595814,
+        "mean_member_spectrum_rel_error_mean": 0.040940431069530964,
+        "mean_member_spectrum_rel_error_std": 0.02648150577306637,
+        "individual_member_spectrum_rel_error_mean": 0.047083594679457344,
+        "individual_member_spectrum_rel_error_std": 0.023838789159178298
+      }
+    },
+    "energy_spectra_first_25_modes": {
+      "k_bins": [
+        0.0,
+        3.1415927410125732,
+        6.2831854820251465,
+        9.42477798461914,
+        12.566370964050293,
+        15.707963943481445,
+        18.84955596923828,
+        21.99114990234375,
+        25.132741928100586,
+        28.274333953857422,
+        31.41592788696289,
+        34.55752182006836,
+        37.69911193847656,
+        40.84070587158203,
+        43.9822998046875,
+        47.1238899230957,
+        50.26548385620117,
+        53.40707778930664,
+        56.548667907714844,
+        59.69026184082031,
+        62.83185577392578,
+        65.97344970703125,
+        69.11504364013672,
+        72.25662994384766,
+        75.39822387695312
+      ],
+      "GT": [
+        2.556935760367196e-05,
+        0.06674329191446304,
+        0.010383382439613342,
+        0.004061298444867134,
+        0.0006254635518416762,
+        0.0007665948360227048,
+        0.0001483433006796986,
+        0.00010547260171733797,
+        4.0756884118309245e-05,
+        2.4158933229045942e-05,
+        1.0192547051701695e-05,
+        6.160019438539166e-06,
+        4.356687441031681e-06,
+        2.3349175535258837e-06,
+        1.7822608242568094e-06,
+        1.1154965022797114e-06,
+        8.867946235113777e-07,
+        7.619313464601873e-07,
+        5.869366077604354e-07,
+        4.525187478066073e-07,
+        3.136699149308697e-07,
+        3.231754135413212e-07,
+        2.204919837822672e-07,
+        1.621716023691988e-07,
+        1.5251663398885285e-07
+      ],
+      "D0_ensemble_mean_field": [
+        2.8241642212378792e-05,
+        0.06555899232625961,
+        0.010000078938901424,
+        0.004274823237210512,
+        0.0005313802976161242,
+        0.0007629453320987523,
+        0.00013350210792850703,
+        9.756840881891549e-05,
+        3.698511136462912e-05,
+        2.1919528080616146e-05,
+        7.178667601692723e-06,
+        4.680623533204198e-06,
+        2.3421289370162413e-06,
+        1.4787333384447265e-06,
+        8.564150562051509e-07,
+        4.498662917740148e-07,
+        4.003927642770577e-07,
+        1.999472090119525e-07,
+        2.3123016035242472e-07,
+        8.060617062710662e-08,
+        1.1295404789279928e-07,
+        4.7461199415010924e-08,
+        5.557154025837008e-08,
+        2.5041194007258127e-08,
+        3.215760457919714e-08
+      ],
+      "D0_mean_member": [
+        2.8241642212378792e-05,
+        0.06555899232625961,
+        0.010000078938901424,
+        0.004274823237210512,
+        0.0005313803558237851,
+        0.0007629452738910913,
+        0.0001335020933765918,
+        9.756840881891549e-05,
+        3.698510772665031e-05,
+        2.1919528080616146e-05,
+        7.178667601692723e-06,
+        4.680623533204198e-06,
+        2.3421289370162413e-06,
+        1.4787332247578888e-06,
+        8.564150562051509e-07,
+        4.4986623493059597e-07,
+        4.003927642770577e-07,
+        1.999472090119525e-07,
+        2.312301319307153e-07,
+        8.060617062710662e-08,
+        1.1295404789279928e-07,
+        4.7461199415010924e-08,
+        5.557154025837008e-08,
+        2.5041194007258127e-08,
+        3.215760102648346e-08
+      ],
+      "G0_ensemble_mean_field": [
+        2.009589661611244e-05,
+        0.0662536472082138,
+        0.011579121463000774,
+        0.0038747501093894243,
+        0.000548976706340909,
+        0.0007271358044818044,
+        0.00014427179121412337,
+        9.723183757159859e-05,
+        5.0640202971408144e-05,
+        2.810238402162213e-05,
+        1.8532475223764777e-05,
+        1.0564107469690498e-05,
+        9.359969226352405e-06,
+        5.7872985053109005e-06,
+        4.533702394837746e-06,
+        2.6772295314003713e-06,
+        2.26906831812812e-06,
+        1.3699834653380094e-06,
+        1.1505858310556505e-06,
+        5.336894446372753e-07,
+        5.13489794684574e-07,
+        2.731069912442763e-07,
+        2.29214066393979e-07,
+        1.1576013037029043e-07,
+        1.1289061063735062e-07
+      ],
+      "G0_mean_member": [
+        2.4128539735102095e-05,
+        0.06629151105880737,
+        0.011782348155975342,
+        0.003968135919421911,
+        0.0007367513608187437,
+        0.0008640405721962452,
+        0.00031169256544671953,
+        0.00020241427409928292,
+        0.0001964755356311798,
+        8.985460590338334e-05,
+        0.00011899313540197909,
+        5.771006181021221e-05,
+        6.565429066540673e-05,
+        3.5259949072496966e-05,
+        3.2977783121168613e-05,
+        1.858331415860448e-05,
+        1.702833833405748e-05,
+        1.0098519851453602e-05,
+        8.449536835541949e-06,
+        3.828632543445565e-06,
+        3.7853392313991208e-06,
+        1.9658834844449302e-06,
+        1.6667909221723676e-06,
+        8.557323667446326e-07,
+        7.973931133165024e-07
+      ],
+      "G1_ensemble_mean_field": [
+        1.6638303350191563e-05,
+        0.06657908856868744,
+        0.012118872255086899,
+        0.0037822334561496973,
+        0.0005115361418575048,
+        0.000678144977428019,
+        0.00013917045725975186,
+        9.17713186936453e-05,
+        5.118096305523068e-05,
+        2.788885285553988e-05,
+        2.0868204956059344e-05,
+        1.1477346561150625e-05,
+        1.0697263860492967e-05,
+        6.526759989355924e-06,
+        5.234112904872745e-06,
+        3.0409519240492955e-06,
+        2.6604204776958795e-06,
+        1.6148649137903703e-06,
+        1.3621630614579772e-06,
+        6.330338351290266e-07,
+        6.130329666120815e-07,
+        3.2349601042369613e-07,
+        2.777254906050075e-07,
+        1.4098860390276968e-07,
+        1.3506286222764174e-07
+      ],
+      "G1_mean_member": [
+        2.128254527633544e-05,
+        0.06662400811910629,
+        0.012357575818896294,
+        0.003891989588737488,
+        0.0007390347891487181,
+        0.000842992914840579,
+        0.0003462129971012473,
+        0.00021949051006231457,
+        0.00023066441644914448,
+        0.00010272818326484412,
+        0.00014276066212914884,
+        6.733820191584527e-05,
+        7.774191908538342e-05,
+        4.135611743549816e-05,
+        3.928762816940434e-05,
+        2.1845671653863974e-05,
+        2.029318784479983e-05,
+        1.1993564839940518e-05,
+        1.018057628243696e-05,
+        4.640413862944115e-06,
+        4.590331627696287e-06,
+        2.4010475954128196e-06,
+        2.0536558622552548e-06,
+        1.0597904065434705e-06,
+        9.889020020636963e-07
+      ],
+      "FM_temp_0.5_ensemble_mean_field": [
+        0.00015584001084789634,
+        0.06533309817314148,
+        0.010377209633588791,
+        0.003446880029514432,
+        0.0011758048785850406,
+        0.0006794038345105946,
+        0.00030428761965595186,
+        0.000167889054864645,
+        0.00017579205450601876,
+        5.7580175052862614e-05,
+        6.964048225199804e-05,
+        2.7243753720540553e-05,
+        2.658234916452784e-05,
+        1.3796427992929239e-05,
+        1.0827419828274287e-05,
+        6.229582140804268e-06,
+        5.185337158764014e-06,
+        2.7840196707984433e-06,
+        2.536419742682483e-06,
+        1.1017737051588483e-06,
+        1.193104253616184e-06,
+        5.850394018125371e-07,
+        5.877673743270861e-07,
+        2.7069225438935973e-07,
+        2.924818716110167e-07
+      ],
+      "FM_temp_0.5_mean_member": [
+        0.00015917158452793956,
+        0.0653722956776619,
+        0.010593533515930176,
+        0.0035551683977246284,
+        0.001408659853041172,
+        0.0008652911055833101,
+        0.0005520556005649269,
+        0.0003296774812042713,
+        0.000420935801230371,
+        0.0001598550152266398,
+        0.00024107804347295314,
+        0.00010323858441552147,
+        0.00011664476187434047,
+        5.941919516772032e-05,
+        5.2816041716141626e-05,
+        2.9238182833069004e-05,
+        2.6104422431671992e-05,
+        1.5583356798742898e-05,
+        1.308583978243405e-05,
+        6.003518137731589e-06,
+        6.160647899378091e-06,
+        3.2718153306632303e-06,
+        2.953731609522947e-06,
+        1.5645358644178486e-06,
+        1.5095861272129696e-06
+      ]
+    },
+    "h5": {
+      "ground_truth_rms_divergence": 0.0023299062622609023,
+      "D0": {
+        "ensemble_mean_vrmse_vs_gt": 0.24821973674827152,
+        "sample_mean_vrmse_vs_gt": 0.24821973674827152,
+        "ensemble_mean_rms_divergence": 0.1550000344591317,
+        "sample_rms_divergence": 0.1550000344591317,
+        "divergence_ratio_vs_gt": 66.5262963449535,
+        "ensemble_mean_vorticity_rmse_vs_gt": 0.4641653996717922,
+        "sample_vorticity_rmse_vs_gt": 0.4641653996717922
+      },
+      "G0": {
+        "ensemble_mean_vrmse_vs_gt": 0.6336398807664713,
+        "sample_mean_vrmse_vs_gt": 1.426617791151835,
+        "ensemble_mean_rms_divergence": 0.31295679535435184,
+        "sample_rms_divergence": 0.8048237729704246,
+        "divergence_ratio_vs_gt": 345.4318253084727,
+        "ensemble_mean_vorticity_rmse_vs_gt": 0.6328751498019329,
+        "sample_vorticity_rmse_vs_gt": 1.1439652646516258
+      },
+      "G1": {
+        "ensemble_mean_vrmse_vs_gt": 0.6415958872271909,
+        "sample_mean_vrmse_vs_gt": 1.483140587910182,
+        "ensemble_mean_rms_divergence": 0.3237431480388576,
+        "sample_rms_divergence": 0.8379578770885197,
+        "divergence_ratio_vs_gt": 359.6530429835316,
+        "ensemble_mean_vorticity_rmse_vs_gt": 0.6532824146864878,
+        "sample_vorticity_rmse_vs_gt": 1.192487868605914
+      },
+      "FM_temp_0.5": {
+        "ensemble_mean_vrmse_vs_gt": 0.6465858096877733,
+        "sample_mean_vrmse_vs_gt": 1.1586769764415092,
+        "ensemble_mean_rms_divergence": 0.44284588509430334,
+        "sample_rms_divergence": 0.7376381838441144,
+        "divergence_ratio_vs_gt": 316.59564841390767,
+        "ensemble_mean_vorticity_rmse_vs_gt": 0.7927712117190224,
+        "sample_vorticity_rmse_vs_gt": 1.1820865028070155
+      }
+    },
+    "h10": {
+      "ground_truth_rms_divergence": 0.0022227738446675377,
+      "D0": {
+        "ensemble_mean_vrmse_vs_gt": 0.3186198915872309,
+        "sample_mean_vrmse_vs_gt": 0.3186198915872309,
+        "ensemble_mean_rms_divergence": 0.17507989055612377,
+        "sample_rms_divergence": 0.17507989055612377,
+        "divergence_ratio_vs_gt": 78.76639855923382,
+        "ensemble_mean_vorticity_rmse_vs_gt": 0.6331214171212568,
+        "sample_vorticity_rmse_vs_gt": 0.6331214171212568
+      },
+      "G0": {
+        "ensemble_mean_vrmse_vs_gt": 0.7919658045801852,
+        "sample_mean_vrmse_vs_gt": 1.729310240286092,
+        "ensemble_mean_rms_divergence": 0.35426886453766615,
+        "sample_rms_divergence": 0.9117875703451958,
+        "divergence_ratio_vs_gt": 410.20258202722044,
+        "ensemble_mean_vorticity_rmse_vs_gt": 0.8039204249910212,
+        "sample_vorticity_rmse_vs_gt": 1.3449164080871097
+      },
+      "G1": {
+        "ensemble_mean_vrmse_vs_gt": 0.8494526404473517,
+        "sample_mean_vrmse_vs_gt": 1.9034158947567146,
+        "ensemble_mean_rms_divergence": 0.38011919352743523,
+        "sample_rms_divergence": 0.9936160710759641,
+        "divergence_ratio_vs_gt": 447.0162690908306,
+        "ensemble_mean_vorticity_rmse_vs_gt": 0.841386040077172,
+        "sample_vorticity_rmse_vs_gt": 1.4562931583305185
+      },
+      "FM_temp_0.5": {
+        "ensemble_mean_vrmse_vs_gt": 1.2553136050701141,
+        "sample_mean_vrmse_vs_gt": 1.9919026373989053,
+        "ensemble_mean_rms_divergence": 0.793550428061467,
+        "sample_rms_divergence": 1.2442614783445942,
+        "divergence_ratio_vs_gt": 559.7787113293568,
+        "ensemble_mean_vorticity_rmse_vs_gt": 1.190356500504004,
+        "sample_vorticity_rmse_vs_gt": 1.8376299840726562
+      }
+    }
+  }
+}

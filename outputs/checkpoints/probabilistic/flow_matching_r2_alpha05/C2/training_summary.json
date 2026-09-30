@@ -1,0 +1,64 @@
+{
+  "branch": "C2",
+  "best_epoch": 1,
+  "best_val_cfm_loss": 1.0542740472157797,
+  "epoch0_val_cfm_loss": 1.1027657826741537,
+  "epoch0_val_step1_cfm_loss": 1.1033206955591837,
+  "epoch0_val_step2_cfm_loss": 1.1022108618418376,
+  "selected_checkpoint_path": "outputs/checkpoints/probabilistic/flow_matching_r2_alpha05/C2/best_latent_flow_matcher.pt",
+  "selected_checkpoint_sha256": "f110f9fb207a9fd8ab445c3a77462b9a74bcdb30afcbd2e4e1b39fdfb538010a",
+  "experiment_config": {
+    "branch": "C2",
+    "epochs": 1,
+    "sample_noise_scale": 0.5,
+    "lr": 0.0002,
+    "weight_decay": 0.0001,
+    "batch_size": 16,
+    "num_flow_steps": 10,
+    "solver": "midpoint",
+    "grad_clip": 1.0,
+    "train_windows": 825,
+    "val_windows": 150,
+    "num_optimizer_updates": 52,
+    "seed": 42
+  },
+  "history": [
+    {
+      "epoch": 1,
+      "train_total_cfm_loss": 1.0780127146749785,
+      "train_step1_cfm_loss": 1.0780544899449205,
+      "train_step2_cfm_loss": 1.077970935792634,
+      "val_total_cfm_loss": 1.0542740472157797,
+      "val_step1_cfm_loss": 1.054851900736491,
+      "val_step2_cfm_loss": 1.0536961809794108,
+      "lr": 1e-05
+    }
+  ],
+  "provenance": {
+    "d0_checkpoint": {
+      "path": "outputs/checkpoints/dynamics/horizon_r2/seed_42/E4_H12/latent_transformer/best_long_vrmse.pt",
+      "sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6"
+    },
+    "parent_fm_checkpoint": {
+      "path": "outputs/checkpoints/probabilistic/flow_matching_pilot3ep/best_latent_flow_matcher.pt",
+      "sha256": "0a2ac5dc8af8e9f6d532d8e4c0452a9e679f238d4e6470d323bd21b2c473c7ec"
+    },
+    "data_protocol": {
+      "split_file": "outputs/splits/grouped_split.json",
+      "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+      "normalizer_file": "outputs/normalization/stats_grouped.pt",
+      "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec"
+    },
+    "residual_statistics": {
+      "path": "outputs/normalization/latent_residual_stats.json",
+      "sha256": "448b2c338d7ec9e3eb05c1fb1ca4d0ca2088eae2e7e6bec5fd2fab0c27978f36",
+      "d0_sha256": "edddbe8a2528f848975ed33921bb8d2df13059cedb149c36f8132e20b255c0f6",
+      "scale_min": 0.3063662648200989,
+      "scale_max": 1.7961349487304688
+    },
+    "git_commit": "b7f2fba5ef9acc60ea4eb44932b3d43fd2de87bb",
+    "is_git_dirty": false,
+    "seed": 42,
+    "saved_at_utc": "2026-09-30T02:24:16.323291+00:00"
+  }
+}
