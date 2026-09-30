@@ -290,4 +290,64 @@ x_\tau = (1 - (1 - \sigma_{\min}) \tau) x_0 + \tau x_1, \quad \tau \in [0, 1]
 - **系综隔离推演**：`sample_rollout_flow_matching` 支持单源多轨迹独立历史缓冲滚动，杜绝跨轨迹污染；
 - **训练治理契约**：Fail-Closed 密码学比对数据与检查点哈希，并在反向传播后、优化器步进前强制断言全量梯度范数有限性。
 
+---
+
+## 13. 世界模型核心软件契约架构 (World Model Core Contracts - Phase 1)
+
+为支持系统未来平滑泛化与跨领域迁移（从 2D shear_flow 向 Rayleigh-Bénard、障碍物流动、几何流形、稀疏观测、语言上下文及机器人控制状态扩展），并在全过程维持“零行为改变”与“严格向后兼容”，系统在 [src/contracts/](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/src/contracts/) 中固化了第一层核心软件契约抽象（参见 [ADR-008](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-008-world-model-core-contract-phase1.md)）。
+
+### 13.1 核心调用链路拓扑 (Dataflow & Contract Topology)
+
+```
+StateSpec (物理状态规格: variables, num_channels, spatial_dim)
+    │
+    ▼
+WorldModelBatch [ history, future, context, coordinates, boundary, geometry, metadata ]
+    │
+    ▼ (空间自编码器流形: Encoder2D)
+Latent History Z_{t-L+1:t}
+    │
+    ▼
+LatentDynamics ◄──── Context (physical: Re, Sc; [预留: geometry, boundary, forcing, language, action])
+    │
+    ├── predict_mean() -> Z_{t+1} (D0 期望均值)
+    └── sample()       -> Z_{t+1} (高斯重参数化 / 流匹配连续 ODE 求解)
+    │
+    ▼ (潜空间 FIFO 历史缓冲区 HistoryBuffer 滚动)
+Future Latent Sequence Z_{t+1:t+H}
+    │
+    ▼ (空间自编码器流形: Decoder2D)
+Decoded Future Physical Fields q_{t+1:t+H}
+```
+
+### 13.2 四大核心抽象契约
+
+1. **StateSpec (`src/contracts/state_spec.py`)**：
+   - 表达物理状态变量及其通道结构：`variables`, `num_channels`, `spatial_dim`；
+   - 当前剪切流对应唯一契约：`SHEAR_FLOW_STATE_SPEC = StateSpec(variables=("u", "v", "p", "s"), num_channels=4, spatial_dim=2)`；
+   - 具备严格的张量维度断言 (`validate_tensor`) 与不可变只读防护。
+
+2. **Context (`src/contracts/context.py`)**：
+   - 统一多模态条件上下文结构：
+     - `context.physical`: 当前阶段启用，承载 Reynolds ($Re$) 与 Schmidt ($Sc$) 数；
+     - `context.geometry`: 预留（未来扩展障碍物掩码、SDF 符号距离场）；
+     - `context.boundary`: 预留（未来扩展混合边界与非周期壁面条件）；
+     - `context.forcing`: 预留（未来扩展外部驱动外力场）；
+     - `context.language`: 预留（未来扩展语言提示与目标描述）；
+     - `context.action`: 预留（未来扩展机器人交互控制动作）；
+   - 在固定输入下，`Context` 与旧 conditioning 路径保持 bitwise equal 数值一致性。
+
+3. **WorldModelBatch (`src/contracts/batch.py`)**：
+   - 统一世界模型 Batch 数据契约，无损封装历史流场、未来目标、条件上下文、物理规格、时空坐标与轨迹元数据；
+   - 实现 `Mapping` 协议，完全兼容历史字典索引访问（`batch["history"]`、`batch["re"]`、`"re" in batch`）；
+   - 提供 `.to(device)` 递归设备迁移与 `.to_dict()` 序列化工具。
+
+4. **LatentDynamics (`src/contracts/latent_dynamics.py`)**：
+   - 统一潜空间动力学核心调用契约，统一提供 `predict_mean(...)`、`sample(...)` 与 `rollout(...)` 接口；
+   - 包含三分支成熟实现：
+     - `DeterministicLatentDynamics`：包装基准时空 Transformer，输出确定性流场转移；
+     - `GaussianLatentDynamics`：包装条件高斯概率动力学与方差头，支持严格正方差下有界扰动；
+     - `FlowMatchingLatentDynamics`：包装残差流匹配 (OT-CFM) 与高阶 ODE 求解器，支持确定性结构平价回退 (`deterministic_fallback=True`) 与任意连续时间积分步。
+
+
 

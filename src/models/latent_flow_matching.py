@@ -479,6 +479,19 @@ class LatentFlowMatcher(nn.Module):
             scale_tensor = scale_tensor.view(1, -1, 1, 1)
         self.register_buffer("residual_scale", scale_tensor)
 
+    def _load_from_state_dict(
+        self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+    ):
+        """Allow seamless loading of checkpoints containing residual_scale."""
+        key = prefix + "residual_scale"
+        if key in state_dict and self.residual_scale is None:
+            val = state_dict[key]
+            if val is not None and isinstance(val, torch.Tensor):
+                self.set_residual_scale(val)
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        )
+
     @classmethod
     def from_residual_stats(
         cls,
@@ -513,7 +526,10 @@ class LatentFlowMatcher(nn.Module):
     ) -> torch.Tensor:
         """Helper to compute or default condition embedding vector."""
         if re is not None and sc is not None:
-            return self.cond_embed(re, sc)
+            c = self.cond_embed(re, sc)
+            if c.shape[0] == 1 and b > 1:
+                c = c.expand(b, -1)
+            return c
         # Default condition vector (zeros)
         return torch.zeros(b, self.cond_dim, device=device, dtype=dtype)
 
@@ -526,6 +542,7 @@ class LatentFlowMatcher(nn.Module):
         generator: Optional[torch.Generator] = None,
         custom_tau: Optional[torch.Tensor] = None,
         custom_x0: Optional[torch.Tensor] = None,
+        context: Optional[Any] = None,
     ) -> Dict[str, torch.Tensor]:
         """Compute CFM regression loss with residual scale normalization.
 
@@ -537,10 +554,16 @@ class LatentFlowMatcher(nn.Module):
             generator: Optional PyTorch Generator for reproducible random sampling.
             custom_tau: Optional pre-sampled flow time tensor for deterministic testing.
             custom_x0: Optional pre-sampled base noise tensor for deterministic testing.
+            context: Optional Context contract containing physical parameters (re, sc).
 
         Returns:
             Dict containing 'loss' (scalar mean squared error), 'v_pred', 'u_target', 'x_tau'.
         """
+        if context is not None and hasattr(context, "to_re_sc"):
+            c_re, c_sc = context.to_re_sc()
+            re = re if re is not None else c_re
+            sc = sc if sc is not None else c_sc
+
         if z_next.ndim == 5:
             z_next = z_next.squeeze(1)
         if mu.ndim == 5:
@@ -619,6 +642,7 @@ class LatentFlowMatcher(nn.Module):
         seed: Optional[int] = None,
         custom_x0: Optional[torch.Tensor] = None,
         return_trajectory: bool = False,
+        context: Optional[Any] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, List[torch.Tensor]]]:
         """Sample next latent state by integrating the learned neural ODE from tau=0 to tau=1.
 
@@ -639,11 +663,17 @@ class LatentFlowMatcher(nn.Module):
             seed: Optional integer seed for reproducibility.
             custom_x0: Optional initial base noise tensor for testing.
             return_trajectory: If True, also returns list of intermediate latent tensors.
+            context: Optional Context contract containing physical parameters (re, sc).
 
         Returns:
             z_sample: Sampled next latent state of shape (B, 1, C_z, H_z, W_z).
             trajectory: (Optional) Intermediate trajectory states if return_trajectory=True.
         """
+        if context is not None and hasattr(context, "to_re_sc"):
+            c_re, c_sc = context.to_re_sc()
+            re = re if re is not None else c_re
+            sc = sc if sc is not None else c_sc
+
         orig_ndim = mu.ndim
         if orig_ndim == 5:
             mu_2d = mu.squeeze(1)

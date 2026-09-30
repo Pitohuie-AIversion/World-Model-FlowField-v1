@@ -6,7 +6,7 @@ injecting physical parameters (Re, Sc) via AdaLN modulation.
 Supports both Direct and Residual latent prediction heads.
 """
 
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -172,6 +172,7 @@ class LatentSTTransformer(nn.Module):
         z_hist: torch.Tensor,
         re: Optional[torch.Tensor] = None,
         sc: Optional[torch.Tensor] = None,
+        context: Optional[Any] = None,
     ) -> Tuple[torch.Tensor, Tuple[int, int, int, int, int]]:
         """Extract normalized latent features before output projection heads.
 
@@ -179,11 +180,17 @@ class LatentSTTransformer(nn.Module):
             z_hist: Latent sequence of shape (B, L, C_z, H_z, W_z).
             re: Optional Reynolds number tensor (B,).
             sc: Optional Schmidt number tensor (B,).
+            context: Optional Context contract containing physical parameters (re, sc).
 
         Returns:
             x_last: Normalized last-token features of shape (B, 1, N, embed_dim).
             shape_info: Tuple of (b, l, c_z, h_z, w_z).
         """
+        if context is not None and hasattr(context, "to_re_sc"):
+            c_re, c_sc = context.to_re_sc()
+            re = re if re is not None else c_re
+            sc = sc if sc is not None else c_sc
+
         b, l, c_z, h_z, w_z = z_hist.shape
         n_spatial = h_z * w_z
 
@@ -216,6 +223,7 @@ class LatentSTTransformer(nn.Module):
         z_hist: torch.Tensor,
         re: Optional[torch.Tensor] = None,
         sc: Optional[torch.Tensor] = None,
+        context: Optional[Any] = None,
     ) -> torch.Tensor:
         """Deterministic forward pass predicting the next latent state Z_{t+1}.
 
@@ -223,11 +231,12 @@ class LatentSTTransformer(nn.Module):
             z_hist: Latent sequence of shape (B, L, C_z, H_z, W_z).
             re: Optional Reynolds number tensor (B,).
             sc: Optional Schmidt number tensor (B,).
+            context: Optional Context contract containing physical parameters (re, sc).
 
         Returns:
             z_next: Next latent state prediction of shape (B, 1, C_z, H_z, W_z).
         """
-        x_last, (b, l, c_z, h_z, w_z) = self.forward_features(z_hist, re=re, sc=sc)
+        x_last, (b, l, c_z, h_z, w_z) = self.forward_features(z_hist, re=re, sc=sc, context=context)
         delta_or_pred = self.out_proj(x_last)  # (B, 1, N, C_z)
 
         # Reshape to (B, 1, C_z, H_z, W_z)
@@ -245,6 +254,7 @@ class LatentSTTransformer(nn.Module):
         re: Optional[torch.Tensor] = None,
         sc: Optional[torch.Tensor] = None,
         variance_head: Optional[nn.Module] = None,
+        context: Optional[Any] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Predict conditional Gaussian parameters (mu, variance) for next latent state.
 
@@ -253,6 +263,7 @@ class LatentSTTransformer(nn.Module):
             re: Optional Reynolds number tensor (B,).
             sc: Optional Schmidt number tensor (B,).
             variance_head: Optional override variance head module.
+            context: Optional Context contract containing physical parameters (re, sc).
 
         Returns:
             mu: Predicted mean latent state of shape (B, 1, C_z, H_z, W_z).
@@ -265,7 +276,7 @@ class LatentSTTransformer(nn.Module):
                 "Call attach_variance_head() or pass variance_head explicitly."
             )
 
-        x_last, (b, l, c_z, h_z, w_z) = self.forward_features(z_hist, re=re, sc=sc)
+        x_last, (b, l, c_z, h_z, w_z) = self.forward_features(z_hist, re=re, sc=sc, context=context)
         delta_or_pred = self.out_proj(x_last)
         pred_latent = delta_or_pred.view(b, 1, h_z, w_z, c_z).permute(0, 1, 4, 2, 3)
 

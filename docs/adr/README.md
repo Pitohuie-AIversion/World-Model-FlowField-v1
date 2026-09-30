@@ -13,5 +13,6 @@
 | [ADR-005](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-005-probabilistic-latent-dynamics-and-calibration.md) | 概率潜流形方差建模与不确定性量化治理架构 | **Accepted** | 概率与量化 | 潜残差审计、对角高斯方差头、高斯负对数似然 (NLL) 训练、自回归集合推演、Spread-Skill 跨窗口混合池化与区间校准 |
 | [ADR-006](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-006-navier-stokes-pde-residuals-and-controlled-training.md) | 连续 Navier-Stokes 与示踪剂偏微分方程残差约束受控训练 | **Accepted** | 物理与PDE | 连续 NS 动量与标量输运残差、Orszag 2/3 去混叠、均匀时间网格与坐标 Fail-Closed 治理、梯度尺度探测与受控微调 |
 | [ADR-007](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-007-latent-flow-matching-world-model.md) | 潜空间最优传输连续流匹配架构 (Latent OT-CFM) | **Accepted** | 概率生成与流匹配 | 残差流匹配直路径、二维双向周期性残差速度网络、零初始化均值平价、多阶连续 ODE 积分求解器与单源多轨迹隔离推演 |
+| [ADR-008](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/docs/adr/ADR-008-world-model-core-contract-phase1.md) | 世界模型核心软件契约第一阶段抽象架构 | **Accepted** | 软件契约与架构 | 统一 StateSpec、多模态 Context、Mapping 兼容 WorldModelBatch、统一 LatentDynamics 接口与零行为改变保障 |
 
 

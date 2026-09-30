@@ -1,6 +1,6 @@
 """End-to-end Latent Forecaster integrating Encoder, LatentSTTransformer, and Decoder."""
 
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 import torch
 import torch.nn as nn
 from src.models.decoder import Decoder2D
@@ -45,8 +45,14 @@ class LatentForecaster(nn.Module):
         q_hist: torch.Tensor,
         re: Optional[torch.Tensor] = None,
         sc: Optional[torch.Tensor] = None,
+        context: Optional[Any] = None,
     ) -> torch.Tensor:
         """q_hist: (B, L, 4, Ny, Nx) -> q_pred: (B, 1, 4, Ny, Nx)."""
+        if context is not None and hasattr(context, "to_re_sc"):
+            c_re, c_sc = context.to_re_sc()
+            re = re if re is not None else c_re
+            sc = sc if sc is not None else c_sc
+
         if self.freeze_representation:
             with torch.no_grad():
                 z_hist = self.encoder(q_hist)
@@ -65,6 +71,7 @@ class LatentForecaster(nn.Module):
         horizon: int = 30,
         pushforward_steps: int = 0,
         noise_std: float = 0.0,
+        context: Optional[Any] = None,
     ) -> torch.Tensor:
         """Roll out H steps entirely in latent space, then decode.
 
@@ -75,10 +82,16 @@ class LatentForecaster(nn.Module):
             horizon: Prediction horizon H (default: 30).
             pushforward_steps: Number of warmup rollout steps executed without gradients (default: 0).
             noise_std: Standard deviation of Gaussian perturbation injected during rollout (default: 0.0).
+            context: Optional Context contract containing physical parameters (re, sc).
 
         Returns:
             q_rollout: Predicted physical fields of shape (B, horizon, C, Ny, Nx).
         """
+        if context is not None and hasattr(context, "to_re_sc"):
+            c_re, c_sc = context.to_re_sc()
+            re = re if re is not None else c_re
+            sc = sc if sc is not None else c_sc
+
         if self.freeze_representation:
             with torch.no_grad():
                 z_hist = self.encoder(q_hist)
@@ -106,6 +119,7 @@ class LatentForecaster(nn.Module):
         horizon: int = 1,
         pushforward_steps: int = 0,
         noise_std: float = 0.0,
+        context: Optional[Any] = None,
     ) -> torch.Tensor:
         """Unified forward interface matching baseline models.
 
@@ -116,12 +130,13 @@ class LatentForecaster(nn.Module):
             horizon: Prediction horizon H (default: 1).
             pushforward_steps: Number of warmup rollout steps without gradients (default: 0).
             noise_std: Standard deviation of Gaussian noise injected (default: 0.0).
+            context: Optional Context contract containing physical parameters (re, sc).
 
         Returns:
             Predicted physical fields of shape (B, H, C, Ny, Nx).
         """
         if horizon == 1 and pushforward_steps == 0:
-            return self.forward_single_step(q_hist, re=re, sc=sc)
+            return self.forward_single_step(q_hist, re=re, sc=sc, context=context)
         else:
             return self.forward_rollout(
                 q_hist,
@@ -130,6 +145,7 @@ class LatentForecaster(nn.Module):
                 horizon=horizon,
                 pushforward_steps=pushforward_steps,
                 noise_std=noise_std,
+                context=context,
             )
 
     def attach_variance_head(self, variance_head: nn.Module) -> None:
@@ -147,6 +163,7 @@ class LatentForecaster(nn.Module):
         re: Optional[torch.Tensor] = None,
         sc: Optional[torch.Tensor] = None,
         variance_head: Optional[nn.Module] = None,
+        context: Optional[Any] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Encode physical history and predict conditional (mu, variance) in latent space.
 
@@ -155,11 +172,17 @@ class LatentForecaster(nn.Module):
             re: Optional Reynolds number tensor (B,).
             sc: Optional Schmidt number tensor (B,).
             variance_head: Optional variance head override.
+            context: Optional Context contract containing physical parameters (re, sc).
 
         Returns:
             mu: Predicted mean latent state of shape (B, 1, C_z, H_z, W_z).
             variance: Predicted conditional variance of shape (B, 1, C_z, H_z, W_z).
         """
+        if context is not None and hasattr(context, "to_re_sc"):
+            c_re, c_sc = context.to_re_sc()
+            re = re if re is not None else c_re
+            sc = sc if sc is not None else c_sc
+
         if self.freeze_representation:
             with torch.no_grad():
                 z_hist = self.encoder(q_hist)
@@ -171,6 +194,7 @@ class LatentForecaster(nn.Module):
             re=re,
             sc=sc,
             variance_head=variance_head,
+            context=context,
         )
 
     def sample_rollout(
@@ -185,6 +209,7 @@ class LatentForecaster(nn.Module):
         variance_head: Optional[nn.Module] = None,
         decode_samples: bool = True,
         custom_noise_sequence: Optional[list] = None,
+        context: Optional[Any] = None,
     ) -> Dict[str, torch.Tensor]:
         """Execute single-source multi-trajectory probabilistic rollout in latent space.
 
@@ -202,6 +227,7 @@ class LatentForecaster(nn.Module):
             variance_head: Optional variance head override.
             decode_samples: If True, decodes sample latent trajectories to physical space.
             custom_noise_sequence: Optional list of H noise tensors for controlled testing.
+            context: Optional Context contract containing physical parameters (re, sc).
 
         Returns:
             Dictionary containing:
@@ -211,6 +237,10 @@ class LatentForecaster(nn.Module):
                 - "latent_samples": (B, K, H, C_z, H_z, W_z) sampled latent trajectories.
                 - "latent_variances": (B, K, H, C_z, H_z, W_z) conditional variance at each step.
         """
+        if context is not None and hasattr(context, "to_re_sc"):
+            c_re, c_sc = context.to_re_sc()
+            re = re if re is not None else c_re
+            sc = sc if sc is not None else c_sc
         b, l, c_in, ny, nx = q_hist.shape
         k = num_samples
 
@@ -360,6 +390,7 @@ class LatentForecaster(nn.Module):
         generator: Optional[torch.Generator] = None,
         flow_matcher: Optional[nn.Module] = None,
         decode_samples: bool = True,
+        context: Optional[Any] = None,
     ) -> Dict[str, torch.Tensor]:
         """Execute single-source multi-trajectory rollout in latent space using Flow Matching.
 
@@ -380,6 +411,7 @@ class LatentForecaster(nn.Module):
             generator: Optional PyTorch Generator.
             flow_matcher: Optional flow matcher override.
             decode_samples: If True, decodes sample latent trajectories to physical space.
+            context: Optional Context contract containing physical parameters (re, sc).
 
         Returns:
             Dictionary containing:
@@ -388,6 +420,11 @@ class LatentForecaster(nn.Module):
                 - "ensemble_mean": (B, H, C, Ny, Nx) mean across K physical trajectories (if decode_samples=True).
                 - "latent_samples": (B, K, H, C_z, H_z, W_z) sampled latent trajectories.
         """
+        if context is not None and hasattr(context, "to_re_sc"):
+            c_re, c_sc = context.to_re_sc()
+            re = re if re is not None else c_re
+            sc = sc if sc is not None else c_sc
+
         fm = flow_matcher if flow_matcher is not None else self.flow_matcher
         if fm is None:
             raise RuntimeError(
