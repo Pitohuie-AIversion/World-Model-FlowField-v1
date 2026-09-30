@@ -302,13 +302,13 @@ x_\tau = (1 - (1 - \sigma_{\min}) \tau) x_0 + \tau x_1, \quad \tau \in [0, 1]
 StateSpec (物理状态规格: variables, num_channels, spatial_dim)
     │
     ▼
-WorldModelBatch [ history, future, context, coordinates, boundary, geometry, metadata ]
+WorldModelBatch [ history, state_spec, future, context, coordinates, metadata ]
     │
     ▼ (空间自编码器流形: Encoder2D)
 Latent History Z_{t-L+1:t}
     │
     ▼
-LatentDynamics ◄──── Context (physical: Re, Sc; [预留: geometry, boundary, forcing, language, action])
+LatentDynamics ◄──── Context (physical: Re, Sc; geometry, boundary, forcing, language, action)
     │
     ├── predict_mean() -> Z_{t+1} (D0 期望均值)
     └── sample()       -> Z_{t+1} (高斯重参数化 / 流匹配连续 ODE 求解)
@@ -330,15 +330,18 @@ Decoded Future Physical Fields q_{t+1:t+H}
 2. **Context (`src/contracts/context.py`)**：
    - 统一多模态条件上下文结构：
      - `context.physical`: 当前阶段启用，承载 Reynolds ($Re$) 与 Schmidt ($Sc$) 数；
-     - `context.geometry`: 预留（未来扩展障碍物掩码、SDF 符号距离场）；
-     - `context.boundary`: 预留（未来扩展混合边界与非周期壁面条件）；
-     - `context.forcing`: 预留（未来扩展外部驱动外力场）；
-     - `context.language`: 预留（未来扩展语言提示与目标描述）；
-     - `context.action`: 预留（未来扩展机器人交互控制动作）；
-   - 在固定输入下，`Context` 与旧 conditioning 路径保持 bitwise equal 数值一致性。
+     - `context.geometry`: 单一事实源（扩展障碍物掩码、SDF 符号距离场）；
+     - `context.boundary`: 单一事实源（扩展混合边界与非周期壁面条件）；
+     - `context.forcing`: 预留（扩展外部驱动外力场）；
+     - `context.language`: 预留（扩展语言提示与目标描述）；
+     - `context.action`: 预留（扩展机器人交互控制动作）；
+   - 在固定输入下，`Context` 与旧 conditioning 路径保持 bitwise equal 数值一致性；
+   - `resolve_context` 支持 Context 与 legacy `(re, sc)` 参数混合传入时的严格闭门一致性校验 (Fail-Closed)。
 
 3. **WorldModelBatch (`src/contracts/batch.py`)**：
    - 统一世界模型 Batch 数据契约，无损封装历史流场、未来目标、条件上下文、物理规格、时空坐标与轨迹元数据；
+   - **单一事实源**：`boundary` 与 `geometry` 权威存储于 `Context`，Batch 仅通过 `@property` 代理访问；
+   - **无领域假设**：强制显式提供 `state_spec`，禁止静默默认假设剪切流或周期边界；剪切流通过 `shear_flow_batch_adapter` 与 `collate_shear_flow_batch` 注入；
    - 实现 `Mapping` 协议，完全兼容历史字典索引访问（`batch["history"]`、`batch["re"]`、`"re" in batch`）；
    - 提供 `.to(device)` 递归设备迁移与 `.to_dict()` 序列化工具。
 
@@ -347,7 +350,7 @@ Decoded Future Physical Fields q_{t+1:t+H}
    - 包含三分支成熟实现：
      - `DeterministicLatentDynamics`：包装基准时空 Transformer，输出确定性流场转移；
      - `GaussianLatentDynamics`：包装条件高斯概率动力学与方差头，支持严格正方差下有界扰动；
-     - `FlowMatchingLatentDynamics`：包装残差流匹配 (OT-CFM) 与高阶 ODE 求解器，支持确定性结构平价回退 (`deterministic_fallback=True`) 与任意连续时间积分步。
+     - `FlowMatchingLatentDynamics`：包装残差流匹配 (OT-CFM) 与高阶 ODE 求解器，支持确定性结构平价回退 (`deterministic_fallback=True`) 与任意连续时间积分步；严密审计 `_load_from_state_dict` 保持 `strict=True` 负向防护。
 
 
 

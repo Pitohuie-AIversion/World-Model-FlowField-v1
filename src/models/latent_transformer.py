@@ -186,10 +186,9 @@ class LatentSTTransformer(nn.Module):
             x_last: Normalized last-token features of shape (B, 1, N, embed_dim).
             shape_info: Tuple of (b, l, c_z, h_z, w_z).
         """
-        if context is not None and hasattr(context, "to_re_sc"):
-            c_re, c_sc = context.to_re_sc()
-            re = re if re is not None else c_re
-            sc = sc if sc is not None else c_sc
+        from src.contracts.context import resolve_context
+        ctx = resolve_context(context=context, re=re, sc=sc)
+        re, sc = ctx.to_re_sc() if ctx is not None else (None, None)
 
         b, l, c_z, h_z, w_z = z_hist.shape
         n_spatial = h_z * w_z

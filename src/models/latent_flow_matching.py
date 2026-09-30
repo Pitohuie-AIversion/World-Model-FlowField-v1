@@ -482,12 +482,27 @@ class LatentFlowMatcher(nn.Module):
     def _load_from_state_dict(
         self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
     ):
-        """Allow seamless loading of checkpoints containing residual_scale."""
+        """Strict governance hook for loading checkpoints containing residual_scale.
+
+        Enforces:
+        1. When key is present in state_dict:
+           - Must be a valid torch.Tensor.
+           - Must strictly validate shape, finiteness (no NaN/Inf), and positivity (> 0).
+           - Any violation records to error_msgs for strict fail-closed rejection.
+        2. Seamlessly registers validated scale tensor so strict=True checkpoint loading succeeds.
+        """
         key = prefix + "residual_scale"
-        if key in state_dict and self.residual_scale is None:
+        if key in state_dict:
             val = state_dict[key]
-            if val is not None and isinstance(val, torch.Tensor):
-                self.set_residual_scale(val)
+            if val is None:
+                error_msgs.append(f"Buffer '{key}' in state_dict cannot be None")
+            elif not isinstance(val, torch.Tensor):
+                error_msgs.append(f"Buffer '{key}' must be a torch.Tensor, got {type(val)}")
+            else:
+                try:
+                    self.set_residual_scale(val)
+                except ValueError as e:
+                    error_msgs.append(f"Invalid '{key}' in state_dict: {str(e)}")
         super()._load_from_state_dict(
             state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
         )
@@ -559,10 +574,9 @@ class LatentFlowMatcher(nn.Module):
         Returns:
             Dict containing 'loss' (scalar mean squared error), 'v_pred', 'u_target', 'x_tau'.
         """
-        if context is not None and hasattr(context, "to_re_sc"):
-            c_re, c_sc = context.to_re_sc()
-            re = re if re is not None else c_re
-            sc = sc if sc is not None else c_sc
+        from src.contracts.context import resolve_context
+        ctx = resolve_context(context=context, re=re, sc=sc)
+        re, sc = ctx.to_re_sc() if ctx is not None else (None, None)
 
         if z_next.ndim == 5:
             z_next = z_next.squeeze(1)
@@ -669,10 +683,9 @@ class LatentFlowMatcher(nn.Module):
             z_sample: Sampled next latent state of shape (B, 1, C_z, H_z, W_z).
             trajectory: (Optional) Intermediate trajectory states if return_trajectory=True.
         """
-        if context is not None and hasattr(context, "to_re_sc"):
-            c_re, c_sc = context.to_re_sc()
-            re = re if re is not None else c_re
-            sc = sc if sc is not None else c_sc
+        from src.contracts.context import resolve_context
+        ctx = resolve_context(context=context, re=re, sc=sc)
+        re, sc = ctx.to_re_sc() if ctx is not None else (None, None)
 
         orig_ndim = mu.ndim
         if orig_ndim == 5:

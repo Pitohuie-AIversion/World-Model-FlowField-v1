@@ -131,13 +131,21 @@ def resolve_context(
 ) -> Optional[Context]:
     """Compatibility resolver supporting both new Context and legacy (re, sc) parameters.
 
+    Fail-Closed Policy:
+    If both Context and legacy (re, sc) parameters are provided, their values must be
+    numerically equal within tolerance. Any divergence raises ValueError immediately.
+
     Returns:
         Unified Context instance, or None if no conditioning information is provided.
+
+    Raises:
+        ValueError: If Context and legacy parameters conflict.
+        TypeError: If context has an unsupported type.
     """
     if context is not None:
         if isinstance(context, Context):
-            return context
-        if isinstance(context, dict):
+            resolved_ctx = context
+        elif isinstance(context, dict):
             # Parse dict-based context
             phys_data = context.get("physical")
             if isinstance(phys_data, PhysicalContext):
@@ -154,7 +162,7 @@ def resolve_context(
             if re_val is not None or sc_val is not None:
                 phys = PhysicalContext(re=re_val, sc=sc_val)
 
-            return Context(
+            resolved_ctx = Context(
                 physical=phys,
                 geometry=context.get("geometry"),
                 boundary=context.get("boundary"),
@@ -162,7 +170,37 @@ def resolve_context(
                 language=context.get("language"),
                 action=context.get("action"),
             )
-        raise TypeError(f"Expected Context or dict, got {type(context)}")
+        else:
+            raise TypeError(f"Expected Context or dict, got {type(context)}")
+
+        # Fail-closed validation against legacy parameters
+        if re is not None:
+            if resolved_ctx.re is None:
+                raise ValueError(
+                    f"Context conflict: Context physical.re is None, but legacy re={re} was provided."
+                )
+            ctx_re_t = torch.as_tensor(resolved_ctx.re).float()
+            legacy_re_t = torch.as_tensor(re).float()
+            if not torch.allclose(ctx_re_t, legacy_re_t, rtol=1e-4, atol=1e-5):
+                raise ValueError(
+                    f"Context conflict: Context has re={resolved_ctx.re}, "
+                    f"but divergent legacy re={re} was provided (Fail-Closed)."
+                )
+
+        if sc is not None:
+            if resolved_ctx.sc is None:
+                raise ValueError(
+                    f"Context conflict: Context physical.sc is None, but legacy sc={sc} was provided."
+                )
+            ctx_sc_t = torch.as_tensor(resolved_ctx.sc).float()
+            legacy_sc_t = torch.as_tensor(sc).float()
+            if not torch.allclose(ctx_sc_t, legacy_sc_t, rtol=1e-4, atol=1e-5):
+                raise ValueError(
+                    f"Context conflict: Context has sc={resolved_ctx.sc}, "
+                    f"but divergent legacy sc={sc} was provided (Fail-Closed)."
+                )
+
+        return resolved_ctx
 
     if re is not None or sc is not None:
         return Context.from_re_sc(re=re, sc=sc)

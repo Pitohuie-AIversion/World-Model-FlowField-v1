@@ -47,11 +47,9 @@ class LatentForecaster(nn.Module):
         sc: Optional[torch.Tensor] = None,
         context: Optional[Any] = None,
     ) -> torch.Tensor:
-        """q_hist: (B, L, 4, Ny, Nx) -> q_pred: (B, 1, 4, Ny, Nx)."""
-        if context is not None and hasattr(context, "to_re_sc"):
-            c_re, c_sc = context.to_re_sc()
-            re = re if re is not None else c_re
-            sc = sc if sc is not None else c_sc
+        from src.contracts.context import resolve_context
+        ctx = resolve_context(context=context, re=re, sc=sc)
+        re, sc = ctx.to_re_sc() if ctx is not None else (None, None)
 
         if self.freeze_representation:
             with torch.no_grad():
@@ -87,10 +85,9 @@ class LatentForecaster(nn.Module):
         Returns:
             q_rollout: Predicted physical fields of shape (B, horizon, C, Ny, Nx).
         """
-        if context is not None and hasattr(context, "to_re_sc"):
-            c_re, c_sc = context.to_re_sc()
-            re = re if re is not None else c_re
-            sc = sc if sc is not None else c_sc
+        from src.contracts.context import resolve_context
+        ctx = resolve_context(context=context, re=re, sc=sc)
+        re, sc = ctx.to_re_sc() if ctx is not None else (None, None)
 
         if self.freeze_representation:
             with torch.no_grad():
@@ -178,10 +175,9 @@ class LatentForecaster(nn.Module):
             mu: Predicted mean latent state of shape (B, 1, C_z, H_z, W_z).
             variance: Predicted conditional variance of shape (B, 1, C_z, H_z, W_z).
         """
-        if context is not None and hasattr(context, "to_re_sc"):
-            c_re, c_sc = context.to_re_sc()
-            re = re if re is not None else c_re
-            sc = sc if sc is not None else c_sc
+        from src.contracts.context import resolve_context
+        ctx = resolve_context(context=context, re=re, sc=sc)
+        re, sc = ctx.to_re_sc() if ctx is not None else (None, None)
 
         if self.freeze_representation:
             with torch.no_grad():
@@ -237,10 +233,9 @@ class LatentForecaster(nn.Module):
                 - "latent_samples": (B, K, H, C_z, H_z, W_z) sampled latent trajectories.
                 - "latent_variances": (B, K, H, C_z, H_z, W_z) conditional variance at each step.
         """
-        if context is not None and hasattr(context, "to_re_sc"):
-            c_re, c_sc = context.to_re_sc()
-            re = re if re is not None else c_re
-            sc = sc if sc is not None else c_sc
+        from src.contracts.context import resolve_context
+        ctx = resolve_context(context=context, re=re, sc=sc)
+        re, sc = ctx.to_re_sc() if ctx is not None else (None, None)
         b, l, c_in, ny, nx = q_hist.shape
         k = num_samples
 
@@ -420,10 +415,9 @@ class LatentForecaster(nn.Module):
                 - "ensemble_mean": (B, H, C, Ny, Nx) mean across K physical trajectories (if decode_samples=True).
                 - "latent_samples": (B, K, H, C_z, H_z, W_z) sampled latent trajectories.
         """
-        if context is not None and hasattr(context, "to_re_sc"):
-            c_re, c_sc = context.to_re_sc()
-            re = re if re is not None else c_re
-            sc = sc if sc is not None else c_sc
+        from src.contracts.context import resolve_context
+        ctx = resolve_context(context=context, re=re, sc=sc)
+        re, sc = ctx.to_re_sc() if ctx is not None else (None, None)
 
         fm = flow_matcher if flow_matcher is not None else self.flow_matcher
         if fm is None:

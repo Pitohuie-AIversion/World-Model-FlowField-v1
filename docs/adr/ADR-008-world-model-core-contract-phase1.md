@@ -59,22 +59,22 @@ World-Model-FlowField-v1 经过前期研发，已完整建立了端到端流体�
       language: Optional[Any] = None             # 预留: 语言目标描述
       action: Optional[Any] = None               # 预留: 机器人/控制动作
   ```
-- **兼容性**：提供 `from_re_sc` 与 `to_re_sc`，在固定输入下与历史 ConditioningMLP 数值 bitwise equal；同时通过 `resolve_context` 自动兼容旧的 `(re, sc)` 参数调用。
+- **兼容性与冲突防御**：提供 `from_re_sc` 与 `to_re_sc`，在固定输入下与历史 ConditioningMLP 数值 bitwise equal；同时通过 `resolve_context` 统一兼容旧参数。在同时提供 `Context` 与旧 `(re, sc)` 参数时，执行**严格闭门校验 (Fail-Closed)**：若数值存在偏离直接抛出 `ValueError`，杜绝静默覆盖。
 
 ### 3. WorldModelBatch (统一世界模型 Batch 契约)
 - **定位**：连接 DataLoader 与 Trainer/Evaluator 的通用 Batch 容器。
-- **结构**：
+- **结构 (Phase 1.1 单一事实源治理)**：
   ```
   WorldModelBatch
   ├── history: Tensor (B, L, C, Ny, Nx)
+  ├── state_spec: StateSpec (显式必填，禁止静默默认 shear_flow)
   ├── future: Optional[Tensor] (B, H, C, Ny, Nx)
   ├── context: Optional[Context]
-  ├── state_spec: StateSpec
   ├── coordinates: Optional[Dict[str, Any]] (dt, time)
-  ├── boundary: Optional[Any] ("periodic")
-  ├── geometry: Optional[Any] (None)
   └── metadata: Dict[str, Any] (source_file, traj_idx, start_t, cluster_id)
   ```
+- **单一事实源 (Single Source of Truth)**：`boundary` 与 `geometry` 权威数据仅存于 `Context`。`WorldModelBatch.boundary` 与 `WorldModelBatch.geometry` 仅作为只读 `@property` 代理至 `context`，杜绝双重事实状态。
+- **领域适配器 (Domain Adapters)**：通用契约不再预设剪切流。提供 `shear_flow_batch_adapter` 与 `collate_shear_flow_batch` 负责注入 `SHEAR_FLOW_STATE_SPEC` 与周期边界条件。
 - **兼容性**：实现 `collections.abc.Mapping` 协议，旧代码以 `batch["history"]` 或 `batch["re"]` 访问 100% 透明兼容；提供 `.to(device)` 批量设备迁移能力。
 
 ### 4. LatentDynamics (统一潜动力学接口契约)
@@ -90,22 +90,23 @@ World-Model-FlowField-v1 经过前期研发，已完整建立了端到端流体�
   ├── GaussianLatentDynamics (包装 LatentSTTransformer + VarianceHead2D)
   └── FlowMatchingLatentDynamics (包装 D0 Backbone + LatentFlowMatcher)
   ```
+- **检查点加载安全审计**：`LatentFlowMatcher._load_from_state_dict` 保持 `strict=True` 语义，对 `residual_scale` 张量的形状、通道数、有限性（无 NaN/Inf）与严格正性进行前置验证，非法或畸变权重直接记录至 `error_msgs` 触发严格失败，绝不进行静默修复。
 
 ---
 
 ## 全局调用拓扑 (Architecture Dataflow Topology)
 
 ```
-StateSpec
+StateSpec (Explicit Schema)
     │
     ▼
-WorldModelBatch [ history, future, context, coordinates, metadata ]
+WorldModelBatch [ history, state_spec, future, context, coordinates, metadata ]
     │
     ▼ (Representation Subspace: Encoder2D)
 Latent History Z_{t-L+1:t}
     │
     ▼
-LatentDynamics ◄──── Context (physical: Re, Sc; [future: geometry, boundary, forcing, language, action])
+LatentDynamics ◄──── Context (physical: Re, Sc; geometry, boundary, forcing, language, action)
     │
     ├── predict_mean() -> Z_{t+1} (D0 Mean)
     └── sample()       -> Z_{t+1} (Gaussian / Flow Matching ODE)

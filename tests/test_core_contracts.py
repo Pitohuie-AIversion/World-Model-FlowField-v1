@@ -19,7 +19,12 @@ import torch.nn as nn
 
 from src.contracts.state_spec import StateSpec, SHEAR_FLOW_STATE_SPEC
 from src.contracts.context import Context, PhysicalContext, resolve_context
-from src.contracts.batch import WorldModelBatch, collate_world_model_batch
+from src.contracts.batch import (
+    WorldModelBatch,
+    collate_world_model_batch,
+    shear_flow_batch_adapter,
+    collate_shear_flow_batch,
+)
 from src.contracts.latent_dynamics import (
     LatentDynamics,
     DeterministicLatentDynamics,
@@ -161,6 +166,37 @@ def test_resolve_context_duck_typing():
     assert float(res_dict.sc) == 1.5
 
 
+def test_context_legacy_equal_allowed():
+    """Verify that when both Context and legacy parameters are provided with identical values, they are accepted."""
+    ctx = Context.from_re_sc(re=1000.0, sc=1.0)
+    resolved = resolve_context(context=ctx, re=1000.0, sc=1.0)
+    assert resolved is not None
+    assert float(resolved.re) == 1000.0
+    assert float(resolved.sc) == 1.0
+
+    # Also test tensor equality
+    ctx_t = Context.from_re_sc(re=torch.tensor([500.0, 1000.0]), sc=torch.tensor([0.5, 1.0]))
+    resolved_t = resolve_context(context=ctx_t, re=torch.tensor([500.0, 1000.0]), sc=torch.tensor([0.5, 1.0]))
+    assert resolved_t is not None
+    assert torch.allclose(resolved_t.re, torch.tensor([500.0, 1000.0]))
+    assert torch.allclose(resolved_t.sc, torch.tensor([0.5, 1.0]))
+
+
+def test_context_legacy_conflict_fails_closed():
+    """Verify that divergent Context and legacy parameters raise ValueError immediately (Fail-Closed)."""
+    ctx = Context.from_re_sc(re=1000.0, sc=1.0)
+    with pytest.raises(ValueError, match="Context conflict.*divergent legacy re"):
+        resolve_context(context=ctx, re=2000.0)
+
+    with pytest.raises(ValueError, match="Context conflict.*divergent legacy sc"):
+        resolve_context(context=ctx, sc=2.0)
+
+    # Test when context has None but legacy provided
+    ctx_no_re = Context(physical=PhysicalContext(sc=torch.tensor([1.0])))
+    with pytest.raises(ValueError, match="Context physical.re is None, but legacy re"):
+        resolve_context(context=ctx_no_re, re=1000.0)
+
+
 # ==============================================================================
 # C. WorldModelBatch Contract Verification
 # ==============================================================================
@@ -188,7 +224,7 @@ def test_world_model_batch_from_batch_dict_lossless():
         "cluster_id": torch.tensor([1, 2]),
     }
 
-    w_batch = WorldModelBatch.from_batch_dict(legacy_batch)
+    w_batch = WorldModelBatch.from_batch_dict(legacy_batch, state_spec=SHEAR_FLOW_STATE_SPEC)
 
     # Tensor parity
     assert torch.equal(w_batch.history, hist_t)
@@ -199,6 +235,12 @@ def test_world_model_batch_from_batch_dict_lossless():
     assert torch.equal(w_batch.coordinates["time"], time_t)
     assert w_batch.metadata["source_file"] == ["file_a.h5", "file_b.h5"]
     assert w_batch.batch_size == b
+
+    # Verify shear_flow_batch_adapter yields matching state_spec
+    adapter_batch = shear_flow_batch_adapter(legacy_batch)
+    assert adapter_batch.state_spec == SHEAR_FLOW_STATE_SPEC
+    assert adapter_batch.boundary == "periodic"
+    assert torch.equal(adapter_batch.history, hist_t)
 
     # Dictionary Mapping protocol backwards compatibility
     assert torch.equal(w_batch["history"], hist_t)
@@ -229,6 +271,59 @@ def test_world_model_batch_channel_validation_fail_fast():
         )
 
 
+def test_world_model_batch_requires_explicit_state_spec():
+    """Verify that WorldModelBatch cannot be instantiated without explicitly providing StateSpec."""
+    hist = torch.randn(2, 4, 4, 32, 64)
+    with pytest.raises(TypeError):
+        # Missing required positional/keyword argument 'state_spec'
+        WorldModelBatch(history=hist)  # type: ignore
+
+    with pytest.raises(TypeError, match="state_spec must be an instance of StateSpec"):
+        WorldModelBatch(history=hist, state_spec="not_a_statespec")  # type: ignore
+
+
+def test_world_model_batch_single_geometry_source():
+    """Verify that Geometry has a single source of truth in Context, and batch.geometry is a property."""
+    geom_data = torch.ones((1, 32, 64))
+    ctx = Context(geometry=geom_data)
+    hist = torch.randn(1, 4, 4, 32, 64)
+    batch = WorldModelBatch(history=hist, state_spec=SHEAR_FLOW_STATE_SPEC, context=ctx)
+
+    assert batch.geometry is geom_data
+    assert batch["geometry"] is geom_data
+    assert "geometry" in batch
+    # Verify no independent storage in __dict__
+    assert "geometry" not in batch.__dict__
+
+    # Batch with no context has None geometry
+    batch_empty = WorldModelBatch(history=hist, state_spec=SHEAR_FLOW_STATE_SPEC)
+    assert batch_empty.geometry is None
+    assert "geometry" not in batch_empty
+    with pytest.raises(KeyError):
+        _ = batch_empty["geometry"]
+
+
+def test_world_model_batch_single_boundary_source():
+    """Verify that Boundary has a single source of truth in Context, and batch.boundary is a property."""
+    ctx = Context(boundary="no_slip")
+    hist = torch.randn(1, 4, 4, 32, 64)
+    batch = WorldModelBatch(history=hist, state_spec=SHEAR_FLOW_STATE_SPEC, context=ctx)
+
+    assert batch.boundary == "no_slip"
+    assert batch["boundary"] == "no_slip"
+    assert "boundary" in batch
+    # Verify no independent storage in __dict__
+    assert "boundary" not in batch.__dict__
+
+    # from_batch_dict with conflicting boundary raises ValueError (Fail-Closed)
+    with pytest.raises(ValueError, match="Boundary conflict"):
+        WorldModelBatch.from_batch_dict(
+            {"history": hist, "context": ctx},
+            state_spec=SHEAR_FLOW_STATE_SPEC,
+            boundary="periodic",
+        )
+
+
 def test_collate_world_model_batch():
     """Verify collate_world_model_batch as a DataLoader collate_fn."""
     samples = [
@@ -250,11 +345,17 @@ def test_collate_world_model_batch():
         },
     ]
 
-    batch = collate_world_model_batch(samples)
+    batch = collate_world_model_batch(samples, state_spec=SHEAR_FLOW_STATE_SPEC)
     assert isinstance(batch, WorldModelBatch)
     assert batch.history.shape == (2, 4, 4, 16, 32)
     assert batch.future.shape == (2, 1, 4, 16, 32)
     assert batch.context.re.shape == (2,)
+
+    # Adapter collate test
+    adapter_collate_batch = collate_shear_flow_batch(samples)
+    assert isinstance(adapter_collate_batch, WorldModelBatch)
+    assert adapter_collate_batch.state_spec == SHEAR_FLOW_STATE_SPEC
+    assert adapter_collate_batch.boundary == "periodic"
 
 
 # ==============================================================================
@@ -654,3 +755,71 @@ def test_checkpoint_compatibility_latent_flow_matcher():
         )
         assert sample.shape == (1, 1, 64, 16, 32)
         assert torch.isfinite(sample).all()
+
+
+def test_residual_scale_valid_legacy_checkpoint_loads():
+    """Verify that a checkpoint containing a valid residual_scale loads cleanly under strict=True."""
+    model1 = LatentFlowMatcher(latent_channels=64, cond_dim=128, hidden_channels=64, num_blocks=2)
+    scale_val = torch.abs(torch.randn(1, 64, 1, 1)) + 0.1
+    model1.set_residual_scale(scale_val)
+
+    state_dict = model1.state_dict()
+    assert "residual_scale" in state_dict
+
+    # Fresh model without residual_scale
+    model2 = LatentFlowMatcher(latent_channels=64, cond_dim=128, hidden_channels=64, num_blocks=2)
+    assert model2.residual_scale is None
+
+    # Load with strict=True must succeed
+    model2.load_state_dict(state_dict, strict=True)
+    assert model2.residual_scale is not None
+    assert torch.allclose(model2.residual_scale, scale_val)
+
+
+def test_residual_scale_wrong_shape_fails():
+    """Verify that a checkpoint containing a malformed residual_scale shape fails under strict=True."""
+    model = LatentFlowMatcher(latent_channels=64, cond_dim=128, hidden_channels=64, num_blocks=2)
+    state_dict = model.state_dict()
+
+    # Inject bad shape: 32 channels instead of 64
+    state_dict["residual_scale"] = torch.ones(1, 32, 1, 1)
+    with pytest.raises(RuntimeError, match=r"Error\(s\) in loading state_dict"):
+        model.load_state_dict(state_dict, strict=True)
+
+    # Inject completely wrong dimension (2D instead of 1D/4D)
+    state_dict["residual_scale"] = torch.ones(64, 64)
+    with pytest.raises(RuntimeError, match=r"Error\(s\) in loading state_dict"):
+        model.load_state_dict(state_dict, strict=True)
+
+
+def test_residual_scale_nonfinite_fails():
+    """Verify that checkpoints containing NaN, Inf, non-positive, or None residual_scale fail under strict=True."""
+    model = LatentFlowMatcher(latent_channels=64, cond_dim=128, hidden_channels=64, num_blocks=2)
+    state_dict = model.state_dict()
+
+    # Inject NaN
+    bad_scale_nan = torch.ones(1, 64, 1, 1)
+    bad_scale_nan[0, 0, 0, 0] = float("nan")
+    state_dict["residual_scale"] = bad_scale_nan
+    with pytest.raises(RuntimeError, match=r"Error\(s\) in loading state_dict"):
+        model.load_state_dict(state_dict, strict=True)
+
+    # Inject Inf
+    bad_scale_inf = torch.ones(1, 64, 1, 1)
+    bad_scale_inf[0, 0, 0, 0] = float("inf")
+    state_dict["residual_scale"] = bad_scale_inf
+    with pytest.raises(RuntimeError, match=r"Error\(s\) in loading state_dict"):
+        model.load_state_dict(state_dict, strict=True)
+
+    # Inject non-positive (0.0 or negative)
+    bad_scale_zero = torch.ones(1, 64, 1, 1)
+    bad_scale_zero[0, 0, 0, 0] = 0.0
+    state_dict["residual_scale"] = bad_scale_zero
+    with pytest.raises(RuntimeError, match=r"Error\(s\) in loading state_dict"):
+        model.load_state_dict(state_dict, strict=True)
+
+    # Inject None
+    state_dict["residual_scale"] = None
+    with pytest.raises(RuntimeError, match=r"Error\(s\) in loading state_dict"):
+        model.load_state_dict(state_dict, strict=True)
+
