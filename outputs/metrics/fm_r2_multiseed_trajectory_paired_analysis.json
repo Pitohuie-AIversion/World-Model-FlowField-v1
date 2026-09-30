@@ -1,0 +1,1218 @@
+{
+  "metadata": {
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "branches": [
+      "C2",
+      "R2_A"
+    ],
+    "total_physical_trajectories_per_seed": 6,
+    "total_paired_observations": 18,
+    "noise_scale": 0.5,
+    "ensemble_K": 8
+  },
+  "by_seed_trajectory": {
+    "42": {
+      "traj_0": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 1.591004490852356,
+            "R2_A": 1.6589995225270588,
+            "delta": 0.06799503167470289,
+            "relative_change_pct": 4.273717143204015
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.05302411787367115,
+            "R2_A": 0.047130603556676455,
+            "delta": -0.005893514316994697,
+            "relative_change_pct": -11.11478050617621
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.05799626025448864,
+            "R2_A": 0.052819594129687175,
+            "delta": -0.005176666124801464,
+            "relative_change_pct": -8.925861947108588
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.8038187026977539,
+            "R2_A": 0.836756428082784,
+            "delta": 0.03293772538503015,
+            "relative_change_pct": 4.097656010551319
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 2.442581663529078,
+            "R2_A": 2.5014178355534873,
+            "delta": 0.05883617202440927,
+            "relative_change_pct": 2.4087699053386777
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 0.5720507139020318,
+            "R2_A": 0.5840471897343303,
+            "delta": 0.01199647583229857,
+            "relative_change_pct": 2.097100054376134
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 0.8671338863811058,
+            "R2_A": 0.8776357552628609,
+            "delta": 0.010501868881755083,
+            "relative_change_pct": 1.211101197484457
+          }
+        }
+      },
+      "traj_1": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 0.376478244860967,
+            "R2_A": 0.359334260225296,
+            "delta": -0.01714398463567096,
+            "relative_change_pct": -4.553778304507931
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.05076116036313275,
+            "R2_A": 0.042696222042044006,
+            "delta": -0.008064938321088747,
+            "relative_change_pct": -15.888010170362888
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.05529995862161741,
+            "R2_A": 0.049249249597778544,
+            "delta": -0.006050709023838863,
+            "relative_change_pct": -10.941615825140182
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.1881986310084661,
+            "R2_A": 0.18233314653237662,
+            "delta": -0.0058654844760894775,
+            "relative_change_pct": -3.11664566562422
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 0.4499426819384098,
+            "R2_A": 0.43759989986817044,
+            "delta": -0.012342782070239366,
+            "relative_change_pct": -2.7431898696663106
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 1.5527894688074968,
+            "R2_A": 1.5406895878028823,
+            "delta": -0.012099881004614454,
+            "relative_change_pct": -0.7792351279859502
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 2.304970944749687,
+            "R2_A": 2.306284589258237,
+            "delta": 0.0013136445085502046,
+            "relative_change_pct": 0.05699180336925517
+          }
+        }
+      },
+      "traj_2": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 0.37815433740615845,
+            "R2_A": 0.3606388370196025,
+            "delta": -0.01751550038655597,
+            "relative_change_pct": -4.6318390810214
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.04995317275946339,
+            "R2_A": 0.04403273699184259,
+            "delta": -0.005920435767620802,
+            "relative_change_pct": -11.851971437588423
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.05476823808082069,
+            "R2_A": 0.05006697683711536,
+            "delta": -0.004701261243705325,
+            "relative_change_pct": -8.583919089687972
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.18955366810162863,
+            "R2_A": 0.18370574712753296,
+            "delta": -0.005847920974095672,
+            "relative_change_pct": -3.0851004006740332
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 0.452689944456021,
+            "R2_A": 0.44005148112773895,
+            "delta": -0.012638463328282057,
+            "relative_change_pct": -2.791858640348016
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 1.5528205639732209,
+            "R2_A": 1.5423029948142348,
+            "delta": -0.010517569158986051,
+            "relative_change_pct": -0.6773203165261168
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 2.3320579399485717,
+            "R2_A": 2.32543867777013,
+            "delta": -0.006619262178441776,
+            "relative_change_pct": -0.28383780973245243
+          }
+        }
+      },
+      "traj_3": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 0.49588372310002643,
+            "R2_A": 0.4777781267960866,
+            "delta": -0.01810559630393982,
+            "relative_change_pct": -3.651177778280832
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.053157332663734756,
+            "R2_A": 0.03168978670146316,
+            "delta": -0.021467545962271593,
+            "relative_change_pct": -40.384919420378075
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.05656699482157516,
+            "R2_A": 0.03919103263372866,
+            "delta": -0.017375962187846497,
+            "relative_change_pct": -30.71749213946071
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.2261392871538798,
+            "R2_A": 0.21613739430904388,
+            "delta": -0.010001892844835908,
+            "relative_change_pct": -4.422890410028565
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 0.6459053779641787,
+            "R2_A": 0.6340023651719093,
+            "delta": -0.011903012792269352,
+            "relative_change_pct": -1.8428415675661831
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 1.2323878384830784,
+            "R2_A": 1.2333771982425668,
+            "delta": 0.0009893597594883285,
+            "relative_change_pct": 0.08027990285153347
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 1.7338474233062082,
+            "R2_A": 1.7386582526521293,
+            "delta": 0.0048108293459210305,
+            "relative_change_pct": 0.2774655532692399
+          }
+        }
+      },
+      "traj_4": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 0.38243154684702557,
+            "R2_A": 0.3708380361398061,
+            "delta": -0.011593510707219479,
+            "relative_change_pct": -3.0315257208257815
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.058122007603136204,
+            "R2_A": 0.04635013558436185,
+            "delta": -0.011771872018774353,
+            "relative_change_pct": -20.25372574731771
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.06208036315607993,
+            "R2_A": 0.05247593694366515,
+            "delta": -0.009604426212414786,
+            "relative_change_pct": -15.470956876118342
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.2060215175151825,
+            "R2_A": 0.2056935578584671,
+            "delta": -0.00032795965671539307,
+            "relative_change_pct": -0.15918708913073826
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 0.44398528958360356,
+            "R2_A": 0.43543529758850735,
+            "delta": -0.008549991995096207,
+            "relative_change_pct": -1.925737675479048
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 1.5216465162949964,
+            "R2_A": 1.5201263210494889,
+            "delta": -0.0015201952455075052,
+            "relative_change_pct": -0.0999046249722291
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 2.229874566831343,
+            "R2_A": 2.2267259861226676,
+            "delta": -0.003148580708675297,
+            "relative_change_pct": -0.14119990225053053
+          }
+        }
+      },
+      "traj_5": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 4.469402392705281,
+            "R2_A": 4.3042887051900225,
+            "delta": -0.1651136875152588,
+            "relative_change_pct": -3.694312416012228
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.02730869804508984,
+            "R2_A": 0.022853898932226002,
+            "delta": -0.004454799112863839,
+            "relative_change_pct": -16.312748068430235
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.04122672227579945,
+            "R2_A": 0.038698163989465684,
+            "delta": -0.0025285582863337694,
+            "relative_change_pct": -6.133299342640347
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 2.249577442804972,
+            "R2_A": 2.2548881371816,
+            "delta": 0.0053106943766279,
+            "relative_change_pct": 0.23607519686035155
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 7.583482960859935,
+            "R2_A": 7.502909163633983,
+            "delta": -0.08057379722595215,
+            "relative_change_pct": -1.06249064765902
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 0.5968897637526909,
+            "R2_A": 0.6029809097348363,
+            "delta": 0.0060911459821454406,
+            "relative_change_pct": 1.0204808914547214
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 0.8681788777595193,
+            "R2_A": 0.8849903828920942,
+            "delta": 0.0168115051325749,
+            "relative_change_pct": 1.9364102909252754
+          }
+        }
+      }
+    },
+    "43": {
+      "traj_0": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 1.585052251815796,
+            "R2_A": 1.5013665358225505,
+            "delta": -0.08368571599324537,
+            "relative_change_pct": -5.279681846284697
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.04663163210110118,
+            "R2_A": 0.030927283805795014,
+            "delta": -0.01570434829530617,
+            "relative_change_pct": -33.677457956560175
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.04993138827073077,
+            "R2_A": 0.03765396771632368,
+            "delta": -0.012277420554407094,
+            "relative_change_pct": -24.588582412005522
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.7887657483418783,
+            "R2_A": 0.772698442141215,
+            "delta": -0.016067306200663323,
+            "relative_change_pct": -2.037018751693969
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 2.398731599251429,
+            "R2_A": 2.313995490471522,
+            "delta": -0.08473610877990723,
+            "relative_change_pct": -3.5325381466751336
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 0.5572471638020178,
+            "R2_A": 0.5510921468820482,
+            "delta": -0.006155016919969558,
+            "relative_change_pct": -1.1045398379373987
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 0.858062422325936,
+            "R2_A": 0.8249293182660563,
+            "delta": -0.03313310405987968,
+            "relative_change_pct": -3.861386211281262
+          }
+        }
+      },
+      "traj_1": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 0.376578430334727,
+            "R2_A": 0.35080186525980633,
+            "delta": -0.025776565074920654,
+            "relative_change_pct": -6.844939326983969
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.04425391213347515,
+            "R2_A": 0.04432681427958111,
+            "delta": 7.290214610596035e-05,
+            "relative_change_pct": 0.1647360483883971
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.050054502430915214,
+            "R2_A": 0.04907868683706814,
+            "delta": -0.0009758155938470736,
+            "relative_change_pct": -1.9495061312294246
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.19517562786738077,
+            "R2_A": 0.18410338461399078,
+            "delta": -0.011072243253389985,
+            "relative_change_pct": -5.672964075675179
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 0.45194397245844203,
+            "R2_A": 0.42715644588073093,
+            "delta": -0.024787526577711105,
+            "relative_change_pct": -5.484645904861672
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 1.5948123025047023,
+            "R2_A": 1.5082255277078866,
+            "delta": -0.08658677479681565,
+            "relative_change_pct": -5.429276828428551
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 2.3542810696398924,
+            "R2_A": 2.2761437780896943,
+            "delta": -0.0781372915501981,
+            "relative_change_pct": -3.3189449024516806
+          }
+        }
+      },
+      "traj_2": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 0.37646201252937317,
+            "R2_A": 0.35103192925453186,
+            "delta": -0.02543008327484131,
+            "relative_change_pct": -6.755019743952823
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.04436540937361618,
+            "R2_A": 0.044020302671318255,
+            "delta": -0.00034510670229792595,
+            "relative_change_pct": -0.7778733638895681
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.050999038183363155,
+            "R2_A": 0.04971406084465949,
+            "delta": -0.001284977338703662,
+            "relative_change_pct": -2.5196109269426294
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.19462287922700247,
+            "R2_A": 0.1838309864203135,
+            "delta": -0.010791892806688963,
+            "relative_change_pct": -5.545027824864112
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 0.4514319896697998,
+            "R2_A": 0.4268137514591217,
+            "delta": -0.0246182382106781,
+            "relative_change_pct": -5.453365905390339
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 1.5964753995312826,
+            "R2_A": 1.5070333856225064,
+            "delta": -0.08944201390877615,
+            "relative_change_pct": -5.602467406327457
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 2.3529668650995443,
+            "R2_A": 2.273759878052178,
+            "delta": -0.07920698704736617,
+            "relative_change_pct": -3.3662601978041566
+          }
+        }
+      },
+      "traj_3": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 0.46783753236134845,
+            "R2_A": 0.42504312594731647,
+            "delta": -0.04279440641403198,
+            "relative_change_pct": -9.147279440799212
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.04486152219275633,
+            "R2_A": 0.03334578825160861,
+            "delta": -0.011515733941147722,
+            "relative_change_pct": -25.669512264136095
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.049911943274006866,
+            "R2_A": 0.03946196916028081,
+            "delta": -0.010449974113726057,
+            "relative_change_pct": -20.936820785273238
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.23031856616338095,
+            "R2_A": 0.20685230692227682,
+            "delta": -0.023466259241104126,
+            "relative_change_pct": -10.18860946905074
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 0.6263226171334585,
+            "R2_A": 0.5837383021910986,
+            "delta": -0.042584314942359924,
+            "relative_change_pct": -6.799102216244243
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 1.2298527664295413,
+            "R2_A": 1.1694711168145275,
+            "delta": -0.0603816496150138,
+            "relative_change_pct": -4.909664901621627
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 1.719094634905429,
+            "R2_A": 1.6605222141585656,
+            "delta": -0.05857242074686342,
+            "relative_change_pct": -3.4071667468199394
+          }
+        }
+      },
+      "traj_4": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 0.3813708225886027,
+            "R2_A": 0.35580797990163165,
+            "delta": -0.025562842686971066,
+            "relative_change_pct": -6.7028836955748305
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.05139694052437941,
+            "R2_A": 0.05191402145040532,
+            "delta": 0.0005170809260259118,
+            "relative_change_pct": 1.006053902723338
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.0569493149620636,
+            "R2_A": 0.055249890128228195,
+            "delta": -0.0016994248338354084,
+            "relative_change_pct": -2.9841005725309753
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.2096485843261083,
+            "R2_A": 0.20395628114541373,
+            "delta": -0.00569230318069458,
+            "relative_change_pct": -2.715164139548972
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 0.4427027938266595,
+            "R2_A": 0.4162065039078395,
+            "delta": -0.026496289918820026,
+            "relative_change_pct": -5.9851192014827586
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 1.56133037023293,
+            "R2_A": 1.454358104093468,
+            "delta": -0.10697226613946187,
+            "relative_change_pct": -6.85135370315656
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 2.259244884650506,
+            "R2_A": 2.157537016339241,
+            "delta": -0.10170786831126488,
+            "relative_change_pct": -4.501852322529374
+          }
+        }
+      },
+      "traj_5": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 4.980270544687907,
+            "R2_A": 4.73082160949707,
+            "delta": -0.24944893519083688,
+            "relative_change_pct": -5.008742656699764
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.0574231066275388,
+            "R2_A": 0.03345449862536043,
+            "delta": -0.02396860800217837,
+            "relative_change_pct": -41.74035403142675
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.05927224577559779,
+            "R2_A": 0.04131540718177954,
+            "delta": -0.017956838593818247,
+            "relative_change_pct": -30.295525939411977
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 2.569860021273295,
+            "R2_A": 2.534710168838501,
+            "delta": -0.03514985243479396,
+            "relative_change_pct": -1.3677730360340083
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 7.833938141663869,
+            "R2_A": 7.350720226764679,
+            "delta": -0.48321791489918997,
+            "relative_change_pct": -6.168263090172399
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 0.5899093867196638,
+            "R2_A": 0.561564456713039,
+            "delta": -0.028344930006624747,
+            "relative_change_pct": -4.804963379925805
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 0.8430521796172176,
+            "R2_A": 0.8080694184804851,
+            "delta": -0.03498276113673249,
+            "relative_change_pct": -4.1495368830688735
+          }
+        }
+      }
+    },
+    "44": {
+      "traj_0": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 3,
+        "cluster_id": 3,
+        "re": 10000.0,
+        "sc": 0.1,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 1.5219184557596843,
+            "R2_A": 1.5767589410146077,
+            "delta": 0.054840485254923355,
+            "relative_change_pct": 3.603378686116862
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.0563147757978489,
+            "R2_A": 0.03783401657710783,
+            "delta": -0.01848075922074107,
+            "relative_change_pct": -32.81689211918516
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.062072626412070044,
+            "R2_A": 0.04551727857324295,
+            "delta": -0.016555347838827096,
+            "relative_change_pct": -26.67093177099383
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.7757648626963297,
+            "R2_A": 0.8078776001930237,
+            "delta": 0.032112737496693966,
+            "relative_change_pct": 4.1394936843465135
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 2.391884744167328,
+            "R2_A": 2.4439192612965903,
+            "delta": 0.052034517129262436,
+            "relative_change_pct": 2.1754608894157603
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 0.5709819750853221,
+            "R2_A": 0.5861683253108297,
+            "delta": 0.015186350225507628,
+            "relative_change_pct": 2.6596899531265104
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 0.8641396637527743,
+            "R2_A": 0.8715114290651057,
+            "delta": 0.007371765312331413,
+            "relative_change_pct": 0.8530756799563404
+          }
+        }
+      },
+      "traj_1": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 0,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 0.37995832165082294,
+            "R2_A": 0.3597036898136139,
+            "delta": -0.020254631837209047,
+            "relative_change_pct": -5.330750949000876
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.03810429219932606,
+            "R2_A": 0.04168297373689711,
+            "delta": 0.0035786815375710504,
+            "relative_change_pct": 9.391806883200275
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.046802741606370546,
+            "R2_A": 0.049021224316675216,
+            "delta": 0.00221848271030467,
+            "relative_change_pct": 4.740069991973935
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.19732552270094553,
+            "R2_A": 0.1881651928027471,
+            "delta": -0.009160329898198427,
+            "relative_change_pct": -4.642242814215809
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 0.45467182869712514,
+            "R2_A": 0.4378061381479104,
+            "delta": -0.016865690549214718,
+            "relative_change_pct": -3.709420616083434
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 1.5745961073809587,
+            "R2_A": 1.518973353527964,
+            "delta": -0.055622753852994755,
+            "relative_change_pct": -3.532509295066951
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 2.352165660200127,
+            "R2_A": 2.310701508559355,
+            "delta": -0.041464151640771885,
+            "relative_change_pct": -1.7628074562250022
+          }
+        }
+      },
+      "traj_2": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 6,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 0.1,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 0.37957340478897095,
+            "R2_A": 0.3600987990697225,
+            "delta": -0.019474605719248472,
+            "relative_change_pct": -5.1306560137098245
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.03861381338598827,
+            "R2_A": 0.04262462196250757,
+            "delta": 0.004010808576519295,
+            "relative_change_pct": 10.386978712583437
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.046441138358204626,
+            "R2_A": 0.049065261948271655,
+            "delta": 0.002624123590067029,
+            "relative_change_pct": 5.650429086873217
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.19850553075472513,
+            "R2_A": 0.1887440780798594,
+            "delta": -0.009761452674865723,
+            "relative_change_pct": -4.917471386188753
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 0.4548700874050458,
+            "R2_A": 0.4386602168281873,
+            "delta": -0.01620987057685852,
+            "relative_change_pct": -3.5636264123967774
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 1.5882834323631012,
+            "R2_A": 1.5329867524140532,
+            "delta": -0.05529667994904797,
+            "relative_change_pct": -3.481537288768146
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 2.373419281632411,
+            "R2_A": 2.339910647412981,
+            "delta": -0.033508634219429734,
+            "relative_change_pct": -1.4118295270771912
+          }
+        }
+      },
+      "traj_3": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+        "traj_idx": 22,
+        "cluster_id": 23,
+        "re": 10000.0,
+        "sc": 0.1,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 0.4856764078140259,
+            "R2_A": 0.440826952457428,
+            "delta": -0.0448494553565979,
+            "relative_change_pct": -9.234431534045514
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.03559030425579598,
+            "R2_A": 0.036569735733792186,
+            "delta": 0.000979431477996208,
+            "relative_change_pct": 2.7519615200724363
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.04181603105583539,
+            "R2_A": 0.04179231980136441,
+            "delta": -2.3711254470981658e-05,
+            "relative_change_pct": -0.056703742254545636
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.23542309800783792,
+            "R2_A": 0.2099446803331375,
+            "delta": -0.02547841767470041,
+            "relative_change_pct": -10.822395036978131
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 0.6418134123086929,
+            "R2_A": 0.6052045350273451,
+            "delta": -0.036608877281347874,
+            "relative_change_pct": -5.70397510853826
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 1.2420678151050752,
+            "R2_A": 1.2009620048967018,
+            "delta": -0.04110581020837345,
+            "relative_change_pct": -3.309465852707569
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 1.7436323119342538,
+            "R2_A": 1.7050510242663681,
+            "delta": -0.03858128766788571,
+            "relative_change_pct": -2.212696300924049
+          }
+        }
+      },
+      "traj_4": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 2,
+        "cluster_id": 4,
+        "re": 10000.0,
+        "sc": 1.0,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 0.3879578312238057,
+            "R2_A": 0.3656230370203654,
+            "delta": -0.02233479420344031,
+            "relative_change_pct": -5.757015945002482
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.04734811175148934,
+            "R2_A": 0.04599113451937834,
+            "delta": -0.0013569772321109994,
+            "relative_change_pct": -2.8659584974226884
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.054725984121129535,
+            "R2_A": 0.05268134388704008,
+            "delta": -0.0020446402340894565,
+            "relative_change_pct": -3.7361415549218546
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 0.21477029224236807,
+            "R2_A": 0.20919172962506613,
+            "delta": -0.005578562617301941,
+            "relative_change_pct": -2.59745542973259
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 0.44872064267595607,
+            "R2_A": 0.42784472554922104,
+            "delta": -0.020875917126735033,
+            "relative_change_pct": -4.652319314360269
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 1.5501869898338725,
+            "R2_A": 1.4818690110472656,
+            "delta": -0.06831797878660684,
+            "relative_change_pct": -4.4070798706631
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 2.2615355690327825,
+            "R2_A": 2.198857690546087,
+            "delta": -0.0626778784866957,
+            "relative_change_pct": -2.771474362152168
+          }
+        }
+      },
+      "traj_5": {
+        "source_file": "shear_flow_Reynolds_1e4_Schmidt_1e0.hdf5",
+        "traj_idx": 3,
+        "cluster_id": 34,
+        "re": 10000.0,
+        "sc": 1.0,
+        "metrics": {
+          "primary1_h10_ens_vrmse": {
+            "C2": 4.353017171223958,
+            "R2_A": 4.472240289052327,
+            "delta": 0.11922311782836914,
+            "relative_change_pct": 2.738861647881959
+          },
+          "primary2_h10_ens_spec_rel_err": {
+            "C2": 0.044836115441285074,
+            "R2_A": 0.027613391478856403,
+            "delta": -0.01722272396242867,
+            "relative_change_pct": -38.41261401198462
+          },
+          "primary3_h10_indiv_spec_rel_err": {
+            "C2": 0.05305130259754757,
+            "R2_A": 0.03939363553460377,
+            "delta": -0.013657667062943801,
+            "relative_change_pct": -25.744263371914194
+          },
+          "primary4_h5_ens_vrmse": {
+            "C2": 2.2897702852884927,
+            "R2_A": 2.425408124923706,
+            "delta": 0.13563783963521336,
+            "relative_change_pct": 5.923643978903503
+          },
+          "secondary_h10_samp_vrmse": {
+            "C2": 7.517933189868927,
+            "R2_A": 7.491276562213898,
+            "delta": -0.026656627655029297,
+            "relative_change_pct": -0.3545738832974924
+          },
+          "secondary_h10_samp_div_rms": {
+            "C2": 0.5928002193796352,
+            "R2_A": 0.5940815675331944,
+            "delta": 0.0012813481535591809,
+            "relative_change_pct": 0.21615176777432882
+          },
+          "secondary_h10_samp_vort_rmse": {
+            "C2": 0.8625364168629067,
+            "R2_A": 0.8719375042176499,
+            "delta": 0.00940108735474321,
+            "relative_change_pct": 1.089935122847971
+          }
+        }
+      }
+    }
+  },
+  "statistical_analysis": {
+    "primary1_h10_ens_vrmse": {
+      "mean_delta": -0.030390315585666256,
+      "std_delta": 0.08039240919893072,
+      "standard_se": 0.018948672566829233,
+      "standard_t_stat": -1.603822931494551,
+      "standard_p_value": 0.12716884895832403,
+      "standard_ci_95": [
+        -0.07036852014642538,
+        0.00958788897509286
+      ],
+      "cluster_means": [
+        -0.02691287464565702,
+        -0.07544975810580788,
+        0.011191685994466127
+      ],
+      "cluster_se": 0.025071593524436282,
+      "cluster_p_value": 0.3492215292706702,
+      "cluster_ci_95": [
+        -0.13826467590275096,
+        0.07748404473141846
+      ],
+      "label": "Primary 1 (h=10 Ens VRMSE)",
+      "baseline_mean_C2": 1.2982793290306018,
+      "treatment_mean_R2_A": 1.2678890134449359,
+      "overall_relative_change_pct": -2.3408148698137303,
+      "breakdown": {
+        "discovery_seed42": {
+          "mean_delta": -0.02691287464565702,
+          "std_delta": 0.07563460620402872,
+          "n": 6
+        },
+        "replication_seeds43_44": {
+          "mean_delta": -0.03212903605567088,
+          "std_delta": 0.08589537458608777,
+          "n": 12,
+          "standard_se": 0.024795858819710758
+        }
+      }
+    },
+    "primary2_h10_ens_spec_rel_err": {
+      "mean_delta": -0.007611581010644807,
+      "std_delta": 0.00886246081615763,
+      "standard_se": 0.0020889020470350418,
+      "standard_t_stat": -3.6438190186106425,
+      "standard_p_value": 0.0020084777628393002,
+      "standard_ci_95": [
+        -0.01201877909004724,
+        -0.0032043829312423744
+      ],
+      "cluster_means": [
+        -0.009595517583269006,
+        -0.008490635644799719,
+        -0.004748589803865698
+      ],
+      "cluster_se": 0.001466598105828563,
+      "cluster_p_value": 0.03517819397516697,
+      "cluster_ci_95": [
+        -0.013921843354133465,
+        -0.0013013186671561499
+      ],
+      "label": "Primary 2 (h=10 Ens Spectrum Rel L2 Error)",
+      "baseline_mean_C2": 0.046781468060712705,
+      "treatment_mean_R2_A": 0.0391698870500679,
+      "overall_relative_change_pct": -16.270504809226047,
+      "breakdown": {
+        "discovery_seed42": {
+          "mean_delta": -0.009595517583269006,
+          "std_delta": 0.0063507840502694075,
+          "n": 6
+        },
+        "replication_seeds43_44": {
+          "mean_delta": -0.006619612724332709,
+          "std_delta": 0.009991579500310408,
+          "n": 12,
+          "standard_se": 0.0028843205570668806
+        }
+      }
+    },
+    "primary3_h10_indiv_spec_rel_err": {
+      "mean_delta": -0.006528933010957661,
+      "std_delta": 0.006787812609304463,
+      "standard_se": 0.0015999027751542464,
+      "standard_t_stat": -4.080831103157113,
+      "standard_p_value": 0.0007783346602234786,
+      "standard_ci_95": [
+        -0.009904432808996843,
+        -0.003153433212918479
+      ],
+      "cluster_means": [
+        -0.007572930513156784,
+        -0.007440741838056257,
+        -0.00457312668165994
+      ],
+      "cluster_se": 0.0009786474100762705,
+      "cluster_p_value": 0.02173824450207884,
+      "cluster_ci_95": [
+        -0.010739712961384568,
+        -0.0023181530605307548
+      ],
+      "label": "Primary 3 (h=10 Indiv-Member Spectrum Rel L2 Error)",
+      "baseline_mean_C2": 0.05277593301434535,
+      "treatment_mean_R2_A": 0.04624700000338769,
+      "overall_relative_change_pct": -12.371042325643,
+      "breakdown": {
+        "discovery_seed42": {
+          "mean_delta": -0.007572930513156784,
+          "std_delta": 0.0053287488518107134,
+          "n": 6
+        },
+        "replication_seeds43_44": {
+          "mean_delta": -0.006006934259858099,
+          "std_delta": 0.007576744333418021,
+          "n": 12,
+          "standard_se": 0.0021872176902399333
+        }
+      }
+    },
+    "primary4_h5_ens_vrmse": {
+      "mean_delta": 0.0017631732755237495,
+      "std_delta": 0.03744015105620288,
+      "standard_se": 0.00882472823349658,
+      "standard_t_stat": 0.19979915853174512,
+      "standard_p_value": 0.8440081201470118,
+      "standard_ci_95": [
+        -0.016855375821652814,
+        0.020381722372700313
+      ],
+      "cluster_means": [
+        0.0027008603016535995,
+        -0.01703997618622249,
+        0.01962863571114014
+      ],
+      "cluster_se": 0.010595694366724001,
+      "cluster_p_value": 0.8831403082459792,
+      "cluster_ci_95": [
+        -0.04382642001505227,
+        0.04735276656609977
+      ],
+      "label": "Primary 4 (h=5 Ens VRMSE)",
+      "baseline_mean_C2": 0.6646255704539793,
+      "treatment_mean_R2_A": 0.6663887437295031,
+      "overall_relative_change_pct": 0.265288209467986,
+      "breakdown": {
+        "discovery_seed42": {
+          "mean_delta": 0.0027008603016535995,
+          "std_delta": 0.01573579903253625,
+          "n": 6
+        },
+        "replication_seeds43_44": {
+          "mean_delta": 0.0012943297624588245,
+          "std_delta": 0.04531105957740573,
+          "n": 12,
+          "standard_se": 0.013080176222141185
+        }
+      }
+    },
+    "secondary_h10_samp_vrmse": {
+      "mean_delta": -0.045488596376445506,
+      "std_delta": 0.11463291223155922,
+      "standard_se": 0.027019236528699288,
+      "standard_t_stat": -1.6835633503724237,
+      "standard_p_value": 0.1105377763709754,
+      "standard_ci_95": [
+        -0.10249420250585822,
+        0.011517009752967211
+      ],
+      "cluster_means": [
+        -0.011195312564571644,
+        -0.11440673222144439,
+        -0.0108637443433205
+      ],
+      "cluster_se": 0.03445920085469978,
+      "cluster_p_value": 0.31764349536002334,
+      "cluster_ci_95": [
+        -0.1937545709989045,
+        0.10277737824601349
+      ],
+      "label": "Secondary (h=10 Sample VRMSE)",
+      "baseline_mean_C2": 2.007419607636553,
+      "treatment_mean_R2_A": 1.961931011260108,
+      "overall_relative_change_pct": -2.2660233168690507,
+      "breakdown": {
+        "discovery_seed42": {
+          "mean_delta": -0.011195312564571644,
+          "std_delta": 0.04411049965386221,
+          "n": 6
+        },
+        "replication_seeds43_44": {
+          "mean_delta": -0.06263523828238245,
+          "std_delta": 0.13587394990937196,
+          "n": 12,
+          "standard_se": 0.039223430778016814
+        }
+      }
+    },
+    "secondary_h10_samp_div_rms": {
+      "mean_delta": -0.0326010466466552,
+      "std_delta": 0.03871373968349986,
+      "standard_se": 0.0091249159517645,
+      "standard_t_stat": -3.572750348103572,
+      "standard_p_value": 0.00234347132803725,
+      "standard_ci_95": [
+        -0.05185293646810766,
+        -0.013349156825202747
+      ],
+      "cluster_means": [
+        -0.0008434439725292786,
+        -0.06298044189777696,
+        -0.03397925406965937
+      ],
+      "cluster_se": 0.017950638053341135,
+      "cluster_p_value": 0.21099585110794594,
+      "cluster_ci_95": [
+        -0.109836408467608,
+        0.044634315174297605
+      ],
+      "label": "Secondary (h=10 Sample RMS Divergence)",
+      "baseline_mean_C2": 1.1820627107545343,
+      "treatment_mean_R2_A": 1.1494616641078792,
+      "overall_relative_change_pct": -2.7579794498250694,
+      "breakdown": {
+        "discovery_seed42": {
+          "mean_delta": -0.0008434439725292786,
+          "std_delta": 0.00934949531279627,
+          "n": 6
+        },
+        "replication_seeds43_44": {
+          "mean_delta": -0.04847984798371816,
+          "std_delta": 0.03809657419971895,
+          "n": 12,
+          "standard_se": 0.010997533684705145
+        }
+      }
+    },
+    "secondary_h10_samp_vort_rmse": {
+      "mean_delta": -0.0289738626232405,
+      "std_delta": 0.03616843543088068,
+      "standard_se": 0.00852498198602784,
+      "standard_t_stat": -3.3987007441574644,
+      "standard_p_value": 0.0034173745348715645,
+      "standard_ci_95": [
+        -0.046960002418110436,
+        -0.010987722828370565
+      ],
+      "cluster_means": [
+        0.003945000830280691,
+        -0.06429007214205079,
+        -0.026576516557951402
+      ],
+      "cluster_se": 0.019734206740263792,
+      "cluster_p_value": 0.2797745111067631,
+      "cluster_ci_95": [
+        -0.11388330112367674,
+        0.055935575877195734
+      ],
+      "label": "Secondary (h=10 Sample Vorticity RMSE)",
+      "baseline_mean_C2": 1.7322330332572342,
+      "treatment_mean_R2_A": 1.703259170633994,
+      "overall_relative_change_pct": -1.6726307642776561,
+      "breakdown": {
+        "discovery_seed42": {
+          "mean_delta": 0.003945000830280691,
+          "std_delta": 0.008696386590798353,
+          "n": 6
+        },
+        "replication_seeds43_44": {
+          "mean_delta": -0.0454332943500011,
+          "std_delta": 0.0331767270941477,
+          "n": 12,
+          "standard_se": 0.009577296159318464
+        }
+      }
+    }
+  }
+}
