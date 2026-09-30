@@ -489,3 +489,15 @@ class TestComparativeValidationBenchmarkIntegrity:
         assert "GT" in spectra
         assert "FM_temp_1.0_ensemble_mean_field" in spectra
         assert "FM_temp_0.7_ensemble_mean_field" in spectra
+
+    def test_evaluator_launch_state_dirty_fails_closed(self):
+        """Verify evaluator fails closed at launch if git worktree is dirty."""
+        from unittest.mock import patch
+        import sys
+        from scripts.evaluate_latent_flow_matching_pilot import main
+
+        test_args = ["evaluate_latent_flow_matching_pilot.py", "--device", "cpu"]
+        with patch.object(sys, "argv", test_args):
+            with patch("scripts.evaluate_latent_flow_matching_pilot.is_git_dirty", return_value=True):
+                with pytest.raises(RuntimeError, match="Formal evaluation requires a clean git worktree at launch"):
+                    main()

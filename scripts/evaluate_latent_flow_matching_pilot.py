@@ -927,7 +927,13 @@ def main():
     parser.add_argument("--max-rollout-trajectories", type=int, default=6, help="Max trajectories for rollout")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--allow-dirty", action="store_true", help="Allow dirty working tree for development runs")
     args = parser.parse_args()
+
+    eval_git_commit = get_git_commit(str(PROJECT_ROOT))
+    eval_git_dirty_at_start = is_git_dirty(str(PROJECT_ROOT))
+    if eval_git_dirty_at_start and not args.allow_dirty:
+        raise RuntimeError("Formal evaluation requires a clean git worktree at launch. (Fail-Closed)")
 
     fm_temps = [float(t.strip()) for t in args.fm_temperatures.split(",") if t.strip()]
     rollout_temps = [float(t.strip()) for t in args.rollout_temperatures.split(",") if t.strip()]
@@ -1052,8 +1058,9 @@ def main():
     full_report = {
         "evaluation_protocol": "STRICT_SAME_VALIDATION_SPLIT_AB_TEST_V3_TEMPERATURE_DIAGNOSTIC",
         "evaluated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "git_commit": get_git_commit(str(PROJECT_ROOT)),
-        "is_git_dirty": is_git_dirty(str(PROJECT_ROOT)),
+        "git_commit": eval_git_commit,
+        "is_git_dirty": eval_git_dirty_at_start,
+        "git_dirty_at_start": eval_git_dirty_at_start,
         "evaluation_script_sha256": eval_script_sha,
         "provenance_verification": prov_report,
         "step1_one_step_probabilistic": step1_results,
