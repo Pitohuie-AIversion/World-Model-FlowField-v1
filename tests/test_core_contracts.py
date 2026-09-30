@@ -197,6 +197,17 @@ def test_context_legacy_conflict_fails_closed():
         resolve_context(context=ctx_no_re, re=1000.0)
 
 
+def test_context_legacy_near_miss_conflict_fails_closed():
+    """Verify that near-miss legacy parameters (e.g. 1000.0 vs 1000.05) fail closed strictly."""
+    ctx = Context.from_re_sc(re=1000.0, sc=1.0)
+    # 1000.0 vs 1000.05 is within 1e-4 relative tolerance, but violates physical condition identity
+    with pytest.raises(ValueError, match="Context conflict.*divergent legacy re"):
+        resolve_context(context=ctx, re=1000.05)
+
+    with pytest.raises(ValueError, match="Context conflict.*divergent legacy sc"):
+        resolve_context(context=ctx, sc=1.0001)
+
+
 # ==============================================================================
 # C. WorldModelBatch Contract Verification
 # ==============================================================================
