@@ -108,3 +108,13 @@ $$\Delta_{s, j} = M_{s, j}^{R2A} - M_{s, j}^{C2}$$
 - **Confirmatory Replication 集**：由 Seeds 43, 44, 45, 46 构成独立的证实性复现集合（$G=4$ 个独立集群，$N_{\mathrm{rep}} = 24$ 个轨迹级配对样本）。
 - **推断稳健性**：在小集群（Very Few Clusters）场景下，根据 Cameron & Miller (2015) 统计标准，常规渐近聚类稳健标准误存在小样本偏倚风险；通过将复现种子扩展至 4 个（$G=4, df=3$），为正式证实性假设检验提供统计支撑。
 - **等价性判别规范**：普通无差异假设检验（$H_0: \Delta=0$）的非显著结果（如 $p=0.88$）仅代表“未检测到显著差异（No Detectable Difference）”，在未预先规定等价性边界（Equivalence Margin）进行双单侧检验（TOST）前，严禁宣称“统计等价（Equivalent）”。
+
+### 3. 推断目标界定（Estimand Specification）
+- **Estimand 明确定义**：
+  $$\text{Inference over fine-tuning stochasticity is conducted conditional on the fixed six-trajectory validation set.}$$
+- **交叉分类结构（Cross-Classified Structure）**：验证集在所有微调种子间重复使用了完全相同的 6 条物理轨迹，统计结构为 $\text{seed} \times \text{trajectory}$。当前基于种子均值效应（Seed-Level Mean Effects）的推断，严格回答的是“在给定的这 6 条物理轨迹上，对微调过程的随机实现，效应是否稳健”。不能同时自动外推至未见物理轨迹全域。
+
+### 4. 队列封存与停止规则治理（Sealed Replication Cohort & No Optional Stopping）
+- **Seeds 43–46 正式封存（SEALED）**：严禁在观察到当前结果后随意单独追加单个种子（如 Seed 47），坚决杜绝因追逐统计显著性而产生的 Optional Stopping 选择偏倚。
+- **两层级报告（Two-Tier Reporting）**：严格保持预注册 Primary 端点与预指定 Secondary 端点的层级划分，严禁事后倒置。
+- **后续确证路径**：若需将 Secondary 中的物理约束指标（散度、涡度、Sample VRMSE）提升为最高证实性主张，必须前瞻性建立独立的 Phase II Validation Cohort（如 Seeds 47–50），形成完整的“Discovery $\rightarrow$ Replication $\rightarrow$ Independent Confirmation”证据链。
