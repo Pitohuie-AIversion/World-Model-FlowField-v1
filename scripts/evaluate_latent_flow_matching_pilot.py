@@ -251,6 +251,7 @@ def verify_checkpoint_provenance(
     split_file_path: str,
     normalizer: FieldNormalizer,
     expected_seed: int = 42,
+    expected_baseline_seed: int = 42,
 ) -> Dict[str, Any]:
     """Strict fail-closed cryptographic identity, parent lineage, and protocol check."""
     runtime_d0_sha = compute_file_sha256(d0_checkpoint_path)
@@ -275,8 +276,8 @@ def verify_checkpoint_provenance(
     if not g0_norm or not hash_matches(runtime_norm_hash, g0_norm, min_prefix_len=16):
         errors.append(f"G0 normalizer_hash mismatch: runtime={runtime_norm_hash[:12]}, G0={str(g0_norm)[:12]}")
     g0_seed = g0_prov.get("seed")
-    if g0_seed is None or g0_seed != expected_seed:
-        errors.append(f"G0 seed mismatch: expected {expected_seed}, got {g0_seed}")
+    if g0_seed is None or g0_seed != expected_baseline_seed:
+        errors.append(f"G0 seed mismatch: expected {expected_baseline_seed}, got {g0_seed}")
 
     # Check G1
     g1_prov = g1_data.get("provenance", {})
@@ -290,8 +291,8 @@ def verify_checkpoint_provenance(
     if not g1_norm or not hash_matches(runtime_norm_hash, g1_norm, min_prefix_len=16):
         errors.append(f"G1 normalizer_hash mismatch: runtime={runtime_norm_hash[:12]}, G1={str(g1_norm)[:12]}")
     g1_seed = g1_prov.get("seed")
-    if g1_seed is None or g1_seed != expected_seed:
-        errors.append(f"G1 seed mismatch: expected {expected_seed}, got {g1_seed}")
+    if g1_seed is None or g1_seed != expected_baseline_seed:
+        errors.append(f"G1 seed mismatch: expected {expected_baseline_seed}, got {g1_seed}")
 
     # Check FM
     fm_prov = fm_data.get("provenance", {})
@@ -927,6 +928,7 @@ def main():
     parser.add_argument("--max-rollout-trajectories", type=int, default=6, help="Max trajectories for rollout")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--expected-baseline-seed", type=int, default=42, help="Expected seed of G0/G1 reference baselines (default: 42)")
     parser.add_argument("--allow-dirty", action="store_true", help="Allow dirty working tree for development runs")
     args = parser.parse_args()
 
@@ -959,6 +961,7 @@ def main():
         split_file_path=args.split_file,
         normalizer=normalizer,
         expected_seed=args.seed,
+        expected_baseline_seed=args.expected_baseline_seed,
     )
     print("[Provenance Verified] Cryptographic binding confirmed: D0 SHA, split_hash, normalizer_hash, and seeds strictly match.")
 

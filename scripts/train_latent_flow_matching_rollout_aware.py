@@ -68,6 +68,7 @@ def verify_rollout_aware_preflight_contract(
     split_file: str,
     residual_stats_path: Optional[str] = None,
     expected_seed: Optional[int] = 42,
+    expected_parent_seed: Optional[int] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], FieldNormalizer, str, str, str, str, Optional[Dict[str, Any]]]:
     """Verify cryptographic bindings for D0, parent FM, normalizer, split, and residual stats.
 
@@ -140,9 +141,10 @@ def verify_rollout_aware_preflight_contract(
         raise ValueError(
             "Parent FM checkpoint provenance is missing 'seed'. (Fail-Closed)"
         )
-    if expected_seed is not None and fm_seed != expected_seed:
+    target_parent_seed = expected_parent_seed if expected_parent_seed is not None else expected_seed
+    if target_parent_seed is not None and fm_seed != target_parent_seed:
         raise ValueError(
-            f"Parent FM seed ({fm_seed}) does not match expected seed ({expected_seed}). (Fail-Closed)"
+            f"Parent FM seed ({fm_seed}) does not match expected seed ({target_parent_seed}). (Fail-Closed)"
         )
 
     # Load and verify residual stats if provided or if parent FM recorded it
@@ -586,6 +588,7 @@ def train_latent_flow_matching_rollout_aware(
     overwrite: bool = False,
     device_str: Optional[str] = None,
     seed: int = 42,
+    expected_parent_seed: Optional[int] = 42,
 ) -> Dict[str, Any]:
     """Execute Rollout-Aware (FM-R2) training pipeline with rigorous experimental controls."""
     if branch not in ("C1", "C2", "R2_A"):
@@ -627,6 +630,7 @@ def train_latent_flow_matching_rollout_aware(
         split_file=split_file,
         residual_stats_path=residual_stats_path,
         expected_seed=seed,
+        expected_parent_seed=expected_parent_seed,
     )
     print(f"Preflight Verified: D0={d0_sha256[:12]}..., Parent FM={parent_fm_sha256[:12]}...")
 
@@ -965,6 +969,7 @@ def main():
     parser.add_argument("--solver", type=str, default="midpoint")
     parser.add_argument("--grad-clip", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--expected-parent-seed", type=int, default=42, help="Expected seed of parent FM checkpoint (default: 42)")
     parser.add_argument("--smoke-test", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
@@ -996,6 +1001,7 @@ def main():
         overwrite=args.overwrite,
         device_str=args.device,
         seed=args.seed,
+        expected_parent_seed=args.expected_parent_seed,
     )
 
 
