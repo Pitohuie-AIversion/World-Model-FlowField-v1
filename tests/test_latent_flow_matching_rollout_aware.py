@@ -246,6 +246,7 @@ class TestFM_R2EquivalenceAndGovernanceContracts:
             batch=batch,
             device=device,
             branch="R2_A",
+            sample_noise_scale=0.5,
             gen_loss_1=gen_l1_r2,
             gen_loss_2=gen_l2_r2,
             gen_sample=gen_samp,
@@ -302,7 +303,7 @@ class TestFM_R2EquivalenceAndGovernanceContracts:
 
         hook = forecaster.transformer.register_forward_pre_hook(hook_fn)
 
-        res = compute_rollout_aware_step_loss(forecaster, batch, device=device, branch="R2_A")
+        res = compute_rollout_aware_step_loss(forecaster, batch, device=device, branch="R2_A", sample_noise_scale=0.5)
         hook.remove()
 
         assert len(captured_step2_hist) == 2
@@ -326,7 +327,7 @@ class TestFM_R2EquivalenceAndGovernanceContracts:
         batch = next(iter(DataLoader(dataset, batch_size=2)))
 
         for branch in ("C2", "R2_A"):
-            res = compute_rollout_aware_step_loss(forecaster, batch, device=device, branch=branch)
+            res = compute_rollout_aware_step_loss(forecaster, batch, device=device, branch=branch, sample_noise_scale=0.5)
             expected_total = 0.5 * (res["loss_step1"] + res["loss_step2"])
             assert math.isclose(res["loss"].item(), expected_total, rel_tol=1e-5), (
                 f"{branch} loss weighting is not 0.5 * L1 + 0.5 * L2"
@@ -387,6 +388,254 @@ class TestFM_R2EquivalenceAndGovernanceContracts:
                 split_file=split_path,
             )
 
+    def test_missing_parent_d0_sha_fails_closed(self, tmp_path):
+        """Verify preflight rejects parent FM checkpoint if d0_checkpoint.sha256 is missing."""
+        d0_path, fm_path, norm_path, split_path, _, _ = _create_mock_checkpoints(tmp_path)
+        fm_payload_corrupt = torch.load(fm_path, map_location="cpu", weights_only=False)
+        fm_payload_corrupt["provenance"]["d0_checkpoint"].pop("sha256", None)
+        corrupt_fm = str(tmp_path / "corrupt_d0_sha_fm.pt")
+        torch.save(fm_payload_corrupt, corrupt_fm)
+
+        with pytest.raises(ValueError, match="missing 'd0_checkpoint.sha256'"):
+            verify_rollout_aware_preflight_contract(
+                d0_checkpoint_path=d0_path,
+                parent_fm_checkpoint_path=corrupt_fm,
+                normalizer_path=norm_path,
+                split_file=split_path,
+            )
+
+    def test_missing_split_hash_fails_closed(self, tmp_path):
+        """Verify preflight rejects parent FM checkpoint if data_protocol.split_hash is missing."""
+        d0_path, fm_path, norm_path, split_path, _, _ = _create_mock_checkpoints(tmp_path)
+        fm_payload_corrupt = torch.load(fm_path, map_location="cpu", weights_only=False)
+        fm_payload_corrupt["provenance"]["data_protocol"].pop("split_hash", None)
+        corrupt_fm = str(tmp_path / "corrupt_split_hash_fm.pt")
+        torch.save(fm_payload_corrupt, corrupt_fm)
+
+        with pytest.raises(ValueError, match="missing 'data_protocol.split_hash'"):
+            verify_rollout_aware_preflight_contract(
+                d0_checkpoint_path=d0_path,
+                parent_fm_checkpoint_path=corrupt_fm,
+                normalizer_path=norm_path,
+                split_file=split_path,
+            )
+
+    def test_missing_normalizer_hash_fails_closed(self, tmp_path):
+        """Verify preflight rejects parent FM checkpoint if data_protocol.normalizer_hash is missing."""
+        d0_path, fm_path, norm_path, split_path, _, _ = _create_mock_checkpoints(tmp_path)
+        fm_payload_corrupt = torch.load(fm_path, map_location="cpu", weights_only=False)
+        fm_payload_corrupt["provenance"]["data_protocol"].pop("normalizer_hash", None)
+        corrupt_fm = str(tmp_path / "corrupt_norm_hash_fm.pt")
+        torch.save(fm_payload_corrupt, corrupt_fm)
+
+        with pytest.raises(ValueError, match="missing 'data_protocol.normalizer_hash'"):
+            verify_rollout_aware_preflight_contract(
+                d0_checkpoint_path=d0_path,
+                parent_fm_checkpoint_path=corrupt_fm,
+                normalizer_path=norm_path,
+                split_file=split_path,
+            )
+
+    def test_missing_seed_fails_closed(self, tmp_path):
+        """Verify preflight rejects parent FM checkpoint if seed is missing."""
+        d0_path, fm_path, norm_path, split_path, _, _ = _create_mock_checkpoints(tmp_path)
+        fm_payload_corrupt = torch.load(fm_path, map_location="cpu", weights_only=False)
+        fm_payload_corrupt["provenance"].pop("seed", None)
+        corrupt_fm = str(tmp_path / "corrupt_seed_fm.pt")
+        torch.save(fm_payload_corrupt, corrupt_fm)
+
+        with pytest.raises(ValueError, match="missing 'seed'"):
+            verify_rollout_aware_preflight_contract(
+                d0_checkpoint_path=d0_path,
+                parent_fm_checkpoint_path=corrupt_fm,
+                normalizer_path=norm_path,
+                split_file=split_path,
+            )
+
+    def test_residual_stats_sha_mismatch_fails_closed(self, tmp_path):
+        """Verify preflight rejects residual stats with SHA mismatch or internal protocol mismatch."""
+        d0_path, fm_path, norm_path, split_path, d0_payload, fm_payload = _create_mock_checkpoints(tmp_path)
+        from src.utils.provenance import compute_file_sha256, compute_split_hash_from_file, compute_normalizer_hash
+        d0_sha = compute_file_sha256(d0_path)
+        split_hash = compute_split_hash_from_file(split_path)
+        norm_hash = compute_normalizer_hash(FieldNormalizer())
+
+        # 1. Valid residual stats
+        stats_path = str(tmp_path / "valid_stats.json")
+        stats_payload = {
+            "d0_checkpoint": {"sha256": d0_sha},
+            "data_protocol": {"split_hash": split_hash, "normalizer_hash": norm_hash},
+            "statistics": {"scale": [1.0] * 64},
+        }
+        with open(stats_path, "w") as f:
+            json.dump(stats_payload, f)
+        stats_sha = compute_file_sha256(stats_path)
+
+        fm_payload["provenance"]["residual_statistics"] = {
+            "path": stats_path,
+            "sha256": stats_sha,
+        }
+        valid_fm = str(tmp_path / "valid_fm_with_stats.pt")
+        torch.save(fm_payload, valid_fm)
+
+        verify_rollout_aware_preflight_contract(
+            d0_checkpoint_path=d0_path,
+            parent_fm_checkpoint_path=valid_fm,
+            normalizer_path=norm_path,
+            split_file=split_path,
+            residual_stats_path=stats_path,
+            expected_seed=42,
+        )
+
+        # 2. SHA mismatch against parent FM recorded SHA
+        corrupt_stats_path = str(tmp_path / "corrupt_stats.json")
+        stats_payload_tampered = dict(stats_payload)
+        stats_payload_tampered["statistics"] = {"scale": [2.0] * 64}
+        with open(corrupt_stats_path, "w") as f:
+            json.dump(stats_payload_tampered, f)
+
+        with pytest.raises(ValueError, match="Residual stats SHA.*diverges from parent FM"):
+            verify_rollout_aware_preflight_contract(
+                d0_checkpoint_path=d0_path,
+                parent_fm_checkpoint_path=valid_fm,
+                normalizer_path=norm_path,
+                split_file=split_path,
+                residual_stats_path=corrupt_stats_path,
+            )
+
+        # 3. D0 SHA mismatch inside stats file
+        stats_wrong_d0 = str(tmp_path / "stats_wrong_d0.json")
+        payload_wrong_d0 = {
+            "d0_checkpoint": {"sha256": "0" * 64},
+            "data_protocol": {"split_hash": split_hash, "normalizer_hash": norm_hash},
+        }
+        with open(stats_wrong_d0, "w") as f:
+            json.dump(payload_wrong_d0, f)
+        fm_payload_d0_mismatch = torch.load(valid_fm, map_location="cpu", weights_only=False)
+        fm_payload_d0_mismatch["provenance"]["residual_statistics"]["sha256"] = compute_file_sha256(stats_wrong_d0)
+        fm_wrong_d0 = str(tmp_path / "fm_wrong_d0.pt")
+        torch.save(fm_payload_d0_mismatch, fm_wrong_d0)
+
+        with pytest.raises(ValueError, match="Residual stats D0 SHA.*diverges from runtime D0 SHA"):
+            verify_rollout_aware_preflight_contract(
+                d0_checkpoint_path=d0_path,
+                parent_fm_checkpoint_path=fm_wrong_d0,
+                normalizer_path=norm_path,
+                split_file=split_path,
+                residual_stats_path=stats_wrong_d0,
+            )
+
+    def test_r2a_requires_explicit_noise_scale(self, tmp_path):
+        """Verify R2-A strictly requires explicit sample_noise_scale, rejecting None or <=0."""
+        d0_path, fm_path, norm_path, split_path, d0_payload, fm_payload = _create_mock_checkpoints(tmp_path)
+        device = torch.device("cpu")
+        forecaster = build_and_freeze_rollout_aware_model(d0_payload, fm_payload, device=device)
+        dataset = DummySyntheticHorizon2Dataset(num_samples=2)
+        batch = next(iter(DataLoader(dataset, batch_size=2)))
+        loader = DataLoader(dataset, batch_size=2)
+
+        # 1. Step loss rejects None for R2_A
+        with pytest.raises(ValueError, match="requires sample_noise_scale to be explicitly specified"):
+            compute_rollout_aware_step_loss(forecaster, batch, device=device, branch="R2_A", sample_noise_scale=None)
+
+        # 2. Validation rejects None for R2_A
+        with pytest.raises(ValueError, match="requires sample_noise_scale to be explicitly specified"):
+            evaluate_rollout_aware_validation(forecaster, loader, device=device, branch="R2_A", sample_noise_scale=None)
+
+        # 3. Training pipeline rejects None for R2_A
+        with pytest.raises(ValueError, match="Branch R2_A requires --sample-noise-scale"):
+            train_latent_flow_matching_rollout_aware(
+                branch="R2_A",
+                d0_checkpoint=d0_path,
+                parent_fm_checkpoint=fm_path,
+                normalizer_path=norm_path,
+                split_file=split_path,
+                output_dir=str(tmp_path / "out_r2a_none"),
+                sample_noise_scale=None,
+            )
+
+        # 4. Rejects negative or zero noise scale
+        with pytest.raises(ValueError, match="sample_noise_scale must be positive"):
+            compute_rollout_aware_step_loss(forecaster, batch, device=device, branch="R2_A", sample_noise_scale=-0.1)
+
+    def test_checkpoint_records_actual_solver_and_flow_steps(self, tmp_path):
+        """Verify checkpoint payload accurately records passed num_flow_steps and solver."""
+        _, fm_path, _, _, _, fm_payload = _create_mock_checkpoints(tmp_path)
+        fm = LatentFlowMatcher(latent_channels=64, cond_dim=128, hidden_channels=128, num_blocks=4)
+
+        payload = build_rollout_aware_checkpoint_payload(
+            flow_matcher=fm,
+            branch="R2_A",
+            epoch=1,
+            val_loss_dict={"val_total_cfm_loss": 1.0, "val_step1_cfm_loss": 1.0, "val_step2_cfm_loss": 1.0},
+            hidden_channels=128,
+            num_blocks=4,
+            target_mode="residual",
+            use_spatial_attn=True,
+            residual_scale=None,
+            sample_noise_scale=0.5,
+            d0_checkpoint="d0.pt",
+            d0_sha256="d0_hash",
+            parent_fm_checkpoint="parent.pt",
+            parent_fm_sha256="parent_hash",
+            split_file="split.json",
+            runtime_split_hash="split_hash",
+            normalizer_path="norm.pt",
+            runtime_norm_hash="norm_hash",
+            actual_stats_path=None,
+            seed=42,
+            num_flow_steps=25,
+            solver="rk4",
+        )
+
+        assert payload["config"]["num_flow_steps"] == 25, "num_flow_steps mismatch in checkpoint config"
+        assert payload["config"]["solver"] == "rk4", "solver mismatch in checkpoint config"
+        assert payload["config"]["sample_noise_scale"] == 0.5, "sample_noise_scale mismatch in checkpoint config"
+
+    def test_training_summary_records_experiment_config_and_checkpoint_sha(self, tmp_path):
+        """Verify training summary records full experiment_config, component losses, and selected checkpoint SHA."""
+        d0_path, fm_path, norm_path, split_path, _, _ = _create_mock_checkpoints(tmp_path)
+        out_dir = str(tmp_path / "mock_train_output")
+
+        from unittest.mock import patch
+
+        dataset = DummySyntheticHorizon2Dataset(num_samples=4)
+        loader = DataLoader(dataset, batch_size=2)
+
+        with patch("scripts.train_latent_flow_matching_rollout_aware.create_flow_dataloaders", return_value=(loader, loader, None, None)):
+            summary = train_latent_flow_matching_rollout_aware(
+                branch="R2_A",
+                d0_checkpoint=d0_path,
+                parent_fm_checkpoint=fm_path,
+                normalizer_path=norm_path,
+                split_file=split_path,
+                output_dir=out_dir,
+                residual_stats_path=None,
+                epochs=1,
+                batch_size=2,
+                sample_noise_scale=0.5,
+                num_flow_steps=10,
+                solver="midpoint",
+                smoke_test=True,
+                device_str="cpu",
+                seed=42,
+            )
+
+        assert "experiment_config" in summary, "summary missing experiment_config"
+        cfg = summary["experiment_config"]
+        assert cfg["branch"] == "R2_A"
+        assert cfg["sample_noise_scale"] == 0.5
+        assert cfg["num_flow_steps"] == 10
+        assert cfg["solver"] == "midpoint"
+        assert cfg["train_windows"] == 4
+        assert cfg["val_windows"] == 4
+        assert cfg["num_optimizer_updates"] > 0
+        assert "selected_checkpoint_path" in summary
+        assert "selected_checkpoint_sha256" in summary
+        assert summary["selected_checkpoint_sha256"] is not None
+        assert "epoch0_val_step1_cfm_loss" in summary
+        assert "epoch0_val_step2_cfm_loss" in summary
+
     def test_synthetic_e2e_training_step(self, tmp_path):
         """Verify end-to-end forward, backward, and optimization step for C1, C2, and R2-A."""
         d0_path, fm_path, norm_path, split_path, d0_payload, fm_payload = _create_mock_checkpoints(tmp_path)
@@ -400,7 +649,7 @@ class TestFM_R2EquivalenceAndGovernanceContracts:
             batch = next(iter(DataLoader(dataset, batch_size=2)))
 
             optimizer.zero_grad()
-            res = compute_rollout_aware_step_loss(forecaster, batch, device=device, branch=branch)
+            res = compute_rollout_aware_step_loss(forecaster, batch, device=device, branch=branch, sample_noise_scale=0.5)
             loss = res["loss"]
             loss.backward()
 

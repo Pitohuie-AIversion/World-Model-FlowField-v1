@@ -96,46 +96,107 @@ def verify_rollout_aware_preflight_contract(
         raise FileNotFoundError(f"Split file not found: {split_file}")
     runtime_split_hash = compute_split_hash_from_file(split_file)
 
-    # Verify parent FM provenance binding to D0
+    # Verify parent FM provenance binding to D0 (Fail-Closed)
     fm_prov = parent_fm_ckpt.get("provenance", {})
     fm_d0_info = fm_prov.get("d0_checkpoint", {})
     fm_d0_sha = fm_d0_info.get("sha256")
-    if fm_d0_sha and not hash_matches(fm_d0_sha, d0_sha):
+    if not fm_d0_sha:
+        raise ValueError(
+            "Parent FM checkpoint provenance is missing 'd0_checkpoint.sha256'. (Fail-Closed)"
+        )
+    if not hash_matches(fm_d0_sha, d0_sha):
         raise ValueError(
             f"Parent FM checkpoint was trained on D0 with SHA {fm_d0_sha[:12]}..., "
             f"which diverges from runtime D0 SHA {d0_sha[:12]}... (Fail-Closed)"
         )
 
-    # Verify split and normalizer hashes in parent FM provenance
+    # Verify split and normalizer hashes in parent FM provenance (Fail-Closed)
     fm_data_proto = fm_prov.get("data_protocol", {})
     fm_split_hash = fm_data_proto.get("split_hash")
-    if fm_split_hash and not hash_matches(fm_split_hash, runtime_split_hash):
+    if not fm_split_hash:
+        raise ValueError(
+            "Parent FM checkpoint provenance is missing 'data_protocol.split_hash'. (Fail-Closed)"
+        )
+    if not hash_matches(fm_split_hash, runtime_split_hash):
         raise ValueError(
             f"Parent FM checkpoint split hash {fm_split_hash[:12]}... diverges from "
             f"runtime split hash {runtime_split_hash[:12]}... (Fail-Closed)"
         )
 
     fm_norm_hash = fm_data_proto.get("normalizer_hash")
-    if fm_norm_hash and not hash_matches(fm_norm_hash, runtime_norm_hash):
+    if not fm_norm_hash:
+        raise ValueError(
+            "Parent FM checkpoint provenance is missing 'data_protocol.normalizer_hash'. (Fail-Closed)"
+        )
+    if not hash_matches(fm_norm_hash, runtime_norm_hash):
         raise ValueError(
             f"Parent FM checkpoint normalizer hash {fm_norm_hash[:12]}... diverges from "
             f"runtime normalizer hash {runtime_norm_hash[:12]}... (Fail-Closed)"
         )
 
-    # Verify seed
+    # Verify seed (Fail-Closed)
     fm_seed = fm_prov.get("seed")
-    if expected_seed is not None and fm_seed is not None and fm_seed != expected_seed:
+    if fm_seed is None:
+        raise ValueError(
+            "Parent FM checkpoint provenance is missing 'seed'. (Fail-Closed)"
+        )
+    if expected_seed is not None and fm_seed != expected_seed:
         raise ValueError(
             f"Parent FM seed ({fm_seed}) does not match expected seed ({expected_seed}). (Fail-Closed)"
         )
 
-    # Load residual stats if provided
+    # Load and verify residual stats if provided or if parent FM recorded it
     stats_data = None
+    parent_stats_prov = fm_prov.get("residual_statistics")
     if residual_stats_path:
         if not os.path.exists(residual_stats_path):
             raise FileNotFoundError(f"Residual stats not found: {residual_stats_path}")
+        runtime_stats_sha = compute_file_sha256(residual_stats_path)
         with open(residual_stats_path, "r") as f:
             stats_data = json.load(f)
+
+        if parent_stats_prov:
+            parent_stats_sha = parent_stats_prov.get("sha256")
+            if not parent_stats_sha:
+                raise ValueError(
+                    "Parent FM checkpoint provenance is missing 'residual_statistics.sha256'. (Fail-Closed)"
+                )
+            if not hash_matches(runtime_stats_sha, parent_stats_sha):
+                raise ValueError(
+                    f"Residual stats SHA {runtime_stats_sha[:12]}... diverges from parent FM "
+                    f"recorded residual stats SHA {parent_stats_sha[:12]}... (Fail-Closed)"
+                )
+
+        # Check internal consistency of residual stats
+        stats_d0 = stats_data.get("d0_checkpoint", {})
+        stats_d0_sha = stats_d0.get("sha256")
+        if not stats_d0_sha:
+            raise ValueError("Residual stats file is missing 'd0_checkpoint.sha256'. (Fail-Closed)")
+        if not hash_matches(stats_d0_sha, d0_sha):
+            raise ValueError(
+                f"Residual stats D0 SHA {stats_d0_sha[:12]}... diverges from runtime D0 SHA {d0_sha[:12]}... (Fail-Closed)"
+            )
+
+        stats_proto = stats_data.get("data_protocol", {})
+        stats_split_hash = stats_proto.get("split_hash")
+        if not stats_split_hash:
+            raise ValueError("Residual stats file is missing 'data_protocol.split_hash'. (Fail-Closed)")
+        if not hash_matches(stats_split_hash, runtime_split_hash):
+            raise ValueError(
+                f"Residual stats split hash {stats_split_hash[:12]}... diverges from runtime split hash {runtime_split_hash[:12]}... (Fail-Closed)"
+            )
+
+        stats_norm_hash = stats_proto.get("normalizer_hash")
+        if not stats_norm_hash:
+            raise ValueError("Residual stats file is missing 'data_protocol.normalizer_hash'. (Fail-Closed)")
+        if not hash_matches(stats_norm_hash, runtime_norm_hash):
+            raise ValueError(
+                f"Residual stats normalizer hash {stats_norm_hash[:12]}... diverges from runtime normalizer hash {runtime_norm_hash[:12]}... (Fail-Closed)"
+            )
+    elif parent_stats_prov:
+        raise ValueError(
+            "Parent FM was trained with residual statistics, but residual_stats_path was not provided. (Fail-Closed)"
+        )
 
     return (
         d0_ckpt,
@@ -239,7 +300,7 @@ def compute_rollout_aware_step_loss(
     batch: Dict[str, torch.Tensor],
     device: torch.device,
     branch: str,
-    sample_noise_scale: float = 1.0,
+    sample_noise_scale: Optional[float] = None,
     num_flow_steps: int = 10,
     solver: str = "midpoint",
     gen_loss_1: Optional[torch.Generator] = None,
@@ -263,6 +324,13 @@ def compute_rollout_aware_step_loss(
     Returns:
         dict with 'loss', 'loss_step1', 'loss_step2', 'branch'.
     """
+    if branch == "R2_A":
+        if sample_noise_scale is None:
+            raise ValueError(
+                "Branch R2_A requires sample_noise_scale to be explicitly specified. (Fail-Closed)"
+            )
+        if sample_noise_scale <= 0:
+            raise ValueError(f"sample_noise_scale must be positive, got {sample_noise_scale}")
     fm = forecaster.flow_matcher
     if fm is None:
         raise RuntimeError("Forecaster has no attached flow_matcher.")
@@ -359,7 +427,7 @@ def evaluate_rollout_aware_validation(
     dataloader: torch.utils.data.DataLoader,
     device: torch.device,
     branch: str,
-    sample_noise_scale: float = 1.0,
+    sample_noise_scale: Optional[float] = None,
     num_flow_steps: int = 10,
     solver: str = "midpoint",
     max_batches: int = 0,
@@ -369,6 +437,14 @@ def evaluate_rollout_aware_validation(
 
     Uses deterministic generators to guarantee reproducible evaluation across branches.
     """
+    if branch == "R2_A":
+        if sample_noise_scale is None:
+            raise ValueError(
+                "Branch R2_A requires sample_noise_scale to be explicitly specified. (Fail-Closed)"
+            )
+        if sample_noise_scale <= 0:
+            raise ValueError(f"sample_noise_scale must be positive, got {sample_noise_scale}")
+
     if len(dataloader) == 0:
         raise ValueError("Validation dataloader is empty.")
 
@@ -427,7 +503,7 @@ def build_rollout_aware_checkpoint_payload(
     target_mode: str,
     use_spatial_attn: bool,
     residual_scale: Optional[torch.Tensor],
-    sample_noise_scale: float,
+    sample_noise_scale: Optional[float],
     d0_checkpoint: str,
     d0_sha256: str,
     parent_fm_checkpoint: str,
@@ -438,6 +514,8 @@ def build_rollout_aware_checkpoint_payload(
     runtime_norm_hash: str,
     actual_stats_path: Optional[str],
     seed: int,
+    num_flow_steps: int = 10,
+    solver: str = "midpoint",
 ) -> Dict[str, Any]:
     """Construct unified governed checkpoint payload for FM-R2 rollout-aware models."""
     residual_stats_info = None
@@ -463,8 +541,8 @@ def build_rollout_aware_checkpoint_payload(
             "use_spatial_attn": use_spatial_attn,
             "sigma_min": flow_matcher.sigma_min,
             "sample_noise_scale": sample_noise_scale,
-            "num_flow_steps": 10,
-            "solver": "midpoint",
+            "num_flow_steps": int(num_flow_steps),
+            "solver": str(solver),
             "residual_scale_applied": residual_scale is not None,
         },
         "provenance": {
@@ -498,7 +576,7 @@ def train_latent_flow_matching_rollout_aware(
     batch_size: int = 16,
     lr: float = 2e-4,
     weight_decay: float = 1e-4,
-    sample_noise_scale: float = 1.0,
+    sample_noise_scale: Optional[float] = None,
     num_flow_steps: int = 10,
     solver: str = "midpoint",
     grad_clip: float = 1.0,
@@ -512,6 +590,14 @@ def train_latent_flow_matching_rollout_aware(
     """Execute Rollout-Aware (FM-R2) training pipeline with rigorous experimental controls."""
     if branch not in ("C1", "C2", "R2_A"):
         raise ValueError(f"Invalid branch '{branch}'. Must be one of ['C1', 'C2', 'R2_A'].")
+
+    if branch == "R2_A" and sample_noise_scale is None:
+        raise ValueError(
+            "Branch R2_A requires --sample-noise-scale to be explicitly specified (e.g. 0.5). "
+            "Implicit default of 1.0 is forbidden to avoid distribution mismatch. (Fail-Closed)"
+        )
+    if sample_noise_scale is not None and sample_noise_scale <= 0:
+        raise ValueError(f"sample_noise_scale must be positive, got {sample_noise_scale}")
 
     # 1. Deterministic Seeding
     random.seed(seed)
@@ -657,6 +743,8 @@ def train_latent_flow_matching_rollout_aware(
         runtime_norm_hash=runtime_norm_hash,
         actual_stats_path=residual_stats_path,
         seed=seed,
+        num_flow_steps=num_flow_steps,
+        solver=solver,
     )
     torch.save(epoch0_payload, os.path.join(output_dir, "epoch0_baseline.pt"))
 
@@ -672,6 +760,7 @@ def train_latent_flow_matching_rollout_aware(
     history = []
     best_loss = epoch0_val["val_total_cfm_loss"]
     best_epoch = 0
+    total_optimizer_updates = 0
 
     for epoch in range(1, epochs + 1):
         forecaster.train()
@@ -711,6 +800,7 @@ def train_latent_flow_matching_rollout_aware(
             )
 
             optimizer.step()
+            total_optimizer_updates += 1
 
             b = batch["history"].shape[0]
             train_loss_total += loss.item() * b
@@ -778,8 +868,15 @@ def train_latent_flow_matching_rollout_aware(
                 runtime_norm_hash=runtime_norm_hash,
                 actual_stats_path=residual_stats_path,
                 seed=seed,
+                num_flow_steps=num_flow_steps,
+                solver=solver,
             )
             torch.save(best_payload, os.path.join(output_dir, "best_latent_flow_matcher.pt"))
+
+    # If epoch 0 was not beaten, ensure best_latent_flow_matcher.pt exists
+    best_ckpt_path = os.path.join(output_dir, "best_latent_flow_matcher.pt")
+    if best_epoch == 0 and not os.path.exists(best_ckpt_path):
+        torch.save(epoch0_payload, best_ckpt_path)
 
     # Save final checkpoint and summary
     final_payload = build_rollout_aware_checkpoint_payload(
@@ -803,14 +900,37 @@ def train_latent_flow_matching_rollout_aware(
         runtime_norm_hash=runtime_norm_hash,
         actual_stats_path=residual_stats_path,
         seed=seed,
+        num_flow_steps=num_flow_steps,
+        solver=solver,
     )
     torch.save(final_payload, os.path.join(output_dir, "final_latent_flow_matcher.pt"))
+
+    best_ckpt_sha = compute_file_sha256(best_ckpt_path) if os.path.exists(best_ckpt_path) else None
 
     summary = {
         "branch": branch,
         "best_epoch": best_epoch,
         "best_val_cfm_loss": best_loss,
         "epoch0_val_cfm_loss": epoch0_val["val_total_cfm_loss"],
+        "epoch0_val_step1_cfm_loss": epoch0_val["val_step1_cfm_loss"],
+        "epoch0_val_step2_cfm_loss": epoch0_val["val_step2_cfm_loss"],
+        "selected_checkpoint_path": best_ckpt_path,
+        "selected_checkpoint_sha256": best_ckpt_sha,
+        "experiment_config": {
+            "branch": branch,
+            "epochs": epochs,
+            "sample_noise_scale": sample_noise_scale,
+            "lr": lr,
+            "weight_decay": weight_decay,
+            "batch_size": batch_size,
+            "num_flow_steps": num_flow_steps,
+            "solver": solver,
+            "grad_clip": grad_clip,
+            "train_windows": len(train_loader.dataset),
+            "val_windows": len(valid_loader.dataset),
+            "num_optimizer_updates": total_optimizer_updates,
+            "seed": seed,
+        },
         "history": history,
         "provenance": final_payload["provenance"],
     }
@@ -839,8 +959,8 @@ def main():
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
-    parser.add_argument("--sample-noise-scale", type=float, default=1.0,
-                        help="Sampling noise scale alpha_noise for Step 1 in R2_A (default: 1.0)")
+    parser.add_argument("--sample-noise-scale", type=float, default=None,
+                        help="Sampling noise scale alpha_noise for Step 1 in R2_A (explicit value required for R2_A)")
     parser.add_argument("--num-flow-steps", type=int, default=10)
     parser.add_argument("--solver", type=str, default="midpoint")
     parser.add_argument("--grad-clip", type=float, default=1.0)
