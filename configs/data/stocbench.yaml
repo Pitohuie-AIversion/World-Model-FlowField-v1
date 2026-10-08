@@ -1,0 +1,55 @@
+# ==============================================================================
+# StocBench Dataset Configuration (incns_stoc / 64)
+# Project: World-Model-FlowField-v1
+# Task: Stochastic Incompressible Navier-Stokes (Kolmogorov Flow) Data Audit
+# ==============================================================================
+
+dataset:
+  name: "stocbench"
+  task: "incns_stoc"
+  subtask: "incns_stoc/64"
+  repo_id: "pfistse/stocbench-data"
+  repo_type: "dataset"
+  revision: "3a5f50398cf6d14f108190ace63a9beed5fbddf7"
+  code_repo: "https://github.com/tum-pbs/stocbench"
+  code_revision: "2e519f153738972fb41c7c996ada8e1a4f4cb7a9"
+  paper_arxiv: "2608.22309"
+
+local_storage:
+  root_dir: "data/stocbench/incns_stoc/64"
+  audit_output_dir: "outputs/data_audit/stocbench"
+
+files:
+  train:
+    filename: "traj_seed_42.npy"
+    remote_path: "incns_stoc/64/traj_seed_42.npy"
+    expected_size: 1638400128  # 1.526 GiB
+    expected_sha256: "5a29c5620c0c30334877344d3a65166ca4c2a5a8e997df5e37d6c54c4a0d4c19"
+    usage: "training_source"
+  test_bifurcation:
+    filename: "step_seed_100.npz"
+    remote_path: "incns_stoc/64/step_seed_100.npz"
+    expected_size: 75923069    # ~72.4 MiB
+    expected_sha256: "5d869c53b39ac81ca91d5dd12dafeb3315ddbbd407081865256368fe9cf25990"
+    usage: "bifurcation_audit_and_eval_only"
+
+physical_contract:
+  state_variables: ["vorticity"]
+  num_channels: 1
+  spatial_dim: 2
+  spatial_resolution: [64, 64]
+  solver_resolution: [256, 256]
+  domain_length: 6.283185307179586  # 2 * pi
+  boundary_condition: "periodic"
+  solver_dt: 0.0001
+  sample_dt: 0.5                     # Frame interval dt between adjacent stored states
+  nu: 0.001                         # Kinematic viscosity
+  drag: -0.1                        # Linear drag coefficient
+  forcing: "stochastic_fourier_modes"
+  stored_scaling:
+    mean: 0.0
+    std: 3.0
+    description: "Stored vorticity values w_stored are scaled as (w_physical - mean) / std. Physical vorticity w = w_stored * 3.0."
+
+budget:
+  max_download_bytes: 4294967296  # 4 GiB
