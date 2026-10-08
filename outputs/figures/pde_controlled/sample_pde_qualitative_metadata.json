@@ -1,0 +1,19 @@
+{
+  "sample_index": 0,
+  "horizon_step": 12,
+  "re": 10000.0,
+  "sc": 0.10000000149011612,
+  "figures": [
+    "sample_pde_flow_fields_comparison.png",
+    "sample_pde_errors_comparison.png",
+    "sample_pde_residuals_comparison.png"
+  ],
+  "metrics_step": {
+    "d0_mae_u": 0.012461282312870026,
+    "p0_mae_u": 0.010354946367442608,
+    "pde_mae_u": 0.01028264407068491,
+    "p0_res_tracer_s": 0.07293441146612167,
+    "pde_res_tracer_s": 0.06917227059602737,
+    "tracer_damping_pct": -5.158252180922621
+  }
+}

@@ -31,7 +31,15 @@ outputs/figures/
 │   ├── figure_1_vrmse_evolution.png / .pdf
 │   ├── figure_2_interval_calibration.png / .pdf
 │   ├── figure_3_spread_skill_relationship.png / .pdf
-│   └── figure_summary_phase3.png / .pdf
+│   ├── figure_summary_phase3.png / .pdf
+│   ├── sample_gaussian_ensemble_realizations.png (+ metadata.json) # 高斯后验采样实例 (GT, Mean, Sample 1-3)
+│   ├── sample_gaussian_uncertainty_vs_error.png                    # 不确定性分布 (σ) vs 实际误差 (|μ - GT|)
+│   └── sample_gaussian_prediction_intervals.png                    # 空间切片置信区间带 (50%, 80%, 90%, 95%)
+├── pde_controlled/                # PDE 残差监督受控实验 (PNG & 矢量 PDF & 定性抽样)
+│   ├── figure_pde_controlled_comparison.png / .pdf
+│   ├── sample_pde_flow_fields_comparison.png (+ metadata.json)     # 流场多物理量横向比对 (GT vs D0 vs P0 vs PDE)
+│   ├── sample_pde_errors_comparison.png                            # 绝对误差空间分布 (|Pred - GT|)
+│   └── sample_pde_residuals_comparison.png                         # 物理残差与散度阻尼空间对比 (P0 vs PDE)
 ├── horizon_ladder_comparison/     # 跨度阶梯 (H2/H4/H8/H12/H16) 完整对比图集
 │   ├── comparison_fixed_ref_*.png (+ metadata.json)
 │   ├── comparison_median_err_*.png (+ metadata.json)

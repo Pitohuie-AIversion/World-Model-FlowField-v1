@@ -1,0 +1,18 @@
+{
+  "sample_index": 0,
+  "num_mc_samples": 32,
+  "seed": 42,
+  "figures": [
+    "sample_gaussian_ensemble_realizations.png",
+    "sample_gaussian_uncertainty_vs_error.png",
+    "sample_gaussian_prediction_intervals.png"
+  ],
+  "diagnostics": {
+    "mean_mae_u": 0.01808243989944458,
+    "mean_mae_s": 0.02078566700220108,
+    "mean_sigma_u": 0.041898250579833984,
+    "mean_sigma_s": 0.05130382627248764,
+    "spatial_corr_unc_err_u": 0.4297792825086018,
+    "spatial_corr_unc_err_s": 0.3916487880324998
+  }
+}
