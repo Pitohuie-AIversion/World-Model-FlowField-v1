@@ -124,6 +124,116 @@ class Context:
         )
 
 
+def _canonicalize_parameter_for_comparison(
+    val: Any,
+    param_name: str,
+) -> torch.Tensor:
+    """Canonicalize a physical parameter into a 1D float64 tensor for comparison.
+
+    Rules:
+    1. Python floats/ints are directly converted to float64 tensors without float32 truncation.
+    2. Tensor inputs preserve their exact numerical value and are promoted to float64 on CPU.
+    3. Finiteness check: NaN, Inf, and -Inf are strictly rejected (torch.isfinite).
+    4. Shape contract:
+       - Scalars: 0-D (), 1-D (1,), or 2-D (1, 1) are normalized to 1D shape (1,).
+       - Batch vectors: 1-D (B,) with B > 1, or 2-D (B, 1) with B > 1 are normalized to 1D shape (B,).
+       - Any higher dimensional (>2D) or multi-column (shape[1] > 1) tensors are rejected.
+
+    Returns:
+        1D torch.Tensor of dtype float64 on CPU.
+
+    Raises:
+        TypeError: If val has an unsupported type or complex dtype.
+        ValueError: If val contains non-finite values (NaN/Inf) or has an invalid shape.
+    """
+    if isinstance(val, (int, float)):
+        # Python int and float (64-bit IEEE 754) converted directly to float64
+        t = torch.tensor([float(val)], dtype=torch.float64)
+    elif isinstance(val, torch.Tensor):
+        if val.is_complex():
+            raise TypeError(f"Physical parameter '{param_name}' must be real-valued, got {val.dtype}.")
+        if val.dtype in (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8):
+            t = val.detach().cpu().to(dtype=torch.float64)
+        elif val.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            t = val.detach().cpu().to(dtype=torch.float64)
+        else:
+            raise TypeError(f"Physical parameter '{param_name}' has unsupported tensor dtype {val.dtype}.")
+    else:
+        try:
+            # Fallback for numpy scalars/arrays or sequences
+            t = torch.as_tensor(val, dtype=torch.float64).detach().cpu()
+        except Exception as err:
+            raise TypeError(f"Unsupported type {type(val)} for physical parameter '{param_name}': {err}") from err
+
+    # Finiteness validation (Fail-Fast on NaN / Inf)
+    if not torch.all(torch.isfinite(t)):
+        raise ValueError(
+            f"Physical parameter '{param_name}' must be finite, but contains non-finite values (NaN or Inf)."
+        )
+
+    # Shape contract validation
+    if t.ndim == 0:
+        return t.unsqueeze(0)
+    elif t.ndim == 1:
+        return t
+    elif t.ndim == 2:
+        if t.shape[1] == 1:
+            return t.squeeze(1)
+        elif t.shape[0] == 1 and t.shape[1] == 1:
+            return t.reshape(1)
+        else:
+            raise ValueError(
+                f"Invalid shape {tuple(val.shape if isinstance(val, torch.Tensor) else t.shape)} for physical parameter '{param_name}': "
+                f"multi-column 2D tensors are not valid scalar or 1D batch vectors."
+            )
+    else:
+        raise ValueError(
+            f"Invalid shape {tuple(val.shape if isinstance(val, torch.Tensor) else t.shape)} for physical parameter '{param_name}': "
+            f"tensors with ndim >= 3 are not valid scalar or batch conditions."
+        )
+
+
+def _assert_parameter_consistency(
+    ctx_val: Any,
+    legacy_val: Any,
+    param_name: str,
+    atol: float = 1e-6,
+) -> None:
+    """Validate numerical and shape consistency between Context and legacy parameters.
+
+    Enforces:
+    1. Independent canonicalization into float64 without lossy cross-casting.
+    2. Strict finiteness (rejects NaN, Inf on either side).
+    3. Strict shape contract (rejects implicit broadcasting between scalar and batch vector,
+       or mismatched batch sizes).
+    4. Strict symmetric absolute difference check (max |diff| <= atol).
+
+    Raises:
+        ValueError: On non-finite values, shape mismatch, or numerical divergence.
+        TypeError: On unsupported data types.
+    """
+    ctx_comp = _canonicalize_parameter_for_comparison(ctx_val, f"Context physical.{param_name}")
+    leg_comp = _canonicalize_parameter_for_comparison(legacy_val, f"legacy {param_name}")
+
+    # Shape compatibility check: disallow implicit broadcasting between scalar and batch vector
+    if ctx_comp.numel() != leg_comp.numel():
+        raise ValueError(
+            f"Context conflict: shape mismatch for '{param_name}' between Context "
+            f"(size {ctx_comp.numel()}) and legacy parameter (size {leg_comp.numel()}). "
+            f"Implicit broadcasting between scalar and batch vector is disallowed."
+        )
+
+    # Numerical equivalence check: symmetric absolute difference
+    diff = torch.abs(ctx_comp - leg_comp)
+    max_diff = torch.max(diff).item()
+    if max_diff > atol:
+        raise ValueError(
+            f"Context conflict: Context has {param_name}={ctx_val}, "
+            f"but divergent legacy {param_name}={legacy_val} was provided (Fail-Closed, "
+            f"max_diff={max_diff:.6e} > atol={atol:.1e})."
+        )
+
+
 def resolve_context(
     context: Optional[Union[Context, Dict[str, Any]]] = None,
     re: Optional[Union[torch.Tensor, float]] = None,
@@ -133,14 +243,15 @@ def resolve_context(
 
     Fail-Closed Policy:
     If both Context and legacy (re, sc) parameters are provided, their values must be
-    numerically equal within tolerance. Any divergence raises ValueError immediately.
+    strictly consistent without lossy dtype truncation, non-finite values (NaN/Inf),
+    or implicit shape broadcasting. Any divergence raises ValueError immediately.
 
     Returns:
         Unified Context instance, or None if no conditioning information is provided.
 
     Raises:
-        ValueError: If Context and legacy parameters conflict.
-        TypeError: If context has an unsupported type.
+        ValueError: If Context and legacy parameters conflict, are non-finite, or have invalid shapes.
+        TypeError: If context or parameters have unsupported types.
     """
     if context is not None:
         if isinstance(context, Context):
@@ -179,26 +290,14 @@ def resolve_context(
                 raise ValueError(
                     f"Context conflict: Context physical.re is None, but legacy re={re} was provided."
                 )
-            ctx_re_t = torch.as_tensor(resolved_ctx.re)
-            legacy_re_t = torch.as_tensor(re, device=ctx_re_t.device, dtype=ctx_re_t.dtype)
-            if not torch.allclose(ctx_re_t, legacy_re_t, rtol=0.0, atol=1e-6):
-                raise ValueError(
-                    f"Context conflict: Context has re={resolved_ctx.re}, "
-                    f"but divergent legacy re={re} was provided (Fail-Closed)."
-                )
+            _assert_parameter_consistency(resolved_ctx.re, re, param_name="re")
 
         if sc is not None:
             if resolved_ctx.sc is None:
                 raise ValueError(
                     f"Context conflict: Context physical.sc is None, but legacy sc={sc} was provided."
                 )
-            ctx_sc_t = torch.as_tensor(resolved_ctx.sc)
-            legacy_sc_t = torch.as_tensor(sc, device=ctx_sc_t.device, dtype=ctx_sc_t.dtype)
-            if not torch.allclose(ctx_sc_t, legacy_sc_t, rtol=0.0, atol=1e-6):
-                raise ValueError(
-                    f"Context conflict: Context has sc={resolved_ctx.sc}, "
-                    f"but divergent legacy sc={sc} was provided (Fail-Closed)."
-                )
+            _assert_parameter_consistency(resolved_ctx.sc, sc, param_name="sc")
 
         return resolved_ctx
 

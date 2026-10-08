@@ -208,6 +208,172 @@ def test_context_legacy_near_miss_conflict_fails_closed():
         resolve_context(context=ctx, sc=1.0001)
 
 
+def test_resolve_context_integer_context_divergence():
+    """Verify that integer Context does not truncate float legacy parameter to pass check."""
+    # Context holds integer tensor 1000, legacy has 1000.05
+    ctx_int = Context.from_re_sc(re=torch.tensor(1000, dtype=torch.int64), sc=1.0)
+    with pytest.raises(ValueError, match="Context conflict.*divergent legacy re"):
+        resolve_context(context=ctx_int, re=1000.05)
+
+
+def test_resolve_context_low_precision_context_divergence():
+    """Verify that low-precision (float16 / bfloat16) Context does not round legacy float to pass."""
+    # float16
+    ctx_f16 = Context.from_re_sc(re=torch.tensor(1000.0, dtype=torch.float16), sc=1.0)
+    with pytest.raises(ValueError, match="Context conflict.*divergent legacy re"):
+        resolve_context(context=ctx_f16, re=1000.05)
+
+    # bfloat16
+    ctx_bf16 = Context.from_re_sc(re=torch.tensor(1000.0, dtype=torch.bfloat16), sc=1.0)
+    with pytest.raises(ValueError, match="Context conflict.*divergent legacy re"):
+        resolve_context(context=ctx_bf16, re=1000.05)
+
+
+def test_resolve_context_float32_vs_float64_divergence():
+    """Verify that subtle physical divergence between float32 and float64 is strictly caught."""
+    ctx_f32 = Context.from_re_sc(re=torch.tensor(1000.0, dtype=torch.float32), sc=1.0)
+    legacy_f64 = torch.tensor(1000.00002, dtype=torch.float64)
+    with pytest.raises(ValueError, match="Context conflict.*divergent legacy re"):
+        resolve_context(context=ctx_f32, re=legacy_f64)
+
+
+def test_resolve_context_symmetry_order_invariance():
+    """Verify that conflict detection is invariant to input order (Context vs legacy swap)."""
+    # Swap of float32 1000.0 vs float64 1000.00002
+    ctx_f64 = Context.from_re_sc(re=torch.tensor(1000.00002, dtype=torch.float64), sc=1.0)
+    legacy_f32 = torch.tensor(1000.0, dtype=torch.float32)
+    with pytest.raises(ValueError, match="Context conflict.*divergent legacy re"):
+        resolve_context(context=ctx_f64, re=legacy_f32)
+
+    # Swap of int 1000 vs float 1000.05
+    ctx_float = Context.from_re_sc(re=1000.05, sc=1.0)
+    legacy_int = torch.tensor(1000, dtype=torch.int64)
+    with pytest.raises(ValueError, match="Context conflict.*divergent legacy re"):
+        resolve_context(context=ctx_float, re=legacy_int)
+
+    # Swap of float16 1000.0 vs float 1000.05
+    legacy_f16 = torch.tensor(1000.0, dtype=torch.float16)
+    with pytest.raises(ValueError, match="Context conflict.*divergent legacy re"):
+        resolve_context(context=ctx_float, re=legacy_f16)
+
+
+def test_resolve_context_compatible_different_representations():
+    """Verify that identical physical values with different representations pass without mutation."""
+    ctx_base = Context.from_re_sc(re=torch.tensor(1000.0, dtype=torch.float32), sc=1.0)
+
+    # Python float
+    res1 = resolve_context(context=ctx_base, re=1000.0, sc=1.0)
+    assert res1 is ctx_base
+    assert res1.re.dtype == torch.float32  # Unmutated
+
+    # Python int
+    res2 = resolve_context(context=ctx_base, re=1000, sc=1)
+    assert res2 is ctx_base
+
+    # float64 tensor
+    res3 = resolve_context(
+        context=ctx_base,
+        re=torch.tensor(1000.0, dtype=torch.float64),
+        sc=torch.tensor(1.0, dtype=torch.float64),
+    )
+    assert res3 is ctx_base
+
+    # Int64 Context vs float legacy
+    ctx_int = Context.from_re_sc(re=torch.tensor(1000, dtype=torch.int64), sc=torch.tensor(1, dtype=torch.int64))
+    res4 = resolve_context(context=ctx_int, re=1000.0, sc=1.0)
+    assert res4 is ctx_int
+    assert res4.re.dtype == torch.int64
+
+    # float16 Context vs float legacy
+    ctx_f16 = Context.from_re_sc(re=torch.tensor(1000.0, dtype=torch.float16), sc=1.0)
+    res5 = resolve_context(context=ctx_f16, re=1000.0, sc=1.0)
+    assert res5 is ctx_f16
+    assert res5.re.dtype == torch.float16
+
+
+def test_resolve_context_non_finite_rejection():
+    """Verify that non-finite values (Inf, -Inf, NaN) are strictly rejected even if both sides match."""
+    # Both sides are Inf (torch.allclose would normally consider Inf == Inf, but contract must reject)
+    ctx_inf = Context(physical=PhysicalContext(re=torch.tensor([float("inf")]), sc=torch.tensor([1.0])))
+    with pytest.raises(ValueError, match="must be finite"):
+        resolve_context(context=ctx_inf, re=float("inf"))
+
+    ctx_valid = Context.from_re_sc(re=1000.0, sc=1.0)
+    # Legacy is Inf
+    with pytest.raises(ValueError, match="must be finite"):
+        resolve_context(context=ctx_valid, re=float("inf"))
+
+    # Legacy is -Inf
+    with pytest.raises(ValueError, match="must be finite"):
+        resolve_context(context=ctx_valid, re=float("-inf"))
+
+    # Legacy is NaN
+    with pytest.raises(ValueError, match="must be finite"):
+        resolve_context(context=ctx_valid, re=float("nan"))
+
+    # Context is NaN
+    ctx_nan = Context(physical=PhysicalContext(re=torch.tensor([float("nan")]), sc=torch.tensor([1.0])))
+    with pytest.raises(ValueError, match="must be finite"):
+        resolve_context(context=ctx_nan, re=1000.0)
+
+    # Both sides are NaN
+    with pytest.raises(ValueError, match="must be finite"):
+        resolve_context(context=ctx_nan, re=float("nan"))
+
+
+def test_resolve_context_shape_contract_rejection():
+    """Verify that invalid shapes and implicit broadcasting between scalar and batch are rejected."""
+    # Scalar Context vs batch legacy
+    ctx_scalar = Context.from_re_sc(re=1000.0, sc=1.0)
+    with pytest.raises(ValueError, match="shape mismatch.*Implicit broadcasting.*disallowed"):
+        resolve_context(context=ctx_scalar, re=torch.tensor([1000.0, 1000.0]))
+
+    # Batch Context vs scalar legacy
+    ctx_batch = Context.from_re_sc(
+        re=torch.tensor([1000.0, 1000.0]),
+        sc=torch.tensor([1.0, 1.0]),
+    )
+    with pytest.raises(ValueError, match="shape mismatch.*Implicit broadcasting.*disallowed"):
+        resolve_context(context=ctx_batch, re=1000.0)
+
+    # Batch size mismatch
+    with pytest.raises(ValueError, match="shape mismatch.*Implicit broadcasting.*disallowed"):
+        resolve_context(context=ctx_batch, re=torch.tensor([1000.0, 1000.0, 1000.0]))
+
+    # Multi-column 2D tensor (not a valid 1D scalar/batch vector)
+    with pytest.raises(ValueError, match="Invalid shape.*multi-column 2D"):
+        resolve_context(context=ctx_scalar, re=torch.ones(2, 2) * 1000.0)
+
+    # 3D tensor
+    with pytest.raises(ValueError, match="Invalid shape.*ndim >= 3"):
+        resolve_context(context=ctx_scalar, re=torch.ones(1, 1, 1) * 1000.0)
+
+    # Valid batch match succeeds
+    res_batch = resolve_context(
+        context=ctx_batch,
+        re=torch.tensor([1000.0, 1000.0]),
+        sc=torch.tensor([[1.0], [1.0]]),
+    )
+    assert res_batch is ctx_batch
+
+
+def test_resolve_context_standalone_usage_preserved():
+    """Verify that standalone Context or standalone legacy kwargs remain fully functional."""
+    # 1. Only Context
+    ctx = Context.from_re_sc(re=1000.0, sc=1.0)
+    res_ctx = resolve_context(context=ctx)
+    assert res_ctx is ctx
+
+    # 2. Only legacy kwargs
+    res_legacy = resolve_context(re=1000.0, sc=1.0)
+    assert res_legacy is not None
+    assert float(res_legacy.re) == 1000.0
+    assert float(res_legacy.sc) == 1.0
+
+    # 3. None input
+    assert resolve_context() is None
+
+
 # ==============================================================================
 # C. WorldModelBatch Contract Verification
 # ==============================================================================

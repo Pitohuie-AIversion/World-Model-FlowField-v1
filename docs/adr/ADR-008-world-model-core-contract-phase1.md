@@ -59,7 +59,11 @@ World-Model-FlowField-v1 经过前期研发，已完整建立了端到端流体�
       language: Optional[Any] = None             # 预留: 语言目标描述
       action: Optional[Any] = None               # 预留: 机器人/控制动作
   ```
-- **兼容性与冲突防御**：提供 `from_re_sc` 与 `to_re_sc`，在固定输入下与历史 ConditioningMLP 数值 bitwise equal；同时通过 `resolve_context` 统一兼容旧参数。在同时提供 `Context` 与旧 `(re, sc)` 参数时，执行**严格闭门校验 (Fail-Closed)**：若数值存在偏离直接抛出 `ValueError`，杜绝静默覆盖。
+- **兼容性与冲突防御**：提供 `from_re_sc` 与 `to_re_sc`，在固定输入下与历史 ConditioningMLP 数值 bitwise equal；同时通过 `resolve_context` 统一兼容旧参数。在同时提供 `Context` 与旧 `(re, sc)` 参数时，执行**严格闭门校验 (Fail-Closed)**：
+  - **无损精度比较**：双侧输入独立规范化为 float64 CPU 比较副本，禁止向 Context 既有 dtype 降精度或整型截断，确保比较结果完全对称且对输入顺序不敏感；
+  - **校验与计算分离**：校验副本仅用于冲突检查，通过后模型计算路径严格沿用原张量与数据流，不发生就地修改；
+  - **有限性防御**：显式调用 `torch.isfinite` 拒绝 NaN 与 Inf；
+  - **形状契约**：明确标量 `()` / `(1,)` 与批次向量 `(B,)` / `(B, 1)` 边界，严禁标量与批次张量之间隐式广播匹配；超出容差 (`atol=1e-6`) 或形状/有限性不符立即抛出 `ValueError`，杜绝静默覆盖。
 
 ### 3. WorldModelBatch (统一世界模型 Batch 契约)
 - **定位**：连接 DataLoader 与 Trainer/Evaluator 的通用 Batch 容器。
