@@ -518,6 +518,39 @@ def verify_world_model_contract(
     }
 
 
+def allocate_exclusive_audit_dir(base_dir: Path, requested_run_id: str, overwrite: bool = False) -> tuple[Path, str]:
+    """Atomically allocate an exclusive audit output directory to prevent collisions and overwrites.
+
+    Concurrency and isolation guarantees:
+    - If overwrite is False, never reuses an existing non-empty directory.
+    - Uses atomic OS mkdir(exist_ok=False) system calls to prevent race conditions during concurrent execution.
+    - If collisions occur, systematically suffixes with timestamp and atomic increment counter.
+    """
+    base_dir.mkdir(parents=True, exist_ok=True)
+    target_dir = base_dir / requested_run_id
+    if overwrite:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        return target_dir, requested_run_id
+
+    try:
+        target_dir.mkdir(parents=False, exist_ok=False)
+        return target_dir, requested_run_id
+    except FileExistsError:
+        if not any(target_dir.iterdir()):
+            return target_dir, requested_run_id
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    counter = 1
+    while True:
+        candidate_run_id = f"{requested_run_id}_{timestamp}_{counter}"
+        candidate_dir = base_dir / candidate_run_id
+        try:
+            candidate_dir.mkdir(parents=False, exist_ok=False)
+            return candidate_dir, candidate_run_id
+        except FileExistsError:
+            counter += 1
+
+
 def main():
     parser = argparse.ArgumentParser(description="StocBench data preparation and audit.")
     parser.add_argument("--config", type=str, default="configs/data/stocbench.yaml", help="Path to config YAML.")
@@ -535,21 +568,13 @@ def main():
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
-    run_id = args.run_id or datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    audit_output_dir = PROJECT_ROOT / cfg["local_storage"]["audit_output_dir"] / run_id
-    if audit_output_dir.exists() and any(audit_output_dir.iterdir()) and not args.overwrite:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        candidate_run_id = f"{run_id}_{timestamp}"
-        candidate_dir = PROJECT_ROOT / cfg["local_storage"]["audit_output_dir"] / candidate_run_id
-        counter = 1
-        while candidate_dir.exists() and any(candidate_dir.iterdir()):
-            candidate_run_id = f"{run_id}_{timestamp}_{counter}"
-            candidate_dir = PROJECT_ROOT / cfg["local_storage"]["audit_output_dir"] / candidate_run_id
-            counter += 1
-        run_id = candidate_run_id
-        audit_output_dir = candidate_dir
-
-    audit_output_dir.mkdir(parents=True, exist_ok=True)
+    requested_run_id = args.run_id or datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_audit_dir = PROJECT_ROOT / cfg["local_storage"]["audit_output_dir"]
+    audit_output_dir, run_id = allocate_exclusive_audit_dir(
+        base_dir=base_audit_dir,
+        requested_run_id=requested_run_id,
+        overwrite=args.overwrite,
+    )
 
     logger = setup_logger(audit_output_dir)
     logger.info(f"Initialized StocBench Audit Run '{run_id}'")

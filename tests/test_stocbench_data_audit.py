@@ -410,44 +410,41 @@ def test_real_downloaded_stocbench_files_acceptance():
 # ==============================================================================
 
 def test_audit_output_anti_collision_and_overwrite_protection(tmp_path):
-    """Verify that audit output directory allocation never silently overwrites existing evidence."""
+    """Verify that audit output directory allocation never silently overwrites existing evidence,
+    and guarantees atomic race-free concurrency across simultaneous invocations."""
+    import concurrent.futures
+    from scripts.prepare_stocbench_data import allocate_exclusive_audit_dir
+
     base_dir = tmp_path / "data_audit" / "stocbench"
     base_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. First run creates run_dir with evidence
     run_id = "test_run"
-    first_dir = base_dir / run_id
-    first_dir.mkdir(parents=True, exist_ok=True)
+    first_dir, alloc_run_id_1 = allocate_exclusive_audit_dir(base_dir, run_id, overwrite=False)
+    assert first_dir == base_dir / run_id
     sentinel_file = first_dir / "manifest.json"
     sentinel_file.write_text('{"evidence": "original_v1"}', encoding="utf-8")
 
-    # 2. Simulate collision logic from prepare_stocbench_data.py without --overwrite
-    def resolve_audit_dir(run_id_val, overwrite=False):
-        audit_output_dir = base_dir / run_id_val
-        if audit_output_dir.exists() and any(audit_output_dir.iterdir()) and not overwrite:
-            timestamp = "20261008_120000"
-            candidate_run_id = f"{run_id_val}_{timestamp}"
-            candidate_dir = base_dir / candidate_run_id
-            counter = 1
-            while candidate_dir.exists() and any(candidate_dir.iterdir()):
-                candidate_run_id = f"{run_id_val}_{timestamp}_{counter}"
-                candidate_dir = base_dir / candidate_run_id
-                counter += 1
-            return candidate_dir
-        return audit_output_dir
-
-    # Second invocation: should branch to timestamped candidate dir
-    second_dir = resolve_audit_dir(run_id, overwrite=False)
+    # 2. Second sequential invocation: branches to distinct directory
+    second_dir, alloc_run_id_2 = allocate_exclusive_audit_dir(base_dir, run_id, overwrite=False)
     assert second_dir != first_dir
-    assert not second_dir.exists() or not any(second_dir.iterdir())
-    second_dir.mkdir(parents=True, exist_ok=True)
     (second_dir / "manifest.json").write_text('{"evidence": "second_run"}', encoding="utf-8")
 
     # Original evidence remains completely intact and uncorrupted
     assert sentinel_file.read_text(encoding="utf-8") == '{"evidence": "original_v1"}'
 
-    # Third invocation within the same second: should increment counter suffix
-    third_dir = resolve_audit_dir(run_id, overwrite=False)
-    assert third_dir != first_dir
-    assert third_dir != second_dir
-    assert third_dir.name.endswith("_1")
+    # 3. True concurrency test: 10 workers simultaneously requesting the exact same run_id
+    def worker_task(worker_id):
+        worker_dir, w_run_id = allocate_exclusive_audit_dir(base_dir, run_id, overwrite=False)
+        proof_file = worker_dir / f"worker_{worker_id}.txt"
+        proof_file.write_text(f"worker_{worker_id}", encoding="utf-8")
+        return str(worker_dir)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(worker_task, i) for i in range(10)]
+        results = [f.result() for f in futures]
+
+    # Every concurrent worker must acquire a unique, non-overlapping directory
+    assert len(set(results)) == 10
+    # Original evidence remains untouched
+    assert sentinel_file.read_text(encoding="utf-8") == '{"evidence": "original_v1"}'

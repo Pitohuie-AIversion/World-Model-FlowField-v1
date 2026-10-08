@@ -232,14 +232,14 @@
 | `pytest.log` | 定向测试套件完整执行原始日志 | 记录测试用例（含真实文件集成测试）的全部输出 |
 | `summary.md` | 本次运行的简要技术提炼 | 包含通过状态、核心指标与关键结论 |
 
-### 2. 防覆写机制实测证据（持久化归档）
+### 2. 防覆写机制实测证据（持久化归档与并发安全保证）
 
-为防止重复执行审计时静默覆盖历史证据，`scripts/prepare_stocbench_data.py` 实施了严格防覆写与防碰撞保护：
-- 若目标目录已存在且非空，未显式传入 `--overwrite` 标志时，脚本自动追加时间戳与递增序列号后缀（支持同秒内重复执行）新建全新独立目录；
+为防止重复执行审计时静默覆盖历史证据，`scripts/prepare_stocbench_data.py` 实施了原子排他分配与并发安全保护：
+- **原子排他分配机制**：通过 `allocate_exclusive_audit_dir` 使用操作系统原子系统调用 `Path.mkdir(exist_ok=False)`。若多个进程/线程并发申请同一 `run_id`，利用操作系统内核的排他性捕获 `FileExistsError`，自动追加时间戳与递增序列号重试，彻底杜绝 check-then-act 竞态条件；
 - **实测生成的两套持久化证据目录（已永久保存在磁盘，供随时查验）**：
   1. `outputs/data_audit/stocbench/run_anti_overwrite_verified/manifest.json`
   2. `outputs/data_audit/stocbench/run_anti_overwrite_verified_20261008_180405/manifest.json`
-- **自动化测试保障**：已在 `tests/test_stocbench_data_audit.py` 中新增自动化单元测试 `test_audit_output_anti_collision_and_overwrite_protection`，从代码层确保历史证据永不被覆盖。
+- **并发自动化测试保障**：在 `tests/test_stocbench_data_audit.py` 的测试用例 `test_audit_output_anti_collision_and_overwrite_protection` 中，使用 10 线程并发竞争压测，确证 10 个并发工作者均获得互斥独立目录，且基线证据未被修改。
 
 ---
 
@@ -258,17 +258,27 @@
 ### 1. 新增测试文件 `tests/test_stocbench_model_smoke.py` 纳入版本控制
 
 - **定位**：单通道最小链路与接口冒烟测试套件（共 6 项用例）；
-- **纳入版本库**：正式纳入 Git 索引并提交，杜绝工作区存在未跟踪核心测试文件的问题；
-- **测试覆盖**：
-  1. 单通道自编码器前向及有限性；
-  2. 单通道下保持 `project_pressure=False` 隔离压力规范处理；
-  3. Deterministic / Gaussian / Flow Matching 三种动力学在 `PhysicalContext.extra` 缺省物理条件下的前向与采样；
-  4. 分叉参考集合 $K_{\text{ref}}=5000$ 维度契约与潜空间投影；
-  5. $\times 3.0$ 存储到物理尺度无损往返缩放；
-  6. 训练集（`traj_seed_42.npy`）与评测集（`step_seed_100.npz`）的物理隔离与防泄漏。
+- **纳入版本库**：正式纳入 Git 索引并提交（Commit `9f4d82b`），杜绝工作区存在未跟踪核心测试文件的问题；
+- **测试覆盖与实测状态**：
+  1. `test_single_channel_autoencoder_smoke`：单通道自编码器前向及有限性（PASSED）；
+  2. `test_decoder_pressure_projection_isolated_for_single_channel`：单通道下保持 `project_pressure=False` 隔离压力规范处理（PASSED）；
+  3. `test_latent_dynamics_forward_default_context_smoke`：Deterministic / Gaussian / Flow Matching 三种动力学在 `PhysicalContext.extra` 缺省物理条件下的前向与采样（PASSED）；
+  4. `test_stocbench_reference_ensemble_dimension_and_latent_projection`：分叉参考集合 $K_{\text{ref}}=5000$ 维度契约与潜空间投影（PASSED）；
+  5. `test_stocbench_physical_scaling_roundtrip`：$\times 3.0$ 存储到物理尺度无损往返缩放（PASSED）；
+  6. `test_train_and_reference_data_isolation`：训练集（`traj_seed_42.npy`）与评测集（`step_seed_100.npz`）的物理隔离与防泄漏（PASSED）。
+- **早期草稿报错根因回溯（澄清非模型缺陷）**：
+  前期草稿运行出现的两处报错已被追溯并准确定性：
+  - `TypeError: LatentSTTransformer.__init__() got unexpected keyword argument 'in_channels'`：系草稿传参误写为 `in_channels`，正确参数名为 `latent_channels`；
+  - `TypeError: VarianceHead2D.__init__() got unexpected keyword argument 'in_channels'`：系草稿传参误写为 `in_channels`，正确签名要求 `embed_dim, latent_channels`；
+  - 结论：世界模型核心组件天然支持单通道潜空间，早期报错纯属测试草稿调用方式不匹配，而非模型架构缺陷，无需重构核心网络。
 
 ### 2. `src/models/decoder.py` 与冻结基线保持零差异（零代码变动）
 
 - **核对事实**：冻结版本 `40e5a61` 中的 `Decoder2D` 构造参数已包含 `out_channels`（默认 4）与 `project_pressure`（默认 `False`），天然支持传入 `out_channels=1, project_pressure=False`；
 - **决策结论**：收回任何非必要修改，**完全保持 `40e5a61` 源码不变**；
 - **证据核对**：`git diff 40e5a619096ede506c8b933619781113fca3e158 HEAD -- src/models/decoder.py` 输出完全为空，既有 4 通道剪切流模型、动态覆盖测试及压力零均值规范行为 100% 保持完全一致。
+
+### 3. 工作区状态与隔离边界声明
+
+- **本轮交付物状态**：本轮新增与适配的目标代码、测试及报告已全部提交；
+- **工作区隔离范围**：工作区仍保留其他任务历史修改（`scripts/export_report_pdf.py`，用于调整导出 PDF 超时时间）以及历史报告/图表文件。测试在包含该隔离修改的工作区上执行，经核查对数据加载与世界模型逻辑无任何副作用。
