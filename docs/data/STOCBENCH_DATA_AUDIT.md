@@ -2,17 +2,17 @@
 
 ## 一、审计概述与结论
 
-- **审计结论**：**PASS WITH CONDITIONS**
-  - **核心依据**：
+- **当前结论**：**BLOCKED——数据下载、数值审计及最小契约适配已有执行记录；数据使用许可仍待确认，正式训练准入暂不关闭。**
+  - **已确认的工程事实（通过项）**：
     1. 真实官方数据文件 `traj_seed_42.npy` 与 `step_seed_100.npz` 均成功下载、校验并实测通过；
     2. 本地计算的 SHA-256 与远程 Hugging Face Git LFS 声明完全一致（字节级吻合）；
-    3. 数据维度、dtype、物理采样时间步长及求解器保存缩放语义已全部核实，无 NaN/Inf 或退化常数；
-    4. 同一初态下 5000 个未来样本的数值分叉得到严格证实（空间标准差均值 0.4620，与保存的 `mean`/`std` 偏差为 0.0）；
+    3. 数据维度、dtype、物理采样步长及求解器保存缩放语义已全部核实，无 NaN/Inf 或退化常数；
+    4. 同一初态下 5000 个未来样本的数值离散度得到实测检验（空间标准差均值 0.4620，与保存的 `mean`/`std` 偏差为 0.0）；
     5. 单通道涡量数据成功通过现有 `StateSpec` 与 `WorldModelBatch` 最小契约；
-    6. 新增定向测试及既有相关模块回归测试全部通过。
-  - **保留条件（CONDITIONS）**：
-    1. **数据许可未明**：上游代码仓库标注 MIT 许可证，但 Hugging Face 数据集卡片未声明明确的 Dataset License，在正式分发或商业化前需向上游团队确认；
-    2. **表示模型通道不匹配**：当前仓库既有 Encoder/Decoder 权重均为 4 通道（$u, v, p, s$），不能直接复用于单通道涡量数据，后续需训练单通道自编码器或采用物理空间模型。
+    6. 普通回归与离线测试完全解耦，干净检出环境可完全离线运行（10 passed, 1 skipped），真实数据验收执行 Fail-Closed 机制（无数据时断言报错终止，有数据时 11 passed）。
+  - **阻塞项与准入边界（BLOCKED 根因）**：
+    1. **数据使用许可未明确**：上游代码仓库标注 MIT 许可证，但 Hugging Face 数据集卡片未声明明确的 Dataset License（Card Data 为空，无 License tag）。按照严格工程治理标准，未获明确许可前**不得进入正式模型训练与对外公开发布**，因此训练准入暂不关闭；
+    2. **单通道表示模型尚未建立**：当前仓库既有权重为 4 通道 shear_flow 自编码器，不能直接复用于单通道涡量数据，后续需开展单通道自编码器表示验证。
 
 ---
 
@@ -20,13 +20,13 @@
 
 | 标识项 | 对应内容 | 证据来源 |
 | :--- | :--- | :--- |
-| **本项目评估 Commit** | `40e5a619096ede506c8b933619781113fca3e158` | 本地 `git rev-parse HEAD` |
+| **本项目评估 Commit** | `40e5a619096ede506c8b933619781113fca3e158` (后接入提交 `a0e35c5`) | 本地 `git rev-parse HEAD` |
 | **StocBench 代码仓库** | `https://github.com/tum-pbs/stocbench` | 官方开源代码 |
 | **StocBench 代码 Revision** | `2e519f153738972fb41c7c996ada8e1a4f4cb7a9` | GitHub 远程 `HEAD` |
 | **StocBench 代码 License** | `MIT License` (Copyright (c) 2025 Sebastian Pfister) | `LICENSE` 文件 |
 | **Hugging Face 数据集** | `https://huggingface.co/datasets/pfistse/stocbench-data` | 官方数据仓库 |
 | **Hugging Face 数据 Revision** | `3a5f50398cf6d14f108190ace63a9beed5fbddf7` | API `repo_info.sha` |
-| **数据集 License 状态** | 未显式声明（Card Data 为空） | Hugging Face 仓库元数据 |
+| **数据集 License 状态** | **未显式声明**（Card Data 为空，未打 license tag） | Hugging Face 仓库元数据 |
 | **论文引用** | arXiv:2608.22309 | *StocBench: A Benchmark for Generative Modeling of Stochastic Dynamics* |
 
 ---
@@ -57,26 +57,28 @@
   3. 轴 2（`C=1`）：状态通道数（单通道二维涡量 $\omega$）；
   4. 轴 3（`Ny=64`）：垂直空间网格分辨率；
   5. 轴 4（`Nx=64`）：水平空间网格分辨率。
-- **时间信息区分**：
-  - **求解器内部推进步长**：$\Delta t_{\text{solver}} = 0.0001$（源自 `solver/configs/incns_stoc.yaml`）；
+- **时间与物理时机区分**：
+  - **求解器内部推进步长**：$\Delta t_{\text{solver}} = 0.0001$；
   - **相邻保存帧时间间隔**：$\Delta t_{\text{sample}} = 0.5$（求解器内部每隔 5000 步采样输出一帧）；
-  - **物理时间跨度**：单条轨迹总时长 $T_{\text{phys}} = 200 \times 0.5 = 100.0$。
+  - **保存时机与首末跨度**：官方求解器完成 warmup 之后，推进 5000 步（即 $t=0.5$）保存第 0 帧；推进至第 $200 \times 5000$ 步保存第 199 帧（$t=100.0$）。
+    - 首末保存帧之间的时间跨度为：$199 \times 0.5 = 99.5$；
+    - 求解器累计运行时长为：$200 \times 0.5 = 100.0$。
 - **数值与分布特征**：
   - NaN 数量：0；Inf 数量：0；
   - 实测取值范围（抽样 5 条轨迹）：$\min = -5.3271$，$\max = 6.0329$，$\text{mean} = 0.0000$，$\text{std} = 0.9776$；
   - 变化性：未发现常数退化或全零帧。
-- **缩放与标准化语义**：
-  - 官方求解器在输出保存时执行了：$w_{\text{stored}} = (w_{\text{physical}} - \text{mean}) / \text{std}$，其中配置定义 $\text{mean} = 0.0, \text{std} = 3.0$（见 `solver/base.py` 行 151-153）；
-  - **结论**：文件中存储的数值已经是经过 $3.0$ 倍除法缩放的无量纲数值，其标准差约为 $1.0$；真实物理涡量满足 $\omega_{\text{phys}} = 3.0 \times \omega_{\text{stored}}$。因此后续使用时**不得直接套用未经说明的双重标准化**。
+- **缩放语义（存储尺度 vs 求解器尺度）**：
+  - 官方求解器在输出保存时执行了无量纲缩放：$w_{\text{stored}} = (w_{\text{solver}} - 0.0) / 3.0$（见 `solver/base.py` 行 151-153）；
+  - **结论**：文件中存储数值的标准差约为 $1.0$；乘以 $3.0$ 恢复的是求解器内部无量纲尺度，求解器本身基于无量纲参数（$\nu=0.001, L=2\pi$）运行，不能草率认定为有具体物理单位的真实量纲物理量。后续模型使用时**禁止套用未经说明的双重标准化**。
 
 ### 2. 条件分叉评测文件 (`step_seed_100.npz`)
 
 - **读取方式**：`np.load(..., allow_pickle=False)` 受控字典读取。
 - **包含键名与形状**：
-  - `init`: `(1, 64, 64)`，`float32`，给定的单帧初始高分辨率状态经 block-mean 下采样后的初态；
-  - `raw`: `(5000, 1, 1, 64, 64)`，`float32`，在完全相同的 `init` 条件下，因未观测随机强迫演化一步产生的 5000 个真实可能未来；
-  - `mean`: `(1, 64, 64)`，`float32`，官方预先计算的 5000 个未来的样本均值；
-  - `std`: `(1, 64, 64)`，`float32`，官方预先计算的 5000 个未来的样本标准差（采用总体标准差 `ddof=0`）。
+  - `init`: `(1, 64, 64)`，`float32`，给定的单帧初始状态经 block-mean 下采样后的初态；
+  - `raw`: `(5000, 1, 1, 64, 64)`，`float32`，在相同 `init` 条件下，因未观测随机强迫演化一步产生的 5000 个真实候选未来；
+  - `mean`: `(1, 64, 64)`，`float32`，官方预存的 5000 个未来的样本均值；
+  - `std`: `(1, 64, 64)`，`float32`，官方预存的 5000 个未来的总体标准差（`ddof=0`）。
 - **统计一致性校验**：
   - 对 5000 个样本沿成员轴重新计算：
     $$\text{diff}_{\text{mean}} = \max |\text{raw.mean}(0) - \text{mean}| = 0.000000\times 10^{0}$$
@@ -92,24 +94,27 @@
 ### 1. 三层证据体系
 
 ```
-[Layer A: 生成机制]
-官方求解器复制相同初态 init -> 注入不同伪随机数种子的傅里叶谱随机强迫 -> 仿真推进 sample_dt
+[Layer A: 生成机制与源码追溯]
+审查 StocBench 官方求解器 solver/create_incns_stoc_dataset.py 确认：
+求解器复制同一初态 init，注入不同伪随机数种子的谱空间随机强迫推进 sample_dt
 
-[Layer B: 文件结构]
-step_seed_100.npz 结构明确包含 1 个 init 与 5000 个对应的 raw 候选未来（K_ref = 5000）
+[Layer B: 文件结构与完整性互证]
+文件结构将一个初态 (init) 与多个未来样本 (raw) 关联；结合固定版本的生成代码和文件完整性校验，支持这些样本来自同一初态的判断。
+（注：单个初态数组加多个未来数组，单靠这种静态文件结构本身并不能证明其动态生成过程，必须与 Layer A 的源码及 Git SHA 形成证据闭环）
 
-[Layer C: 文件数值实测]
-5000 个未来之间存在显著空间分布差异：
+[Layer C: 文件数值实测与离散性验证]
+5000 个未来样本在空间各点展现出非零方差与显著离散度：
 - 成员轴空间标准差：mean = 0.4620, min = 0.3895, max = 0.7850
 - 任意两个分支的最大局部差值：|branch_0 - branch_1|_max = 2.6223
+（注：非零方差证明的是样本存在离散性；随机性来源和独立生成机制需结合求解代码与连续性实测共同定性）
 ```
 
 ### 2. 证据边界与非推断声明
 
-- **证据确证范围**：数据确实来源于真实的随机 Navier-Stokes 系统，在相同的单帧当前条件 $\omega_t$ 下，下一时刻流场 $\omega_{t+1}$ 确实呈现连续且具有明显方差的非确定性条件分布。
+- **证据确证范围**：数据确实来源于具有谱空间随机外力的二维 Navier-Stokes 仿真系统；在相同的初态 $\omega_t$ 下，下一时刻流场 $\omega_{t+1}$ 确实呈现连续且具有明显方差的非确定性条件分布。
 - **严谨边界（不成立的假设）**：
   1. 文件中仅保存了单步（1 步）的分叉集合，**未保存跨多步的长轨迹分叉树**；
-  2. 样本之间存在显著差异，**不能直接证明条件分布是多峰分布**（可能仍接近多维高斯或偏态分布）；
+  2. 样本之间存在显著离散度，**不能直接证明条件分布是多峰分布**（可能仍接近单峰偏态分布）；
   3. 不能由此推断“Flow Matching 必定优于高斯模型”；
   4. 不能由此推断“现有世界模型已经具有正确的概率校准”。这些结论需要后续严谨的模型训练与能量距离（Energy Distance）评测给出。
 
@@ -154,39 +159,42 @@ step_seed_100.npz 结构明确包含 1 个 init 与 5000 个对应的 raw 候选
 
 ---
 
-## 七、新增组件与修改清单
+## 七、测试执行策略与环境边界实测
 
-1. `configs/data/stocbench.yaml`：StocBench 数据源、物理参数、校验哈希及本地路径配置；
-2. `src/data/stocbench_dataset.py`：
-   - `STOCBENCH_STATE_SPEC`：单通道涡量状态规范；
-   - `StocBenchTrainDataset`：内存映射训练数据集；
-   - `StocBenchReferenceEnsemble`：分叉参考集合解析器与统计校验器；
-   - `stocbench_batch_adapter`：数据契约适配器；
-3. `scripts/prepare_stocbench_data.py`：支持 `preflight` 与 `download-audit` 双阶段的准备与审计工具；
-4. `tests/test_stocbench_data_audit.py`：包含 11 个覆盖合法读取、非法输入校验、统计一致性、退化防御及真实数据校验的完整测试集；
-5. `docs/data/STOCBENCH_DATA_AUDIT.md`：本技术审计报告。
+为确保代码库在无外部大文件/无 GPU 依赖的环境下保持纯净可维护，同时真实数据验收具备严格 Fail-Closed 特性，本工程建立明确解耦的两个测试执行范围，并完成全覆盖实测验证：
+
+### 1. 双执行范围设计与实测对比
+
+| 执行范围 | 依赖条件与环境变量 | 执行命令 | 实测结果 | 行为判定 |
+| :--- | :--- | :--- | :--- | :--- |
+| **普通离线单元测试（无数据环境）** | 模拟干净检出环境，无大文件依赖（`STOCBENCH_REQUIRE_REAL_DATA=0`） | `STOCBENCH_DATA_DIR=/tmp/clean_empty_checkout python -m pytest -q tests/test_stocbench_data_audit.py` | `10 passed, 1 skipped in 2.80s` | **PASS**（前 10 项纯合成数据测试 100% 通过；第 11 项因缺失真实数据显式 skip，不阻断普通 CI） |
+| **真实数据验收测试（缺失数据场景）** | 强制执行真实数据验收（`STOCBENCH_REQUIRE_REAL_DATA=1`），数据缺失 | `STOCBENCH_DATA_DIR=/tmp/clean_empty_checkout STOCBENCH_REQUIRE_REAL_DATA=1 python -m pytest -q tests/test_stocbench_data_audit.py` | `1 failed, 10 passed in 2.76s` (退出码 1) | **FAIL-CLOSED**（明确触发 `AssertionError: FAIL-CLOSED: Real trajectory file ... not found!`，绝不静默放行） |
+| **真实数据验收测试（数据就绪场景）** | 本地真实 1.6 GiB 数据落地，强制验收（`STOCBENCH_REQUIRE_REAL_DATA=1`） | `STOCBENCH_REQUIRE_REAL_DATA=1 python -m pytest -q tests/test_stocbench_data_audit.py` | `11 passed in 4.04s` | **PASS**（11 项测试全绿通过，包括 99500 样本滑动窗口与 5000 候选未来统计对齐） |
+| **相关世界模型模块回归** | 核心契约、自编码器、条件高斯、潜空间流匹配 | `python -m pytest -q tests/test_core_contracts.py tests/test_dataset.py tests/test_splits.py tests/test_encoder_decoder.py tests/test_probabilistic_interfaces.py tests/test_latent_flow_matching.py` | `102 passed in 9.00s` | **PASS**（零破坏性改动） |
+
+### 2. 警告信息（Warnings）根因分析与原始日志精准定位
+
+在仓库全量回归测试（`python -m pytest -q`）中输出的 **`541 passed, 14 warnings`**，其全部 14 个 warnings 来源已被原始日志精确定位：
+- **唯一来源文件**：`tests/test_compile_roundtrip.py: 14 warnings`；
+- **告警类别**：`DeprecationWarning`；
+- **原始告警堆栈**：
+  ```text
+  tests/test_compile_roundtrip.py: 14 warnings
+    /root/miniconda3/envs/seagent/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+      warnings.warn(
+  ```
+- **性质定性**：来自已有的模型 TorchScript 编译回环测试，属于 PyTorch 2.10 废弃 `torch.jit.script_method` 的上游 API 迁移提示；
+- **与本轮关系**：本轮新增的 StocBench 数据适配与审计模块（`src/data/stocbench_dataset.py`、`tests/test_stocbench_data_audit.py`）产生 **0 个 warning**。
 
 ---
 
-## 八、进入下一阶段的前置条件评估
-
-| 前置条件项 | 状态 | 评估说明 |
-| :--- | :---: | :--- |
-| **真实数据可获取性** | **满足** | 已完成远端预检与本地全量下载校验 |
-| **数据物理与时间语义** | **满足** | $\Delta t_{\text{sample}} = 0.5$，已区分内部求解步长与缩放系数 |
-| **条件随机分叉证据** | **满足** | 5000 个未来样本方差明显，统计完全自洽 |
-| **最小数据契约兼容** | **满足** | 单通道 `StateSpec` 与 `WorldModelBatch` 验证通过 |
-| **模型算法保持不变** | **满足** | 未修改 Transformer、Gaussian、Flow Matching 任何核心算法 |
-| **测试与代码回归** | **满足** | 11 个定向测试全部通过，102 个既有模块测试全部通过 |
-| **表示模型匹配（待办）** | *需下阶段解决* | 既有自编码器为 4 通道，后续需要针对 1 通道涡量适配自编码器或探索直接流匹配 |
-
----
-
-## 九、审计产物与执行证据归档索引
+## 八、审计产物与执行证据归档索引
 
 本次规范化审计运行完整记录在独立运行目录：
 
 `outputs/data_audit/stocbench/run_stocbench_audit_v1/`
+
+### 1. 产物清单与关键索引项
 
 | 产物文件 | 说明 | 关键索引项 |
 | :--- | :--- | :--- |
@@ -195,3 +203,22 @@ step_seed_100.npz 结构明确包含 1 个 init 与 5000 个对应的 raw 候选
 | `execution.log` | 数据获取与审计全流程控制台日志 | 记录预检、下载阶段耗时与数据流关键动作 |
 | `pytest.log` | 定向测试套件完整执行原始日志 | 记录 11 个测试用例（含真实文件集成测试）的全部输出 |
 | `summary.md` | 本次运行的简要技术提炼 | 包含通过状态、核心指标与关键结论 |
+
+### 2. 防覆写机制实测验证
+
+为防止重复执行审计时静默覆盖历史证据，`scripts/prepare_stocbench_data.py` 内部实施了严格防覆写保护：
+- 若目标目录已存在且非空，未显式传入 `--overwrite` 标志时，脚本自动追加时间戳后缀（如 `run_stocbench_audit_v1_20261008_174207`）新建全新独立目录；
+- 实测日志确证：
+  `[INFO] Initialized StocBench Audit Run 'run_stocbench_audit_v1_20261008_174207'`
+  `[INFO] Preflight manifest saved to: .../run_stocbench_audit_v1_20261008_174207/manifest.json`
+  历史 `run_stocbench_audit_v1` 下的原有审计记录 100% 保持只读与隔离。
+
+---
+
+## 九、后续科研推进建议
+
+本轮完成的是“**StocBench 数据准备、审计与最小契约接入**”，而非“概率流场世界模型完成”。进入下一轮前，建议紧紧围绕世界模型的**潜空间动力学主线**推进：
+
+1. **核心下一步**：单通道涡量 Encoder/Decoder 2D 表示模型训练与验证；
+2. **核心回答问题**：潜空间压缩与重建会不会把原始随机未来之间的差异抹平？
+3. **隔离保护原则**：`step_seed_100.npz` 继续严格封存为概率分叉评测基准，不得参与自编码器的训练或超参数调优。

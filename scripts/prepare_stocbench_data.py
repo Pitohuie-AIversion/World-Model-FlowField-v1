@@ -524,6 +524,7 @@ def main():
     parser.add_argument("--stage", type=str, required=True, choices=["preflight", "download-audit"], help="Audit stage.")
     parser.add_argument("--run_id", type=str, default=None, help="Execution run identifier.")
     parser.add_argument("--skip_download", action="store_true", help="Skip download if files already exist.")
+    parser.add_argument("--overwrite", action="store_true", help="Allow overwriting existing run directory without timestamping.")
     args = parser.parse_args()
 
     config_path = PROJECT_ROOT / args.config
@@ -536,6 +537,11 @@ def main():
 
     run_id = args.run_id or datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     audit_output_dir = PROJECT_ROOT / cfg["local_storage"]["audit_output_dir"] / run_id
+    if audit_output_dir.exists() and any(audit_output_dir.iterdir()) and not args.overwrite:
+        suffix = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_id = f"{run_id}_{suffix}"
+        audit_output_dir = PROJECT_ROOT / cfg["local_storage"]["audit_output_dir"] / run_id
+
     audit_output_dir.mkdir(parents=True, exist_ok=True)
 
     logger = setup_logger(audit_output_dir)
@@ -624,7 +630,8 @@ def main():
     logger.info("=== Executing Directed Tests and Archiving pytest.log ===")
     pytest_log_path = audit_output_dir / "pytest.log"
     pytest_cmd = [sys.executable, "-m", "pytest", "-v", "tests/test_stocbench_data_audit.py"]
-    pytest_res = subprocess.run(pytest_cmd, capture_output=True, text=True)
+    test_env = {**os.environ, "STOCBENCH_REQUIRE_REAL_DATA": "1"}
+    pytest_res = subprocess.run(pytest_cmd, capture_output=True, text=True, env=test_env)
     with open(pytest_log_path, "w", encoding="utf-8") as pf:
         pf.write(pytest_res.stdout)
         if pytest_res.stderr:
