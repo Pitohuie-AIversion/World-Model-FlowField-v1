@@ -15,7 +15,7 @@ import numpy as np
 import torch
 
 from src.contracts.batch import WorldModelBatch
-from src.contracts.context import Context
+from src.contracts.context import Context, PhysicalContext
 from src.contracts.latent_dynamics import (
     DeterministicLatentDynamics,
     GaussianLatentDynamics,
@@ -91,7 +91,12 @@ def test_latent_dynamics_forward_default_context_smoke():
     """Verify Deterministic, Gaussian, and FlowMatching dynamics run forward with context=None."""
     b, l, c_z, hz, wz = 2, 1, 64, 8, 8
     z_hist = torch.randn(b, l, c_z, hz, wz, dtype=torch.float32)
-    ctx = Context(physical=None, boundary="periodic")
+    ctx = Context(
+        physical=PhysicalContext(extra={"nu": 0.001, "drag": -0.1, "epsilon": 1.0}),
+        boundary="periodic",
+    )
+    assert ctx.boundary == "periodic"
+    assert ctx.to_re_sc() == (None, None)
 
     # Lightweight transformer backbone
     backbone = LatentSTTransformer(
