@@ -14,6 +14,7 @@ H. Checkpoint compatibility with existing real repository checkpoints.
 import os
 from pathlib import Path
 import pytest
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -372,6 +373,141 @@ def test_resolve_context_standalone_usage_preserved():
 
     # 3. None input
     assert resolve_context() is None
+
+
+def test_resolve_context_boolean_rejection():
+    """Verify that boolean configurations are strictly rejected and not treated as 1.0/0.0."""
+    ctx_float = Context.from_re_sc(re=1.0, sc=1.0)
+
+    # Legacy is Python bool True/False
+    with pytest.raises(TypeError, match="must be numeric, got boolean"):
+        resolve_context(context=ctx_float, re=True)
+    with pytest.raises(TypeError, match="must be numeric, got boolean"):
+        resolve_context(context=ctx_float, re=False)
+
+    # Context contains Python bool
+    ctx_bool = Context(physical=PhysicalContext(re=True, sc=1.0))
+    with pytest.raises(TypeError, match="must be numeric, got boolean"):
+        resolve_context(context=ctx_bool, re=1.0)
+
+    # Boolean PyTorch tensor
+    with pytest.raises(TypeError, match="must be real numeric, got boolean tensor"):
+        resolve_context(context=ctx_float, re=torch.tensor([True]))
+
+    # Boolean NumPy scalar/array
+    with pytest.raises(TypeError, match="must be numeric, got boolean"):
+        resolve_context(context=ctx_float, re=np.bool_(True))
+    with pytest.raises(TypeError, match="must be real numeric, got boolean numpy array"):
+        resolve_context(context=ctx_float, re=np.array([True]))
+
+    # Context.from_re_sc factory also rejects boolean
+    with pytest.raises(TypeError, match="must be numeric, got boolean"):
+        Context.from_re_sc(re=True, sc=1.0)
+
+
+def test_resolve_context_complex_rejection():
+    """Verify that complex parameters are strictly rejected without lossy imaginary-part truncation."""
+    ctx_float = Context.from_re_sc(re=1000.0, sc=1.0)
+
+    # NumPy complex array
+    with pytest.raises(TypeError, match="must be real-valued, got complex numpy array"):
+        resolve_context(context=ctx_float, re=np.array([1000.0 + 5.0j]))
+
+    # NumPy complex in Context
+    ctx_np_c = Context(physical=PhysicalContext(re=np.array([1000.0 + 5.0j]), sc=1.0))
+    with pytest.raises(TypeError, match="must be real-valued, got complex numpy array"):
+        resolve_context(context=ctx_np_c, re=1000.0)
+
+    # Python complex
+    with pytest.raises(TypeError, match="must be real-valued, got complex"):
+        resolve_context(context=ctx_float, re=1000.0 + 5.0j)
+
+    # PyTorch complex tensor
+    with pytest.raises(TypeError, match="must be real-valued, got complex tensor"):
+        resolve_context(context=ctx_float, re=torch.tensor([1000.0 + 5.0j]))
+
+    # Context.from_re_sc factory rejects complex
+    with pytest.raises(TypeError, match="must be real-valued, got complex"):
+        Context.from_re_sc(re=1000.0 + 5.0j, sc=1.0)
+
+
+def test_resolve_context_lossless_integer_bound_rejection():
+    """Verify that integers exceeding 2^53 (lossless float64 precision limit) are strictly rejected."""
+    limit = 2**53
+    exceeded = limit + 1
+
+    ctx_valid = Context.from_re_sc(re=1000.0, sc=1.0)
+
+    # Python integer exceeding 2^53
+    with pytest.raises(ValueError, match="exceeds maximum lossless float64 representation limit"):
+        resolve_context(context=ctx_valid, re=exceeded)
+
+    # Context containing out-of-range integer
+    ctx_overflow = Context(physical=PhysicalContext(re=exceeded, sc=1.0))
+    with pytest.raises(ValueError, match="exceeds maximum lossless float64 representation limit"):
+        resolve_context(context=ctx_overflow, re=exceeded)
+
+    # PyTorch int64 tensor exceeding 2^53
+    with pytest.raises(ValueError, match="exceeds maximum lossless float64 representation limit"):
+        resolve_context(context=ctx_valid, re=torch.tensor([exceeded], dtype=torch.int64))
+
+    # NumPy integer exceeding 2^53
+    with pytest.raises(ValueError, match="exceeds maximum lossless float64 representation limit"):
+        resolve_context(context=ctx_valid, re=np.array([exceeded], dtype=np.int64))
+
+    # Verifying that limit comparison between 2^53 and 2^53 + 1 fails safely (not falsely passing)
+    ctx_limit = Context(physical=PhysicalContext(re=limit, sc=1.0))
+    with pytest.raises(ValueError, match="exceeds maximum lossless float64 representation limit"):
+        resolve_context(context=ctx_limit, re=exceeded)
+
+    # Safe integer within limit (e.g. 2^50) passes normally
+    safe_int = 2**50
+    ctx_safe = Context(physical=PhysicalContext(re=safe_int, sc=1.0))
+    res_safe = resolve_context(context=ctx_safe, re=safe_int)
+    assert res_safe is ctx_safe
+
+
+def test_resolve_context_empty_parameter_rejection():
+    """Verify that empty tensors or arrays are rejected in normalization with clear ValueError."""
+    ctx_valid = Context.from_re_sc(re=1000.0, sc=1.0)
+
+    # Empty PyTorch tensor
+    with pytest.raises(ValueError, match="must not be empty \\(got numel=0\\)"):
+        resolve_context(context=ctx_valid, re=torch.tensor([]))
+
+    # Empty Context tensor
+    ctx_empty = Context(physical=PhysicalContext(re=torch.tensor([]), sc=1.0))
+    with pytest.raises(ValueError, match="must not be empty \\(got numel=0\\)"):
+        resolve_context(context=ctx_empty, re=torch.tensor([]))
+
+    # Empty NumPy array
+    with pytest.raises(ValueError, match="must not be empty \\(got numel=0\\)"):
+        resolve_context(context=ctx_valid, re=np.array([]))
+
+    # Empty Python sequence
+    with pytest.raises(ValueError, match="must not be empty"):
+        resolve_context(context=ctx_valid, re=[])
+
+    # Factory rejects empty tensor
+    with pytest.raises(ValueError, match="must not be empty"):
+        Context.from_re_sc(re=torch.tensor([]), sc=1.0)
+
+
+def test_resolve_context_valid_numpy_and_sequence_inputs():
+    """Verify that valid real NumPy arrays and list inputs continue to work seamlessly."""
+    ctx_base = Context.from_re_sc(re=torch.tensor(1000.0, dtype=torch.float32), sc=1.0)
+
+    # Real NumPy 1D array
+    res_np = resolve_context(context=ctx_base, re=np.array([1000.0]), sc=np.array([1.0]))
+    assert res_np is ctx_base
+
+    # Python float list
+    res_list = resolve_context(context=ctx_base, re=[1000.0], sc=[1.0])
+    assert res_list is ctx_base
+
+    # NumPy scalar float
+    res_np_scalar = resolve_context(context=ctx_base, re=np.float64(1000.0), sc=np.float64(1.0))
+    assert res_np_scalar is ctx_base
 
 
 # ==============================================================================

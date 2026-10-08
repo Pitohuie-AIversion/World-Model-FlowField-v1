@@ -6,7 +6,11 @@ external forcing, language descriptors, and agent/robot actions into a unified s
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple, Union
+import numpy as np
 import torch
+
+# Maximum exact integer representable without roundoff in IEEE 754 binary64 (float64)
+MAX_EXACT_INT = 9007199254740992  # 2**53
 
 
 @dataclass
@@ -80,6 +84,36 @@ class Context:
             dtype: Optional target dtype (default: float32 for floats).
             **extra_physical: Additional physical parameters.
         """
+        # Input type and non-empty validation
+        for param_val, param_name in ((re, "re"), (sc, "sc")):
+            if param_val is not None:
+                if isinstance(param_val, (bool, np.bool_)):
+                    raise TypeError(f"Physical parameter '{param_name}' must be numeric, got boolean {param_val}.")
+                if isinstance(param_val, (complex, np.complexfloating)):
+                    raise TypeError(f"Physical parameter '{param_name}' must be real-valued, got complex {param_val}.")
+                if isinstance(param_val, torch.Tensor):
+                    if param_val.dtype == torch.bool:
+                        raise TypeError(f"Physical parameter '{param_name}' must be real numeric, got boolean tensor.")
+                    if param_val.is_complex():
+                        raise TypeError(f"Physical parameter '{param_name}' must be real-valued, got complex tensor.")
+                    if param_val.numel() == 0:
+                        raise ValueError(f"Physical parameter '{param_name}' must not be empty (got numel=0).")
+                elif isinstance(param_val, np.ndarray):
+                    if param_val.dtype == np.bool_:
+                        raise TypeError(f"Physical parameter '{param_name}' must be real numeric, got boolean numpy array.")
+                    if np.iscomplexobj(param_val):
+                        raise TypeError(f"Physical parameter '{param_name}' must be real-valued, got complex numpy array.")
+                    if param_val.size == 0:
+                        raise ValueError(f"Physical parameter '{param_name}' must not be empty (got numel=0).")
+                elif isinstance(param_val, (list, tuple)):
+                    if len(param_val) == 0:
+                        raise ValueError(f"Physical parameter '{param_name}' must not be empty (got len=0).")
+                    for elem in param_val:
+                        if isinstance(elem, (bool, np.bool_)):
+                            raise TypeError(f"Physical parameter '{param_name}' sequence contains boolean element: {elem}.")
+                        if isinstance(elem, (complex, np.complexfloating)):
+                            raise TypeError(f"Physical parameter '{param_name}' sequence contains complex element: {elem}.")
+
         re_t = None
         if re is not None:
             if isinstance(re, torch.Tensor):
@@ -128,50 +162,101 @@ def _canonicalize_parameter_for_comparison(
     val: Any,
     param_name: str,
 ) -> torch.Tensor:
-    """Canonicalize a physical parameter into a 1D float64 tensor for comparison.
+    """Canonicalize a physical parameter into a 1D float64 CPU tensor for comparison.
 
     Rules:
-    1. Python floats/ints are directly converted to float64 tensors without float32 truncation.
-    2. Tensor inputs preserve their exact numerical value and are promoted to float64 on CPU.
-    3. Finiteness check: NaN, Inf, and -Inf are strictly rejected (torch.isfinite).
-    4. Shape contract:
+    1. Type safety:
+       - Boolean inputs (Python bool, numpy bool, torch bool) are strictly rejected with TypeError.
+       - Complex numbers (Python complex, numpy complex, torch complex) are strictly rejected with TypeError
+         BEFORE any lossy type conversions.
+    2. Exact range limits:
+       - Integer inputs (Python int, numpy int, torch integer) must be within [-2^53, 2^53],
+         the exact lossless integer representation limit of IEEE 754 binary64.
+       - Out-of-range integers raise ValueError immediately.
+    3. Python floats and valid integers are directly converted to float64 tensors explicitly on CPU.
+    4. Tensor inputs preserve exact numerical values and are moved to CPU and promoted to float64.
+    5. Non-empty check: val must have numel > 0; empty tensors/arrays raise ValueError.
+    6. Finiteness check: NaN, Inf, and -Inf are strictly rejected (torch.isfinite).
+    7. Shape contract:
        - Scalars: 0-D (), 1-D (1,), or 2-D (1, 1) are normalized to 1D shape (1,).
        - Batch vectors: 1-D (B,) with B > 1, or 2-D (B, 1) with B > 1 are normalized to 1D shape (B,).
        - Any higher dimensional (>2D) or multi-column (shape[1] > 1) tensors are rejected.
 
     Returns:
-        1D torch.Tensor of dtype float64 on CPU.
+        1D torch.Tensor of dtype float64 on CPU with numel > 0.
 
     Raises:
-        TypeError: If val has an unsupported type or complex dtype.
-        ValueError: If val contains non-finite values (NaN/Inf) or has an invalid shape.
+        TypeError: If val is boolean, complex, or has an unsupported data type.
+        ValueError: If val is empty, non-finite, out of exact integer range, or has invalid shape.
     """
-    if isinstance(val, (int, float)):
-        # Python int and float (64-bit IEEE 754) converted directly to float64
-        t = torch.tensor([float(val)], dtype=torch.float64)
-    elif isinstance(val, torch.Tensor):
-        if val.is_complex():
-            raise TypeError(f"Physical parameter '{param_name}' must be real-valued, got {val.dtype}.")
-        if val.dtype in (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8):
-            t = val.detach().cpu().to(dtype=torch.float64)
-        elif val.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
-            t = val.detach().cpu().to(dtype=torch.float64)
-        else:
-            raise TypeError(f"Physical parameter '{param_name}' has unsupported tensor dtype {val.dtype}.")
-    else:
-        try:
-            # Fallback for numpy scalars/arrays or sequences
-            t = torch.as_tensor(val, dtype=torch.float64).detach().cpu()
-        except Exception as err:
-            raise TypeError(f"Unsupported type {type(val)} for physical parameter '{param_name}': {err}") from err
+    # 1. Reject booleans strictly (in Python, bool is a subclass of int)
+    if isinstance(val, (bool, np.bool_)):
+        raise TypeError(f"Physical parameter '{param_name}' must be numeric, got boolean {val}.")
 
-    # Finiteness validation (Fail-Fast on NaN / Inf)
+    # 2. Reject complex values strictly before any casting/as_tensor calls
+    if isinstance(val, (complex, np.complexfloating)):
+        raise TypeError(f"Physical parameter '{param_name}' must be real-valued, got complex {val}.")
+
+    # 3. Handle Python numbers and scalars
+    if isinstance(val, (int, np.integer)):
+        if abs(int(val)) > MAX_EXACT_INT:
+            raise ValueError(
+                f"Integer physical parameter '{param_name}' exceeds maximum lossless "
+                f"float64 representation limit (+/- 2^53): got {val}."
+            )
+        t = torch.tensor([float(val)], dtype=torch.float64, device="cpu")
+    elif isinstance(val, (float, np.floating)):
+        t = torch.tensor([float(val)], dtype=torch.float64, device="cpu")
+    elif isinstance(val, torch.Tensor):
+        if val.dtype == torch.bool:
+            raise TypeError(f"Physical parameter '{param_name}' must be real numeric, got boolean tensor.")
+        if val.is_complex():
+            raise TypeError(f"Physical parameter '{param_name}' must be real-valued, got complex tensor dtype {val.dtype}.")
+        if val.dtype in (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8):
+            if val.numel() > 0 and torch.any(torch.abs(val) > MAX_EXACT_INT):
+                raise ValueError(
+                    f"Integer tensor for physical parameter '{param_name}' exceeds maximum lossless "
+                    f"float64 representation limit (+/- 2^53)."
+                )
+        elif val.dtype not in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
+            raise TypeError(f"Physical parameter '{param_name}' has unsupported tensor dtype {val.dtype}.")
+        t = val.detach().to(device="cpu", dtype=torch.float64)
+    elif isinstance(val, np.ndarray):
+        if val.dtype == np.bool_:
+            raise TypeError(f"Physical parameter '{param_name}' must be real numeric, got boolean numpy array.")
+        if np.iscomplexobj(val):
+            raise TypeError(f"Physical parameter '{param_name}' must be real-valued, got complex numpy array of dtype {val.dtype}.")
+        if np.issubdtype(val.dtype, np.integer):
+            if val.size > 0 and np.any(np.abs(val) > MAX_EXACT_INT):
+                raise ValueError(
+                    f"Integer numpy array for physical parameter '{param_name}' exceeds maximum lossless "
+                    f"float64 representation limit (+/- 2^53)."
+                )
+        t = torch.from_numpy(val).detach().to(device="cpu", dtype=torch.float64)
+    elif isinstance(val, (list, tuple)):
+        for item in val:
+            if isinstance(item, (bool, np.bool_)):
+                raise TypeError(f"Physical parameter '{param_name}' sequence contains boolean element: {item}.")
+            if isinstance(item, (complex, np.complexfloating)):
+                raise TypeError(f"Physical parameter '{param_name}' sequence contains complex element: {item}.")
+        try:
+            t = torch.as_tensor(val, device="cpu", dtype=torch.float64)
+        except Exception as err:
+            raise TypeError(f"Unsupported sequence for physical parameter '{param_name}': {err}") from err
+    else:
+        raise TypeError(f"Unsupported type {type(val)} for physical parameter '{param_name}'.")
+
+    # 4. Non-empty check (P2-3)
+    if t.numel() == 0:
+        raise ValueError(f"Physical parameter '{param_name}' must not be empty (got numel=0).")
+
+    # 5. Finiteness validation (Fail-Fast on NaN / Inf)
     if not torch.all(torch.isfinite(t)):
         raise ValueError(
             f"Physical parameter '{param_name}' must be finite, but contains non-finite values (NaN or Inf)."
         )
 
-    # Shape contract validation
+    # 6. Shape contract validation
     if t.ndim == 0:
         return t.unsqueeze(0)
     elif t.ndim == 1:
@@ -183,12 +268,12 @@ def _canonicalize_parameter_for_comparison(
             return t.reshape(1)
         else:
             raise ValueError(
-                f"Invalid shape {tuple(val.shape if isinstance(val, torch.Tensor) else t.shape)} for physical parameter '{param_name}': "
+                f"Invalid shape {tuple(val.shape if hasattr(val, 'shape') else t.shape)} for physical parameter '{param_name}': "
                 f"multi-column 2D tensors are not valid scalar or 1D batch vectors."
             )
     else:
         raise ValueError(
-            f"Invalid shape {tuple(val.shape if isinstance(val, torch.Tensor) else t.shape)} for physical parameter '{param_name}': "
+            f"Invalid shape {tuple(val.shape if hasattr(val, 'shape') else t.shape)} for physical parameter '{param_name}': "
             f"tensors with ndim >= 3 are not valid scalar or batch conditions."
         )
 
@@ -202,15 +287,18 @@ def _assert_parameter_consistency(
     """Validate numerical and shape consistency between Context and legacy parameters.
 
     Enforces:
-    1. Independent canonicalization into float64 without lossy cross-casting.
+    1. Independent canonicalization into float64 CPU copies without lossy cross-casting.
     2. Strict finiteness (rejects NaN, Inf on either side).
     3. Strict shape contract (rejects implicit broadcasting between scalar and batch vector,
        or mismatched batch sizes).
     4. Strict symmetric absolute difference check (max |diff| <= atol).
+       Note: atol=1e-6 is an engineering absolute consistency tolerance to accommodate
+       minor float32 vs float64 machine representation differences, not mathematical identity.
 
     Raises:
-        ValueError: On non-finite values, shape mismatch, or numerical divergence.
-        TypeError: On unsupported data types.
+        ValueError: On non-finite values, out-of-range integers, empty inputs,
+                    shape mismatch, or numerical divergence.
+        TypeError: On boolean, complex, or unsupported data types.
     """
     ctx_comp = _canonicalize_parameter_for_comparison(ctx_val, f"Context physical.{param_name}")
     leg_comp = _canonicalize_parameter_for_comparison(legacy_val, f"legacy {param_name}")
