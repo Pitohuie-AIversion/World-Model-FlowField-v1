@@ -538,9 +538,16 @@ def main():
     run_id = args.run_id or datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     audit_output_dir = PROJECT_ROOT / cfg["local_storage"]["audit_output_dir"] / run_id
     if audit_output_dir.exists() and any(audit_output_dir.iterdir()) and not args.overwrite:
-        suffix = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_id = f"{run_id}_{suffix}"
-        audit_output_dir = PROJECT_ROOT / cfg["local_storage"]["audit_output_dir"] / run_id
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        candidate_run_id = f"{run_id}_{timestamp}"
+        candidate_dir = PROJECT_ROOT / cfg["local_storage"]["audit_output_dir"] / candidate_run_id
+        counter = 1
+        while candidate_dir.exists() and any(candidate_dir.iterdir()):
+            candidate_run_id = f"{run_id}_{timestamp}_{counter}"
+            candidate_dir = PROJECT_ROOT / cfg["local_storage"]["audit_output_dir"] / candidate_run_id
+            counter += 1
+        run_id = candidate_run_id
+        audit_output_dir = candidate_dir
 
     audit_output_dir.mkdir(parents=True, exist_ok=True)
 

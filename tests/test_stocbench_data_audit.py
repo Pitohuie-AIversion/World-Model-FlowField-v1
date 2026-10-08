@@ -403,3 +403,51 @@ def test_real_downloaded_stocbench_files_acceptance():
     assert batch["history"].shape == (1, 1, 1, 64, 64)
     assert batch["future"].shape == (1, 1, 1, 64, 64)
     assert batch.metadata["dataset_id"] == "stocbench"
+
+
+# ==============================================================================
+# 12. Audit Output Anti-Collision & Anti-Overwrite Protection Test
+# ==============================================================================
+
+def test_audit_output_anti_collision_and_overwrite_protection(tmp_path):
+    """Verify that audit output directory allocation never silently overwrites existing evidence."""
+    base_dir = tmp_path / "data_audit" / "stocbench"
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. First run creates run_dir with evidence
+    run_id = "test_run"
+    first_dir = base_dir / run_id
+    first_dir.mkdir(parents=True, exist_ok=True)
+    sentinel_file = first_dir / "manifest.json"
+    sentinel_file.write_text('{"evidence": "original_v1"}', encoding="utf-8")
+
+    # 2. Simulate collision logic from prepare_stocbench_data.py without --overwrite
+    def resolve_audit_dir(run_id_val, overwrite=False):
+        audit_output_dir = base_dir / run_id_val
+        if audit_output_dir.exists() and any(audit_output_dir.iterdir()) and not overwrite:
+            timestamp = "20261008_120000"
+            candidate_run_id = f"{run_id_val}_{timestamp}"
+            candidate_dir = base_dir / candidate_run_id
+            counter = 1
+            while candidate_dir.exists() and any(candidate_dir.iterdir()):
+                candidate_run_id = f"{run_id_val}_{timestamp}_{counter}"
+                candidate_dir = base_dir / candidate_run_id
+                counter += 1
+            return candidate_dir
+        return audit_output_dir
+
+    # Second invocation: should branch to timestamped candidate dir
+    second_dir = resolve_audit_dir(run_id, overwrite=False)
+    assert second_dir != first_dir
+    assert not second_dir.exists() or not any(second_dir.iterdir())
+    second_dir.mkdir(parents=True, exist_ok=True)
+    (second_dir / "manifest.json").write_text('{"evidence": "second_run"}', encoding="utf-8")
+
+    # Original evidence remains completely intact and uncorrupted
+    assert sentinel_file.read_text(encoding="utf-8") == '{"evidence": "original_v1"}'
+
+    # Third invocation within the same second: should increment counter suffix
+    third_dir = resolve_audit_dir(run_id, overwrite=False)
+    assert third_dir != first_dir
+    assert third_dir != second_dir
+    assert third_dir.name.endswith("_1")
