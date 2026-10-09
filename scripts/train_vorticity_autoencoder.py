@@ -195,6 +195,7 @@ def train_vorticity_autoencoder(
     override_epochs: Optional[int] = None,
     override_batch_size: Optional[int] = None,
     override_lr: Optional[float] = None,
+    override_latent_channels: Optional[int] = None,
     device: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run self-reconstruction training on synthetic vorticity fields with safe resumption support."""
@@ -221,7 +222,7 @@ def train_vorticity_autoencoder(
     ly = domain_cfg.get("ly", 1.0)
     domain_size = (lx, ly)
 
-    latent_channels = model_cfg.get("latent_channels", 64)
+    latent_channels = override_latent_channels or model_cfg.get("latent_channels", 64)
     base_channels = model_cfg.get("base_channels", 32)
 
     seed = synth_cfg.get("seed", 42)
@@ -477,6 +478,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--lr", type=float, default=None)
+    parser.add_argument("--latent-channels", type=int, default=None)
     parser.add_argument("--output-dir", type=str, default=None)
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--device", type=str, default=None)
@@ -497,6 +499,7 @@ def main():
         override_epochs=args.epochs,
         override_batch_size=args.batch_size,
         override_lr=args.lr,
+        override_latent_channels=args.latent_channels,
         device=args.device,
     )
     print(f"Training completed successfully. Summary: {res['summary']}")
