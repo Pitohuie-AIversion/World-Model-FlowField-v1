@@ -271,15 +271,37 @@ def verify_checkpoint_split_binding(
     }
 
 
-def compute_metrics_from_arrays(gt_arr: np.ndarray, pred_arr: np.ndarray, gt_vort: np.ndarray, pred_vort: np.ndarray) -> Dict[str, float]:
-    """Compute deterministic single-step VRMSE and Vorticity RMSE metrics."""
-    vrmse_u = float(np.sqrt(np.mean((gt_arr[0] - pred_arr[0])**2)) / (np.std(gt_arr[0]) + 1e-8))
-    vrmse_v = float(np.sqrt(np.mean((gt_arr[1] - pred_arr[1])**2)) / (np.std(gt_arr[1]) + 1e-8))
-    vrmse_p = float(np.sqrt(np.mean((gt_arr[2] - pred_arr[2])**2)) / (np.std(gt_arr[2]) + 1e-8))
-    vrmse_s = float(np.sqrt(np.mean((gt_arr[3] - pred_arr[3])**2)) / (np.std(gt_arr[3]) + 1e-8))
-    vort_rmse = float(np.sqrt(np.mean((gt_vort - pred_vort)**2)))
+from src.metrics.field import compute_vrmse
+
+
+def compute_metrics_from_arrays(
+    gt_arr: np.ndarray,
+    pred_arr: np.ndarray,
+    gt_vort: np.ndarray,
+    pred_vort: np.ndarray,
+) -> Dict[str, float]:
+    """Compute deterministic single-step VRMSE and Vorticity RMSE metrics using canonical project protocols.
+
+    VRMSE is defined canonically per The Well benchmark in src.metrics.field::compute_vrmse:
+        VRMSE = sqrt( mean((pred - target)^2) / (Var(target) + 1e-6) )
+    Rejects non-finite inputs fail-closed.
+    """
+    if not (np.isfinite(gt_arr).all() and np.isfinite(pred_arr).all()):
+        raise ValueError("Field arrays contain non-finite values (NaN or Inf)")
+    if not (np.isfinite(gt_vort).all() and np.isfinite(pred_vort).all()):
+        raise ValueError("Vorticity arrays contain non-finite values (NaN or Inf)")
+
+    gt_t = torch.from_numpy(gt_arr).float()
+    pred_t = torch.from_numpy(pred_arr).float()
+
+    vrmse_u = float(compute_vrmse(pred_t[0], gt_t[0], eps=1e-6).item())
+    vrmse_v = float(compute_vrmse(pred_t[1], gt_t[1], eps=1e-6).item())
+    vrmse_p = float(compute_vrmse(pred_t[2], gt_t[2], eps=1e-6).item())
+    vrmse_s = float(compute_vrmse(pred_t[3], gt_t[3], eps=1e-6).item())
+    vort_rmse = float(np.sqrt(np.mean((gt_vort - pred_vort) ** 2)))
     vrmse_mean = float((vrmse_u + vrmse_v + vrmse_p + vrmse_s) / 4.0)
-    return {
+
+    res = {
         "vrmse_u": vrmse_u,
         "vrmse_v": vrmse_v,
         "vrmse_p": vrmse_p,
@@ -287,29 +309,110 @@ def compute_metrics_from_arrays(gt_arr: np.ndarray, pred_arr: np.ndarray, gt_vor
         "vrmse_mean": vrmse_mean,
         "vorticity_rmse": vort_rmse,
     }
+    for k, v in res.items():
+        if not np.isfinite(v):
+            raise ValueError(f"Computed metric '{k}' is non-finite: {v}")
+    return res
 
 
 def verify_prediction_arrays(npz_path: str, provenance_path: str, atol: float = 1e-5) -> bool:
-    """Verify saved npz prediction arrays strictly reproduce provenance json metrics."""
-    assert os.path.exists(npz_path), f"Missing {npz_path}"
-    assert os.path.exists(provenance_path), f"Missing {provenance_path}"
+    """Verify saved npz prediction arrays strictly reproduce provenance json metrics and conform to physics contract.
 
-    data = np.load(npz_path)
+    Verification protocol:
+    1. Checks existence of npz and provenance files fail-closed.
+    2. Validates provenance JSON contains all mandatory identity fields (no default fallbacks).
+    3. Validates required array keys in npz (gt_*, pred_*, err_* for u, v, p, s, and vort).
+    4. Checks strict finiteness of all raw arrays (rejects NaN / Inf fail-closed).
+    5. Checks strict spatial grid dimensions: (128, 256) for Nx=128, Ny=256.
+    6. Checks error fields consistency: err_* must strictly match abs(gt_* - pred_*) within atol.
+    7. Checks zero-mean pressure gauge on raw spatial arrays: |mean(p)| <= 1e-5.
+    8. Recomputes metrics using canonical compute_metrics_from_arrays protocol.
+    9. Checks that all stored metrics and recomputed metrics are strictly finite.
+    10. Checks absolute error between recomputed and stored metrics <= atol.
+    """
+    if not os.path.exists(npz_path):
+        raise FileNotFoundError(f"Missing prediction arrays archive: {npz_path}")
+    if not os.path.exists(provenance_path):
+        raise FileNotFoundError(f"Missing provenance metadata: {provenance_path}")
+
+    # 1. Validate provenance metadata
     with open(provenance_path, "r", encoding="utf-8") as f:
         meta = json.load(f)
 
+    required_meta_keys = [
+        "dataset_split",
+        "split_type",
+        "traj_idx",
+        "cluster_id",
+        "source_file_relative",
+        "sample_metrics",
+        "checkpoint_split_binding_status",
+    ]
+    for rk in required_meta_keys:
+        if rk not in meta:
+            raise KeyError(f"Provenance metadata missing mandatory identity field: '{rk}'")
+
+    if meta["dataset_split"] != "test":
+        raise ValueError(f"Provenance dataset_split is '{meta['dataset_split']}', expected 'test'")
+
+    stored = meta["sample_metrics"]
+    if not isinstance(stored, dict):
+        raise ValueError("Provenance sample_metrics must be a dictionary")
+
+    # 2. Validate NPZ arrays
+    data = np.load(npz_path)
+
+    required_array_keys = [
+        "gt_u", "gt_v", "gt_p", "gt_s", "gt_vort",
+        "pred_u", "pred_v", "pred_p", "pred_s", "pred_vort",
+        "err_u", "err_v", "err_p", "err_s", "err_vort"
+    ]
+    for ak in required_array_keys:
+        if ak not in data:
+            raise KeyError(f"Prediction arrays archive missing required array: '{ak}'")
+        arr = data[ak]
+        # Finiteness check
+        if not np.isfinite(arr).all():
+            raise ValueError(f"Array '{ak}' contains non-finite values (NaN or Inf)")
+        # Shape check (Nx=128, Ny=256)
+        if arr.shape != (128, 256):
+            raise ValueError(f"Array '{ak}' has invalid shape {arr.shape}, expected (128, 256)")
+
+    # 3. Consistency of stored error fields with abs(gt - pred)
+    for ch in ["u", "v", "p", "s", "vort"]:
+        expected_err = np.abs(data[f"gt_{ch}"] - data[f"pred_{ch}"])
+        max_err_diff = float(np.max(np.abs(data[f"err_{ch}"] - expected_err)))
+        if not np.isfinite(max_err_diff) or max_err_diff > atol:
+            raise ValueError(
+                f"Error field 'err_{ch}' does not match abs(gt_{ch} - pred_{ch}): "
+                f"max diff = {max_err_diff} > {atol}"
+            )
+
+    # 4. Physical pressure gauge check: spatial mean of gauge pressure must be zero
+    gt_p_mean = float(np.abs(np.mean(data["gt_p"])))
+    pred_p_mean = float(np.abs(np.mean(data["pred_p"])))
+    if gt_p_mean > 1e-5:
+        raise ValueError(f"Ground-truth pressure violates zero-mean gauge: |mean(gt_p)| = {gt_p_mean} > 1e-5")
+    if pred_p_mean > 1e-5:
+        raise ValueError(f"Predicted pressure violates zero-mean gauge: |mean(pred_p)| = {pred_p_mean} > 1e-5")
+
+    # 5. Metric reproduction check
     gt_arr = np.stack([data["gt_u"], data["gt_v"], data["gt_p"], data["gt_s"]], axis=0)
     pred_arr = np.stack([data["pred_u"], data["pred_v"], data["pred_p"], data["pred_s"]], axis=0)
     gt_vort = data["gt_vort"]
     pred_vort = data["pred_vort"]
 
     recomputed = compute_metrics_from_arrays(gt_arr, pred_arr, gt_vort, pred_vort)
-    stored = meta["sample_metrics"]
 
     for k, v in recomputed.items():
-        diff = abs(v - stored[k])
+        if k not in stored:
+            raise KeyError(f"Metric '{k}' present in recomputed but missing from provenance sample_metrics")
+        sv = stored[k]
+        if not (np.isfinite(v) and np.isfinite(sv)):
+            raise ValueError(f"Non-finite metric detected for '{k}': recomputed={v}, stored={sv}")
+        diff = abs(v - sv)
         if diff > atol:
-            raise ValueError(f"Metric mismatch for {k}: recomputed={v}, stored={stored[k]}, diff={diff} > {atol}")
+            raise ValueError(f"Metric mismatch for {k}: recomputed={v}, stored={sv}, diff={diff} > {atol}")
 
     return True
 

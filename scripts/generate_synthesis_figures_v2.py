@@ -57,9 +57,9 @@ def draw_data_generation_and_contract():
 
     boxes_upper = [
         ("1. Initial Conditions\n(IC Specification)", "Shear layer u(y) = tanh(y/delta)\nTransverse perturbation v'(x,y)\nPassive tracer s(x,y)\nLayer thickness delta, disturbance amp", 1.0, 5.2, 2.5, 2.3, "#e1edf7"),
-        ("2. Physical Parameters\n& Boundaries (BCs)", "Reynolds Re in [10^3, 10^5]\nSchmidt Sc in [0.1, 1.0]\nBi-periodic BCs on Omega\nDomain [0, 1.0] x [0, 2.0]", 4.0, 5.2, 2.7, 2.3, "#e1edf7"),
-        ("3. High-Precision DNS\n(Pseudo-Spectral)", "Incompressible N-S solver\nMicro-step dt_dns << dt_save\nPseudo-spectral spatial deriv\nPoisson solver: nabla^2 p = -div(u.grad u)", 7.2, 5.2, 2.8, 2.3, "#e1edf7"),
-        ("4. Trajectory Archive\n(Saved Grid Fields)", "Uniform stride dt = 0.1\nTotal steps T = 100 ~ 200\nResolution: 128 x 256 (Ny x Nx)\nPhysical states: q = [u, v, p, s]", 10.5, 5.2, 2.6, 2.3, "#d5e8d4")
+        ("2. Physical Parameters\n& Boundaries (BCs)", "Design: Re in [10^3, 10^5]\nEvaluated subset: Re = 10^4\nBi-periodic BCs on Omega\nDomain [0, 1.0] x [0, 2.0]", 4.0, 5.2, 2.7, 2.3, "#e1edf7"),
+        ("3. High-Precision DNS\n(Pseudo-Spectral)", "Incompressible N-S solver\nAdaptive CFL micro-step dt_cfl\nPseudo-spectral spatial deriv\nPoisson solver: nabla^2 p = -div(u.grad u)", 7.2, 5.2, 2.8, 2.3, "#e1edf7"),
+        ("4. Trajectory Archive\n(Saved Grid Fields)", "Uniform stride dt = 0.1\nTotal steps T = 100 ~ 200\nNx x Ny = 128 x 256\nLx=1.0, Ly=2.0, dx=dy=1/128\nPhysical states: q = [u, v, p, s]", 10.5, 5.2, 2.6, 2.3, "#d5e8d4")
     ]
     for title, desc, x, y, w, h, col in boxes_upper:
         p = patches.FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.1",
@@ -138,8 +138,8 @@ def draw_model_architecture_detailed():
     ax.add_patch(patches.FancyBboxPatch((0.7, 5.2), 2.5, 3.2, boxstyle="round,pad=0.1",
                                        facecolor="#eef2f7", edgecolor="#2b5c8f", linewidth=1.4))
     ax.text(1.95, 8.0, "Physical History Input\nq_{t-3:t}", fontsize=9.5, weight='bold', ha='center', color="#2b5c8f")
-    ax.text(1.95, 7.1, "(B, 4, 4, 128, 256)\n[B, L, C, Ny, Nx]", fontsize=8.2, ha='center', color="#c0392b", weight='bold')
-    ax.text(1.95, 5.8, "Channels: [u, v, p, s]\nL = 4 frames\nCircular domain: [1.0, 2.0]", fontsize=7.6, ha='center', color="#444")
+    ax.text(1.95, 7.1, "(B, 4, 4, 128, 256)\n[B, L, C, Nx, Ny]", fontsize=8.2, ha='center', color="#c0392b", weight='bold')
+    ax.text(1.95, 5.8, "Channels: [u, v, p, s]\nL = 4 frames\nDomain: [Lx=1.0, Ly=2.0]", fontsize=7.6, ha='center', color="#444")
 
     # Arrow 1 -> Encoder
     ax.annotate("", xy=(3.6, 6.8), xytext=(3.2, 6.8), arrowprops=dict(arrowstyle="->", color="#2b5c8f", lw=1.8))
@@ -149,7 +149,7 @@ def draw_model_architecture_detailed():
                                        facecolor="#ffffff", edgecolor="#475569", linewidth=1.4))
     ax.text(4.9, 8.0, "Spatial Encoder\nEncoder2D", fontsize=9.5, weight='bold', ha='center', color="#475569")
     ax.text(4.9, 7.1, "3 Residual Conv stages\nstride = 2 circular padding\nSpatial downsample: 8x\nChannels: 4 -> 64", fontsize=7.8, ha='center', color="#333")
-    ax.text(4.9, 5.7, "Output: Z_{t-3:t}\n(B, 4, 64, 16, 32)", fontsize=8.0, ha='center', color="#c0392b", weight='bold')
+    ax.text(4.9, 5.7, "Output: Z_{t-3:t}\n(B, 4, 64, 16, 32)\n[B, L, C, Nx_lat, Ny_lat]", fontsize=7.6, ha='center', color="#c0392b", weight='bold')
 
     # Arrow 2 -> LatentSTTransformer
     ax.annotate("", xy=(6.6, 6.8), xytext=(6.2, 6.8), arrowprops=dict(arrowstyle="->", color="#2b5c8f", lw=1.8))
@@ -176,7 +176,7 @@ def draw_model_architecture_detailed():
                                        facecolor="#ffffff", edgecolor="#475569", linewidth=1.4))
     ax.text(12.85, 8.0, "Spatial Decoder\nDecoder2D", fontsize=9.5, weight='bold', ha='center', color="#475569")
     ax.text(12.85, 6.9, "UpBlock2D (3 stages):\nBilinear Interpolation (2x)\n+ Circular Conv + ResBlock\n8x cumulative upsampling\n(project_pressure=False)", fontsize=7.6, ha='center', color="#333")
-    ax.text(12.85, 5.6, "Physical Field q̂_{t+1}\n(B, 1, 4, 128, 256)", fontsize=8.0, ha='center', color="#c0392b", weight='bold')
+    ax.text(12.85, 5.6, "Physical Field q̂_{t+1}\n(B, 1, 4, 128, 256)\n[B, 1, C, Nx, Ny]", fontsize=7.6, ha='center', color="#c0392b", weight='bold')
 
     # Post-denorm gauge note
     ax.annotate("", xy=(12.85, 5.0), xytext=(12.85, 5.3), arrowprops=dict(arrowstyle="->", color="#64748b", lw=1.2))
@@ -299,32 +299,48 @@ def draw_rollout_and_training_mechanisms():
 
 def draw_single_step_prediction_eval():
     """Figure 4: Render Single-Step Prediction Evaluation directly from verified npz arrays."""
+    from scripts.run_genuine_single_step_eval import verify_prediction_arrays
+
     npz_path = os.path.join(OUTPUT_DIR, "single_step_real_prediction_arrays.npz")
     prov_path = os.path.join(OUTPUT_DIR, "single_step_real_prediction_provenance.json")
 
     if not os.path.exists(npz_path) or not os.path.exists(prov_path):
-        print(f"npz or provenance missing. Running genuine single-step evaluation...")
+        print("npz or provenance missing. Running genuine single-step evaluation...")
         from scripts.run_genuine_single_step_eval import run_genuine_single_step_evaluation
         run_genuine_single_step_evaluation()
 
-    assert os.path.exists(npz_path), f"Cannot find {npz_path}"
-    assert os.path.exists(prov_path), f"Cannot find {prov_path}"
+    if not os.path.exists(npz_path):
+        raise FileNotFoundError(f"Cannot find {npz_path}")
+    if not os.path.exists(prov_path):
+        raise FileNotFoundError(f"Cannot find {prov_path}")
+
+    # Mandatory upfront verification: Fail closed before reading or rendering
+    is_valid = verify_prediction_arrays(npz_path, prov_path, atol=1e-5)
+    if not is_valid:
+        raise ValueError(f"Array verification failed for {npz_path} against {prov_path}")
 
     data = np.load(npz_path)
     with open(prov_path, "r", encoding="utf-8") as f:
         meta = json.load(f)
 
+    # Strictly require identity fields - no fallback defaults permitted
+    for required_id_key in ("traj_idx", "cluster_id", "source_file_relative", "sample_metrics"):
+        if required_id_key not in meta:
+            raise KeyError(f"Provenance missing mandatory identity key '{required_id_key}'")
+
+    rel_source_path = meta["source_file_relative"]
+    traj_idx = meta["traj_idx"]
+    cluster_id = meta["cluster_id"]
+    sample_metrics = meta["sample_metrics"]
+
     gt_arr = np.stack([data["gt_u"], data["gt_v"], data["gt_p"], data["gt_s"]], axis=0)
     pred_arr = np.stack([data["pred_u"], data["pred_v"], data["pred_p"], data["pred_s"]], axis=0)
-    err_arr = np.stack([data["err_u"], data["err_v"], data["err_p"], data["err_s"]], axis=0)
     gt_vort = data["gt_vort"]
     pred_vort = data["pred_vort"]
-    err_vort = data["err_vort"]
 
-    sample_metrics = meta["sample_metrics"]
-    rel_source_path = meta.get("source_file_relative", "data/test/...")
-    traj_idx = meta.get("traj_idx", 1)
-    cluster_id = meta.get("cluster_id", 1)
+    # Recompute error fields directly from ground-truth and prediction
+    err_arr = np.abs(gt_arr - pred_arr)
+    err_vort = np.abs(gt_vort - pred_vort)
 
     fig, axes = plt.subplots(5, 3, figsize=(12, 10), dpi=300)
     channel_data = [

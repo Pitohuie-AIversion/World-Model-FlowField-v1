@@ -49,11 +49,11 @@
   "evaluation_type": "single_sample_diagnostic",
   "note": "Individual test trajectory window evaluation; not to be conflated with full test set multi-seed average.",
   "sample_metrics": {
-    "vrmse_u": 0.04258253425359726,
-    "vrmse_v": 0.44553443789482117,
-    "vrmse_p": 0.37460678815841675,
-    "vrmse_s": 0.08509974926710129,
-    "vrmse_mean": 0.23695587739348412,
+    "vrmse_u": 0.042582444846630096,
+    "vrmse_v": 0.4446474611759186,
+    "vrmse_p": 0.3729906678199768,
+    "vrmse_s": 0.08509954810142517,
+    "vrmse_mean": 0.23633003048598766,
     "vorticity_rmse": 1.0480268001556396
   }
 }
