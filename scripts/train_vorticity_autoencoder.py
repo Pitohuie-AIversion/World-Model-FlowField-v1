@@ -207,8 +207,10 @@ def train_vorticity_autoencoder(
         ckpt = torch.load(resume_path, map_location=dev, weights_only=False)
         model.load_state_dict(ckpt["model_state_dict"])
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-        if "rng_state_torch" in ckpt:
-            torch.set_rng_state(ckpt["rng_state_torch"])
+        if "rng_state_torch" in ckpt and ckpt["rng_state_torch"] is not None:
+            torch.set_rng_state(ckpt["rng_state_torch"].cpu())
+        if "rng_state_cuda" in ckpt and ckpt["rng_state_cuda"] is not None and torch.cuda.is_available():
+            torch.cuda.set_rng_state(ckpt["rng_state_cuda"].cpu())
         start_epoch = ckpt["epoch"] + 1
         global_step = ckpt.get("global_step", 0)
         print(f"[VorticityAutoencoder] Resumed from {resume_path} at epoch {start_epoch}, global_step {global_step}")
@@ -270,6 +272,7 @@ def train_vorticity_autoencoder(
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "rng_state_torch": torch.get_rng_state(),
+            "rng_state_cuda": torch.cuda.get_rng_state() if torch.cuda.is_available() else None,
             "capacity_metadata": capacity_meta,
             "train_loss": avg_train_loss,
             "val_relative_l2": l2_res["relative_l2"],
