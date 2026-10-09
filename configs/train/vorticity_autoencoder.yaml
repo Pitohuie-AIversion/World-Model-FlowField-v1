@@ -1,0 +1,49 @@
+# Training configuration for Single-Channel Vorticity Autoencoder Baseline
+experiment_name: "vorticity_autoencoder_synthetic_v1"
+
+model:
+  in_channels: 1
+  out_channels: 1
+  latent_channels: 64
+  base_channels: 32
+  project_pressure: false  # Explicitly disabled for single-channel vorticity (no pressure gauge)
+
+representation_capacity:
+  input_shape: [1, 64, 64]
+  latent_shape: [64, 8, 8]
+  input_elements: 4096
+  latent_elements: 4096
+  element_compression_ratio: 1.0  # 4096 / 4096 = 1.0 (Spatial 8x downsampling offset by 64-channel expansion; no element reduction)
+  note: "Baseline configuration provides spatial-to-channel latent representation with element ratio 1.0; does not claim capacity compression."
+
+domain:
+  lx: 1.0
+  ly: 1.0
+  nx: 64
+  ny: 64
+
+synthetic_data:
+  num_train_samples: 128
+  num_val_samples: 32
+  base_wavenumber: 1
+  perturbation_modes: [[1, 0], [0, 1], [1, 1], [2, 1]]
+  perturbation_amplitude: 0.1
+  seed: 42
+
+training:
+  batch_size: 16
+  epochs: 20
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  loss_type: "mse"  # Single MSE loss optimization (no spectral loss backpropagation)
+
+evaluation:
+  domain_size: [1.0, 1.0]
+  compute_spectrum: true  # Enstrophy spectrum computed strictly as evaluation-only metric
+
+checkpoint:
+  save_dir: "outputs/checkpoints/vorticity_autoencoder_synthetic"
+  keep_top_k: 2
+  verification_tolerance:
+    atol: 1.0e-6
+    rtol: 1.0e-5
