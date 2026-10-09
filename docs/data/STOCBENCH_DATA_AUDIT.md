@@ -264,7 +264,7 @@
 - **纳入版本库**：正式纳入 Git 索引并提交（Commit `9f4d82b`），杜绝工作区存在未跟踪核心测试文件的问题；
 - **测试覆盖与实测状态**：
   1. `test_single_channel_autoencoder_smoke`：单通道自编码器前向及有限性（PASSED）；
-  2. `test_decoder_pressure_projection_isolated_for_single_channel`：单通道下保持 `project_pressure=False` 隔离压力规范处理（PASSED）；
+  2. `test_decoder_pressure_projection_isolated_for_single_channel`：单通道下保持 `project_pressure=False` 隔离压力零均值处理（PASSED）；
   3. `test_latent_dynamics_forward_default_context_smoke`：Deterministic / Gaussian / Flow Matching 三种动力学在 `PhysicalContext.extra` 缺省物理条件下的前向与采样（PASSED）；
   4. `test_stocbench_reference_ensemble_dimension_and_latent_projection`：分叉参考集合 $K_{\text{ref}}=5000$ 维度契约与潜空间投影（PASSED）；
   5. `test_stocbench_physical_scaling_roundtrip`：$\times 3.0$ 存储到物理尺度无损往返缩放（PASSED）；
@@ -273,7 +273,7 @@
   前期草稿运行出现的报错已被准确定位并纠正：
   - `TypeError: LatentSTTransformer.__init__()` 与 `TypeError: VarianceHead2D.__init__()`：系测试草稿调用时构造参数误传为 `in_channels`，正确签名分别要求 `latent_channels` 与 `(embed_dim, latent_channels)`；
   - **关于切片语法的技术更正**：PyTorch 基础切片遵循 NumPy 规范，单通道张量上的 `q[:, 2:3]` 切片会返回空通道 `(B, 0, H, W)`，而**不会直接抛出 IndexError**（只有整数索引 `q[:, 2]` 才会越界报错）；
-  - **单通道模型兼容性定性**：单通道涡量模型的兼容性以显式配置 `out_channels=1, project_pressure=False` 的实际前向测试通过为准，不假设任意单通道配置均天然兼容。
+  - **单通道涡量配置说明**：现有 Decoder 的 `project_pressure` 控制压力通道的零空间均值处理，不是速度场的无散度投影。原四通道布局中，压力位于第 2 号通道。StocBench 使用单通道涡量，因此显式设置 `out_channels=1, project_pressure=False`，避免启用不适用于该状态变量的压力处理。单通道兼容性以这一明确配置下的前向、梯度及接口测试为依据，不推断任意配置均天然兼容；
   - **结论**：现有世界模型核心代码库在显式合法配置下完全支持单通道涡量，无须破坏性重构核心网络。
 
 ### 2. `src/models/decoder.py` 与冻结基线保持零差异（零代码变动）
@@ -286,3 +286,9 @@
 
 - **本轮交付物状态**：本轮新增与适配的目标代码、测试及报告已全部提交；
 - **工作区隔离范围**：工作区仍保留其他任务历史修改（`scripts/export_report_pdf.py`，用于调整导出 PDF 超时时间）以及历史报告/图表文件。测试在包含该隔离修改的工作区上执行，经核查对数据加载与世界模型逻辑无任何副作用。
+
+### 4. 本轮整改收尾结论与范围界定
+
+- **已关闭事项**：已关闭本轮识别的空目录复用漏洞，并补齐对应的定向回归；单通道合法配置已有前向与接口测试记录；
+- **保留前置条件**：正式训练准入继续保持 **BLOCKED**（需等待官方/学术数据许可书面确认）；
+- **后续科研目标**：后续工作重点在于单通道涡量自编码器是否能保留流场关键结构与随机未来的条件分布差异，不提前断言未来分布必然为多峰分布。
