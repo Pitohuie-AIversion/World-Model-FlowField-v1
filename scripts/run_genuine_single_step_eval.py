@@ -315,20 +315,36 @@ def compute_metrics_from_arrays(
     return res
 
 
-def verify_prediction_arrays(npz_path: str, provenance_path: str, atol: float = 1e-5) -> bool:
+def verify_prediction_arrays(
+    npz_path: str,
+    provenance_path: str,
+    atol: float = 1e-5,
+    vort_atol: float = 1e-3,
+    manifest_path: Optional[str] = "outputs/splits/grouped_split.json",
+) -> bool:
     """Verify saved npz prediction arrays strictly reproduce provenance json metrics and conform to physics contract.
 
     Verification protocol:
     1. Checks existence of npz and provenance files fail-closed.
     2. Validates provenance JSON contains all mandatory identity fields (no default fallbacks).
-    3. Validates required array keys in npz (gt_*, pred_*, err_* for u, v, p, s, and vort).
-    4. Checks strict finiteness of all raw arrays (rejects NaN / Inf fail-closed).
-    5. Checks strict spatial grid dimensions: (128, 256) for Nx=128, Ny=256.
-    6. Checks error fields consistency: err_* must strictly match abs(gt_* - pred_*) within atol.
-    7. Checks zero-mean pressure gauge on raw spatial arrays: |mean(p)| <= 1e-5.
-    8. Recomputes metrics using canonical compute_metrics_from_arrays protocol.
-    9. Checks that all stored metrics and recomputed metrics are strictly finite.
-    10. Checks absolute error between recomputed and stored metrics <= atol.
+    3. Validates identity status & semantic values:
+       - dataset_split == "test"
+       - split_type == "grouped"
+       - checkpoint_split_binding_status in ("VERIFIED_MATCH_EMBEDDED", "VERIFIED_MATCH_AUDITED_MANIFEST")
+       - traj_idx is valid non-negative integer
+       - cluster_id is valid non-negative integer
+       - source_file_relative is non-empty string
+       - checkpoint_expected_split_hash == split_content_hash (and matches runtime manifest if present)
+    4. Validates required array keys in npz (gt_*, pred_*, err_* for u, v, p, s, and vort).
+    5. Checks strict finiteness of all raw arrays (rejects NaN / Inf fail-closed).
+    6. Checks strict spatial grid dimensions: (128, 256) for Nx=128, Ny=256.
+    7. Checks error fields consistency: err_* must strictly match abs(gt_* - pred_*) within atol.
+    8. Checks zero-mean pressure gauge on raw spatial arrays: |mean(p)| <= 1e-5.
+    9. Checks that vorticity fields are physically derived from velocity fields via
+       spectral curl (omega = dv/dx - du/dy) on SHEAR_FLOW_DOMAIN_SIZE_XY within vort_atol.
+    10. Recomputes metrics using canonical compute_metrics_from_arrays protocol.
+    11. Checks that all stored metrics and recomputed metrics are strictly finite.
+    12. Checks absolute error between recomputed and stored metrics <= atol.
     """
     if not os.path.exists(npz_path):
         raise FileNotFoundError(f"Missing prediction arrays archive: {npz_path}")
@@ -347,6 +363,8 @@ def verify_prediction_arrays(npz_path: str, provenance_path: str, atol: float = 
         "source_file_relative",
         "sample_metrics",
         "checkpoint_split_binding_status",
+        "checkpoint_expected_split_hash",
+        "split_content_hash",
     ]
     for rk in required_meta_keys:
         if rk not in meta:
@@ -354,6 +372,52 @@ def verify_prediction_arrays(npz_path: str, provenance_path: str, atol: float = 
 
     if meta["dataset_split"] != "test":
         raise ValueError(f"Provenance dataset_split is '{meta['dataset_split']}', expected 'test'")
+
+    if meta.get("split_type") != "grouped":
+        raise ValueError(f"Provenance split_type is '{meta.get('split_type')}', expected 'grouped'")
+
+    # P1-1: Verify binding status is a verified success state
+    binding_status = meta.get("checkpoint_split_binding_status")
+    allowed_success_statuses = ("VERIFIED_MATCH_EMBEDDED", "VERIFIED_MATCH_AUDITED_MANIFEST")
+    if binding_status not in allowed_success_statuses:
+        raise ValueError(
+            f"Checkpoint split binding status '{binding_status}' is invalid or unverified. "
+            f"Must be one of {allowed_success_statuses}. Formal plotting rejects UNVERIFIED or MISMATCH states."
+        )
+
+    # P1-1: Verify identity values are valid types and non-empty / non-negative
+    traj_idx = meta.get("traj_idx")
+    if traj_idx is None or isinstance(traj_idx, bool) or not isinstance(traj_idx, int) or traj_idx < 0:
+        raise ValueError(f"Invalid or empty traj_idx in provenance: {traj_idx}, expected non-negative integer.")
+
+    cluster_id = meta.get("cluster_id")
+    if cluster_id is None or isinstance(cluster_id, bool) or not isinstance(cluster_id, int) or cluster_id < 0:
+        raise ValueError(f"Invalid or empty cluster_id in provenance: {cluster_id}, expected non-negative integer.")
+
+    source_file_rel = meta.get("source_file_relative")
+    if not isinstance(source_file_rel, str) or len(source_file_rel.strip()) == 0:
+        raise ValueError(f"Invalid or empty source_file_relative in provenance: '{source_file_rel}'")
+
+    # P1-1: Verify split fingerprint consistency
+    ckpt_exp_hash = meta.get("checkpoint_expected_split_hash")
+    split_cnt_hash = meta.get("split_content_hash")
+    if not isinstance(ckpt_exp_hash, str) or not isinstance(split_cnt_hash, str) or ckpt_exp_hash != split_cnt_hash:
+        raise ValueError(
+            f"Provenance record split fingerprint mismatch: checkpoint_expected_split_hash='{ckpt_exp_hash}' "
+            f"!= split_content_hash='{split_cnt_hash}'"
+        )
+    if "split_hash" in meta and meta["split_hash"] != split_cnt_hash:
+        raise ValueError(
+            f"Provenance record split fingerprint mismatch: split_hash='{meta['split_hash']}' "
+            f"!= split_content_hash='{split_cnt_hash}'"
+        )
+    if manifest_path and os.path.exists(manifest_path):
+        runtime_split_hash = compute_split_hash_from_file(manifest_path)
+        if split_cnt_hash != runtime_split_hash:
+            raise ValueError(
+                f"Provenance record split content hash '{split_cnt_hash}' does not match "
+                f"runtime manifest content hash '{runtime_split_hash}' from {manifest_path}."
+            )
 
     stored = meta["sample_metrics"]
     if not isinstance(stored, dict):
@@ -396,7 +460,30 @@ def verify_prediction_arrays(npz_path: str, provenance_path: str, atol: float = 
     if pred_p_mean > 1e-5:
         raise ValueError(f"Predicted pressure violates zero-mean gauge: |mean(pred_p)| = {pred_p_mean} > 1e-5")
 
-    # 5. Metric reproduction check
+    # 5. P1-2: Validate that vorticity fields are derived from velocity fields (omega = dv/dx - du/dy)
+    gt_u_t = torch.from_numpy(data["gt_u"]).float().unsqueeze(0)
+    gt_v_t = torch.from_numpy(data["gt_v"]).float().unsqueeze(0)
+    pred_u_t = torch.from_numpy(data["pred_u"]).float().unsqueeze(0)
+    pred_v_t = torch.from_numpy(data["pred_v"]).float().unsqueeze(0)
+
+    derived_gt_vort = compute_vorticity(gt_u_t, gt_v_t, domain_size=SHEAR_FLOW_DOMAIN_SIZE_XY).squeeze(0).numpy()
+    derived_pred_vort = compute_vorticity(pred_u_t, pred_v_t, domain_size=SHEAR_FLOW_DOMAIN_SIZE_XY).squeeze(0).numpy()
+
+    gt_vort_diff = float(np.max(np.abs(data["gt_vort"] - derived_gt_vort)))
+    pred_vort_diff = float(np.max(np.abs(data["pred_vort"] - derived_pred_vort)))
+
+    if not np.isfinite(gt_vort_diff) or gt_vort_diff > vort_atol:
+        raise ValueError(
+            f"Stored ground-truth vorticity 'gt_vort' does not match derived vorticity from velocity fields "
+            f"(omega = dv/dx - du/dy): max diff = {gt_vort_diff} > {vort_atol}"
+        )
+    if not np.isfinite(pred_vort_diff) or pred_vort_diff > vort_atol:
+        raise ValueError(
+            f"Stored predicted vorticity 'pred_vort' does not match derived vorticity from velocity fields "
+            f"(omega = dv/dx - du/dy): max diff = {pred_vort_diff} > {vort_atol}"
+        )
+
+    # 6. Metric reproduction check
     gt_arr = np.stack([data["gt_u"], data["gt_v"], data["gt_p"], data["gt_s"]], axis=0)
     pred_arr = np.stack([data["pred_u"], data["pred_v"], data["pred_p"], data["pred_s"]], axis=0)
     gt_vort = data["gt_vort"]

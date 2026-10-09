@@ -13,6 +13,7 @@ import sys
 import json
 from pathlib import Path
 import numpy as np
+import torch
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -333,14 +334,24 @@ def draw_single_step_prediction_eval():
     cluster_id = meta["cluster_id"]
     sample_metrics = meta["sample_metrics"]
 
+    from src.utils.fft_derivatives import compute_vorticity
+    from src.utils.physics_contract import SHEAR_FLOW_DOMAIN_SIZE_XY
+
     gt_arr = np.stack([data["gt_u"], data["gt_v"], data["gt_p"], data["gt_s"]], axis=0)
     pred_arr = np.stack([data["pred_u"], data["pred_v"], data["pred_p"], data["pred_s"]], axis=0)
-    gt_vort = data["gt_vort"]
-    pred_vort = data["pred_vort"]
 
     # Recompute error fields directly from ground-truth and prediction
     err_arr = np.abs(gt_arr - pred_arr)
-    err_vort = np.abs(gt_vort - pred_vort)
+
+    # Strictly use recomputed derived vorticity directly from velocity fields (omega = dv/dx - du/dy)
+    gt_u_t = torch.from_numpy(gt_arr[0]).float().unsqueeze(0)
+    gt_v_t = torch.from_numpy(gt_arr[1]).float().unsqueeze(0)
+    pred_u_t = torch.from_numpy(pred_arr[0]).float().unsqueeze(0)
+    pred_v_t = torch.from_numpy(pred_arr[1]).float().unsqueeze(0)
+
+    derived_gt_vort = compute_vorticity(gt_u_t, gt_v_t, domain_size=SHEAR_FLOW_DOMAIN_SIZE_XY).squeeze(0).numpy()
+    derived_pred_vort = compute_vorticity(pred_u_t, pred_v_t, domain_size=SHEAR_FLOW_DOMAIN_SIZE_XY).squeeze(0).numpy()
+    err_vort = np.abs(derived_gt_vort - derived_pred_vort)
 
     fig, axes = plt.subplots(5, 3, figsize=(12, 10), dpi=300)
     channel_data = [
@@ -348,7 +359,7 @@ def draw_single_step_prediction_eval():
         ("Cross-stream Velocity v", gt_arr[1], pred_arr[1], err_arr[1], "RdBu_r"),
         ("Gauge Pressure p", gt_arr[2], pred_arr[2], err_arr[2], "viridis"),
         ("Passive Tracer s", gt_arr[3], pred_arr[3], err_arr[3], "inferno"),
-        ("Vorticity w", gt_vort, pred_vort, err_vort, "bwr"),
+        ("Vorticity w", derived_gt_vort, derived_pred_vort, err_vort, "bwr"),
     ]
 
     col_titles = ["Ground Truth (t+1)", "Model Prediction (t+1)", "Absolute Error |GT - Pred|"]

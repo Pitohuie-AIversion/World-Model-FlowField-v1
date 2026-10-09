@@ -78,13 +78,11 @@ def test_provenance_and_manifest_hashes_match():
     expected_file_sha256 = compute_file_sha256(MANIFEST_PATH)
     assert meta["split_manifest_file_sha256"] == expected_file_sha256, "Split manifest file SHA256 mismatch"
 
-    # 3. Checkpoint SHA256 verification
+    # 3. Checkpoint SHA256 verification (strictly require real asset file existence)
     ckpt_path = meta["checkpoint_path"]
-    if os.path.exists(ckpt_path):
-        expected_ckpt_hash = compute_file_sha256(ckpt_path)
-        assert meta["checkpoint_sha256"] == expected_ckpt_hash, "Checkpoint sha256 mismatch"
-    else:
-        assert meta["checkpoint_sha256"] == "821891674ea80383ba07f02edbd1005e1005fc2a6b084b4146969c4f5570ca86"
+    assert os.path.exists(ckpt_path), f"Real checkpoint asset must exist on disk: {ckpt_path}"
+    expected_ckpt_hash = compute_file_sha256(ckpt_path)
+    assert meta["checkpoint_sha256"] == expected_ckpt_hash, "Checkpoint sha256 mismatch"
 
     # 4. Trajectory and cluster identity
     assert meta["traj_idx"] == 1
@@ -367,3 +365,107 @@ def test_draw_entry_blocks_on_verification_failure(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="Error field 'err_u' does not match"):
         gen_mod.draw_single_step_prediction_eval()
+
+
+# =========================================================================
+# P1-1 & P1-2 Hardened Contract Tests: Binding status, semantic identity, and vorticity derivation
+# =========================================================================
+
+def test_verify_prediction_arrays_rejects_unverified_or_mismatched_binding_status(tmp_path):
+    """P1-1 negative test: Rejects TYPE_MATCH_ONLY_UNVERIFIED or CONTENT_HASH_MISMATCH binding status fail-closed."""
+    with open(PROVENANCE_PATH, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+
+    # 1. TYPE_MATCH_ONLY_UNVERIFIED must be rejected
+    meta_unverified = copy.deepcopy(meta)
+    meta_unverified["checkpoint_split_binding_status"] = "TYPE_MATCH_ONLY_UNVERIFIED"
+    json_unverified = tmp_path / "unverified.json"
+    with open(json_unverified, "w", encoding="utf-8") as f:
+        json.dump(meta_unverified, f)
+
+    with pytest.raises(ValueError, match="invalid or unverified"):
+        verify_prediction_arrays(NPZ_PATH, str(json_unverified))
+
+    # 2. CONTENT_HASH_MISMATCH must be rejected
+    meta_mismatch = copy.deepcopy(meta)
+    meta_mismatch["checkpoint_split_binding_status"] = "CONTENT_HASH_MISMATCH"
+    json_mismatch = tmp_path / "mismatch.json"
+    with open(json_mismatch, "w", encoding="utf-8") as f:
+        json.dump(meta_mismatch, f)
+
+    with pytest.raises(ValueError, match="invalid or unverified"):
+        verify_prediction_arrays(NPZ_PATH, str(json_mismatch))
+
+    # 3. Arbitrary unknown status must be rejected
+    meta_unknown = copy.deepcopy(meta)
+    meta_unknown["checkpoint_split_binding_status"] = "UNKNOWN_STATUS"
+    json_unknown = tmp_path / "unknown.json"
+    with open(json_unknown, "w", encoding="utf-8") as f:
+        json.dump(meta_unknown, f)
+
+    with pytest.raises(ValueError, match="invalid or unverified"):
+        verify_prediction_arrays(NPZ_PATH, str(json_unknown))
+
+
+def test_verify_prediction_arrays_rejects_invalid_or_empty_identity(tmp_path):
+    """P1-1 negative test: Rejects null/empty trajectory identities or split fingerprint inconsistency."""
+    with open(PROVENANCE_PATH, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+
+    # 1. traj_idx is None
+    meta_null_traj = copy.deepcopy(meta)
+    meta_null_traj["traj_idx"] = None
+    json_null_traj = tmp_path / "null_traj.json"
+    with open(json_null_traj, "w", encoding="utf-8") as f:
+        json.dump(meta_null_traj, f)
+    with pytest.raises(ValueError, match="Invalid or empty traj_idx"):
+        verify_prediction_arrays(NPZ_PATH, str(json_null_traj))
+
+    # 2. cluster_id is None
+    meta_null_cluster = copy.deepcopy(meta)
+    meta_null_cluster["cluster_id"] = None
+    json_null_cluster = tmp_path / "null_cluster.json"
+    with open(json_null_cluster, "w", encoding="utf-8") as f:
+        json.dump(meta_null_cluster, f)
+    with pytest.raises(ValueError, match="Invalid or empty cluster_id"):
+        verify_prediction_arrays(NPZ_PATH, str(json_null_cluster))
+
+    # 3. source_file_relative is empty string
+    meta_empty_src = copy.deepcopy(meta)
+    meta_empty_src["source_file_relative"] = "   "
+    json_empty_src = tmp_path / "empty_src.json"
+    with open(json_empty_src, "w", encoding="utf-8") as f:
+        json.dump(meta_empty_src, f)
+    with pytest.raises(ValueError, match="Invalid or empty source_file_relative"):
+        verify_prediction_arrays(NPZ_PATH, str(json_empty_src))
+
+    # 4. checkpoint_expected_split_hash != split_content_hash
+    meta_hash_drift = copy.deepcopy(meta)
+    meta_hash_drift["checkpoint_expected_split_hash"] = "deadbeef" * 8
+    json_hash_drift = tmp_path / "hash_drift.json"
+    with open(json_hash_drift, "w", encoding="utf-8") as f:
+        json.dump(meta_hash_drift, f)
+    with pytest.raises(ValueError, match="split fingerprint mismatch"):
+        verify_prediction_arrays(NPZ_PATH, str(json_hash_drift))
+
+
+def test_verify_prediction_arrays_rejects_vorticity_offset_not_matching_velocity(tmp_path):
+    """P1-2 negative test: Rejects vorticity fields that do not match velocity curl (even if err_vort is invariant).
+
+    Reviewer's counterexample:
+    Keeping all velocity fields, err_* fields, and sample metrics unchanged, but adding +10 to both gt_vort and pred_vort.
+    Since (pred_vort + 10) - (gt_vort + 10) = pred_vort - gt_vort, err_vort and vorticity_rmse remain unchanged,
+    but vorticity fields are no longer derived from velocity fields.
+    The hardened verify_prediction_arrays MUST reject this fail-closed.
+    """
+    data = dict(np.load(NPZ_PATH))
+    data["gt_vort"] = data["gt_vort"] + 10.0
+    data["pred_vort"] = data["pred_vort"] + 10.0
+    # err_vort remains exactly abs(gt_vort - pred_vort)
+    data["err_vort"] = np.abs(data["gt_vort"] - data["pred_vort"])
+
+    tampered_npz = tmp_path / "tampered_vort_offset.npz"
+    np.savez(tampered_npz, **data)
+
+    with pytest.raises(ValueError, match="does not match derived vorticity from velocity fields"):
+        verify_prediction_arrays(str(tampered_npz), PROVENANCE_PATH)
