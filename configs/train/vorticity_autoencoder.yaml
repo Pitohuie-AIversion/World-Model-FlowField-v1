@@ -43,7 +43,7 @@ evaluation:
 
 checkpoint:
   save_dir: "outputs/checkpoints/vorticity_autoencoder_synthetic"
-  keep_top_k: 2
+  atomic_save: true
   verification_tolerance:
     atol: 1.0e-6
     rtol: 1.0e-5

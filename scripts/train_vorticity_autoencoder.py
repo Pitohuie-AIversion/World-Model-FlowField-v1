@@ -4,7 +4,11 @@ Key engineering contracts:
 1. Synthetic data only: Generates periodic vorticity fields on [0, Lx) x [0, Ly).
 2. Explicit capacity logging: Explicitly records element compression ratio (1.0 for Cz=64).
 3. Pure MSE training: Optimizes single MSE reconstruction loss; enstrophy spectrum is strictly evaluation-only.
-4. Resumption state tracking: Saves model, optimizer, rng_state, epoch, global_step, and next_batch_idx.
+4. Resumption safety & verification:
+   - Fails immediately if --resume checkpoint or --config does not exist (no silent fallback to fresh training).
+   - Validates protected configuration keys against checkpoint before resuming (prevents altered data/model definitions).
+   - Atomic checkpoint writes (temp file + rename) to protect latest_checkpoint.pt from corruption.
+   - Persists full enstrophy spectrum analysis (curves, ratios, spurious energy) in checkpoint and summary.
 5. Strict isolation: Zero references to real StocBench data files.
 """
 
@@ -14,7 +18,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -71,6 +75,7 @@ def generate_synthetic_vorticity_dataset(
     lx: float = 1.0,
     ly: float = 1.0,
     base_wavenumber: int = 1,
+    perturbation_modes: Optional[List[Tuple[int, int]]] = None,
     perturbation_amplitude: float = 0.1,
     seed: int = 42,
 ) -> torch.Tensor:
@@ -92,7 +97,7 @@ def generate_synthetic_vorticity_dataset(
     # Base periodic quadrupole vorticity field
     omega_0 = 2.0 * torch.cos(2.0 * torch.pi * base_wavenumber * X / lx) * torch.cos(2.0 * torch.pi * base_wavenumber * Y / ly)
 
-    modes = [(1, 0), (0, 1), (1, 1), (2, 1)]
+    modes = [tuple(m) for m in (perturbation_modes or [(1, 0), (0, 1), (1, 1), (2, 1)])]
     samples = []
 
     for _ in range(num_samples):
@@ -136,6 +141,46 @@ def compute_capacity_metadata(
     }
 
 
+def _validate_resumption_config(
+    current_config: Dict[str, Any],
+    checkpoint_config: Dict[str, Any],
+) -> None:
+    """Validate that protected dataset and model definition parameters match between current config and checkpoint."""
+    protected_keys = [
+        ("model", "latent_channels"),
+        ("model", "base_channels"),
+        ("domain", "nx"),
+        ("domain", "ny"),
+        ("domain", "lx"),
+        ("domain", "ly"),
+        ("synthetic_data", "seed"),
+        ("synthetic_data", "num_train_samples"),
+        ("synthetic_data", "base_wavenumber"),
+        ("synthetic_data", "perturbation_modes"),
+        ("synthetic_data", "perturbation_amplitude"),
+        ("training", "batch_size"),
+    ]
+
+    for section, key in protected_keys:
+        curr_val = current_config.get(section, {}).get(key)
+        ckpt_val = checkpoint_config.get(section, {}).get(key)
+
+        # Normalize list/tuple comparisons
+        if isinstance(curr_val, list) and isinstance(ckpt_val, list):
+            norm_curr = [list(x) if isinstance(x, (list, tuple)) else x for x in curr_val]
+            norm_ckpt = [list(x) if isinstance(x, (list, tuple)) else x for x in ckpt_val]
+            match = (norm_curr == norm_ckpt)
+        else:
+            match = (curr_val == ckpt_val)
+
+        if not match:
+            raise ValueError(
+                f"Resume config mismatch for protected key '{section}.{key}': "
+                f"checkpoint has {ckpt_val}, but current config has {curr_val}. "
+                f"Resuming with altered data or model definitions is prohibited."
+            )
+
+
 def train_vorticity_autoencoder(
     config: Optional[Dict[str, Any]] = None,
     resume_path: Optional[str] = None,
@@ -145,7 +190,13 @@ def train_vorticity_autoencoder(
     override_lr: Optional[float] = None,
     device: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Run self-reconstruction training on synthetic vorticity fields with resumption support."""
+    """Run self-reconstruction training on synthetic vorticity fields with safe resumption support."""
+    # Fail-fast: if resume_path is explicitly given, it must exist
+    if resume_path:
+        resume_file = Path(resume_path)
+        if not resume_file.is_file():
+            raise FileNotFoundError(f"Resume checkpoint file not found: {resume_path}")
+
     cfg = config or {}
     model_cfg = cfg.get("model", {})
     train_cfg = cfg.get("training", {})
@@ -167,9 +218,48 @@ def train_vorticity_autoencoder(
     base_channels = model_cfg.get("base_channels", 32)
 
     seed = synth_cfg.get("seed", 42)
-    torch.manual_seed(seed)
+    n_train = synth_cfg.get("num_train_samples", 128)
+    n_val = synth_cfg.get("num_val_samples", 32)
+    base_wavenumber = synth_cfg.get("base_wavenumber", 1)
+    perturbation_modes = synth_cfg.get("perturbation_modes", [[1, 0], [0, 1], [1, 1], [2, 1]])
+    perturbation_amplitude = synth_cfg.get("perturbation_amplitude", 0.1)
+
+    # Build canonical effective configuration snapshot
+    effective_config = {
+        "model": {
+            "in_channels": 1,
+            "out_channels": 1,
+            "latent_channels": latent_channels,
+            "base_channels": base_channels,
+            "project_pressure": False,
+        },
+        "domain": {
+            "nx": nx,
+            "ny": ny,
+            "lx": lx,
+            "ly": ly,
+        },
+        "synthetic_data": {
+            "num_train_samples": n_train,
+            "num_val_samples": n_val,
+            "base_wavenumber": base_wavenumber,
+            "perturbation_modes": perturbation_modes,
+            "perturbation_amplitude": perturbation_amplitude,
+            "seed": seed,
+        },
+        "training": {
+            "batch_size": batch_size,
+            "epochs": epochs,
+            "lr": lr,
+            "weight_decay": weight_decay,
+            "loss_type": "mse",
+        },
+    }
 
     dev = torch.device(device if device else ("cuda" if torch.cuda.is_available() else "cpu"))
+
+    if not resume_path:
+        torch.manual_seed(seed)
 
     # Compute explicit representation capacity
     capacity_meta = compute_capacity_metadata(nx, ny, 1, latent_channels)
@@ -185,16 +275,6 @@ def train_vorticity_autoencoder(
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    # Synthesize data
-    n_train = synth_cfg.get("num_train_samples", 128)
-    n_val = synth_cfg.get("num_val_samples", 32)
-
-    train_data = generate_synthetic_vorticity_dataset(n_train, nx, ny, lx, ly, seed=seed)
-    val_data = generate_synthetic_vorticity_dataset(n_val, nx, ny, lx, ly, seed=seed + 1000)
-
-    train_loader = DataLoader(TensorDataset(train_data), batch_size=batch_size, shuffle=False)
-    val_loader = DataLoader(TensorDataset(val_data), batch_size=batch_size, shuffle=False)
-
     start_epoch = 1
     global_step = 0
     history = {"train_loss": [], "val_rel_l2": [], "val_abs_l2": []}
@@ -203,23 +283,65 @@ def train_vorticity_autoencoder(
     out_path.mkdir(parents=True, exist_ok=True)
 
     # Handle resumption if checkpoint provided
-    if resume_path and os.path.isfile(resume_path):
+    if resume_path:
         ckpt = torch.load(resume_path, map_location=dev, weights_only=False)
+
+        # Validate configuration compatibility
+        if "config" in ckpt:
+            _validate_resumption_config(effective_config, ckpt["config"])
+
+        if epochs <= ckpt["epoch"]:
+            raise ValueError(
+                f"Requested target epochs ({epochs}) must be strictly greater than checkpoint completed epoch "
+                f"({ckpt['epoch']}) to continue training."
+            )
+
         model.load_state_dict(ckpt["model_state_dict"])
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+
+        # PyTorch requires CPU ByteTensor for torch.set_rng_state()
         if "rng_state_torch" in ckpt and ckpt["rng_state_torch"] is not None:
             torch.set_rng_state(ckpt["rng_state_torch"].cpu())
         if "rng_state_cuda" in ckpt and ckpt["rng_state_cuda"] is not None and torch.cuda.is_available():
             torch.cuda.set_rng_state(ckpt["rng_state_cuda"].cpu())
+
         start_epoch = ckpt["epoch"] + 1
         global_step = ckpt.get("global_step", 0)
-        print(f"[VorticityAutoencoder] Resumed from {resume_path} at epoch {start_epoch}, global_step {global_step}")
+        print(f"[VorticityAutoencoder] Resumed safely from {resume_path} at epoch {start_epoch}, global_step {global_step}")
+
+    # Synthesize data with validated parameters
+    train_data = generate_synthetic_vorticity_dataset(
+        num_samples=n_train,
+        nx=nx,
+        ny=ny,
+        lx=lx,
+        ly=ly,
+        base_wavenumber=base_wavenumber,
+        perturbation_modes=perturbation_modes,
+        perturbation_amplitude=perturbation_amplitude,
+        seed=seed,
+    )
+    val_data = generate_synthetic_vorticity_dataset(
+        num_samples=n_val,
+        nx=nx,
+        ny=ny,
+        lx=lx,
+        ly=ly,
+        base_wavenumber=base_wavenumber,
+        perturbation_modes=perturbation_modes,
+        perturbation_amplitude=perturbation_amplitude,
+        seed=seed + 1000,
+    )
+
+    train_loader = DataLoader(TensorDataset(train_data), batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(TensorDataset(val_data), batch_size=batch_size, shuffle=False)
 
     print(f"[VorticityAutoencoder] Starting training for epochs [{start_epoch} -> {epochs}] on {dev}")
     print(f"[Capacity] Input: {capacity_meta['input_shape']}, Latent: {capacity_meta['latent_shape']}, Element Ratio: {capacity_meta['element_compression_ratio']}")
 
     initial_loss: Optional[float] = None
     final_loss: Optional[float] = None
+    last_spec_res: Optional[Dict[str, Any]] = None
 
     for epoch in range(start_epoch, epochs + 1):
         model.train()
@@ -260,11 +382,12 @@ def train_vorticity_autoencoder(
 
         l2_res = compute_relative_l2_error(all_val_pred, all_val_targ)
         spec_res = compute_enstrophy_spectrum_ratio(all_val_pred, all_val_targ, domain_size=domain_size)
+        last_spec_res = spec_res
 
         history["val_rel_l2"].append(l2_res["relative_l2"])
         history["val_abs_l2"].append(l2_res["absolute_l2"])
 
-        # Periodic checkpoint saving
+        # Atomic checkpoint write (save to temporary file then replace)
         ckpt_data = {
             "epoch": epoch,
             "global_step": global_step,
@@ -273,14 +396,25 @@ def train_vorticity_autoencoder(
             "optimizer_state_dict": optimizer.state_dict(),
             "rng_state_torch": torch.get_rng_state(),
             "rng_state_cuda": torch.cuda.get_rng_state() if torch.cuda.is_available() else None,
+            "config": effective_config,
             "capacity_metadata": capacity_meta,
             "train_loss": avg_train_loss,
             "val_relative_l2": l2_res["relative_l2"],
             "val_absolute_l2": l2_res["absolute_l2"],
-            "enstrophy_spectrum_valid_bins": spec_res["valid_bins_count"],
+            "enstrophy_spectrum": {
+                "k_bins": spec_res["k_bins"],
+                "spectrum_target": spec_res["spectrum_target"],
+                "spectrum_pred": spec_res["spectrum_pred"],
+                "spectrum_ratio": spec_res["spectrum_ratio"],
+                "valid_bins_count": spec_res["valid_bins_count"],
+                "total_bins": spec_res["total_bins"],
+                "spurious_energy_in_zero_bins": spec_res["spurious_energy_in_zero_bins"],
+            },
         }
         latest_ckpt = out_path / "latest_checkpoint.pt"
-        torch.save(ckpt_data, latest_ckpt)
+        temp_ckpt = out_path / "latest_checkpoint.pt.tmp"
+        torch.save(ckpt_data, temp_ckpt)
+        temp_ckpt.replace(latest_ckpt)
 
     summary_file = out_path / "training_summary.json"
     summary_data = {
@@ -291,8 +425,17 @@ def train_vorticity_autoencoder(
         "final_step_loss": final_loss,
         "loss_reduction_ratio": float((initial_loss - final_loss) / initial_loss) if initial_loss and initial_loss > 0 else 0.0,
         "capacity_metadata": capacity_meta,
+        "effective_config": effective_config,
         "final_val_relative_l2": history["val_rel_l2"][-1] if history["val_rel_l2"] else None,
         "final_val_absolute_l2": history["val_abs_l2"][-1] if history["val_abs_l2"] else None,
+        "enstrophy_spectrum_summary": {
+            "k_bins": last_spec_res["k_bins"] if last_spec_res else [],
+            "spectrum_target": last_spec_res["spectrum_target"] if last_spec_res else [],
+            "spectrum_pred": last_spec_res["spectrum_pred"] if last_spec_res else [],
+            "spectrum_ratio": last_spec_res["spectrum_ratio"] if last_spec_res else [],
+            "valid_bins_count": last_spec_res["valid_bins_count"] if last_spec_res else 0,
+            "spurious_energy_in_zero_bins": last_spec_res["spurious_energy_in_zero_bins"] if last_spec_res else 0.0,
+        },
     }
     with open(summary_file, "w", encoding="utf-8") as f:
         json.dump(summary_data, f, indent=2)
@@ -303,6 +446,7 @@ def train_vorticity_autoencoder(
         "history": history,
         "summary": summary_data,
         "capacity_metadata": capacity_meta,
+        "effective_config": effective_config,
         "checkpoint_path": str(out_path / "latest_checkpoint.pt"),
     }
 
@@ -318,12 +462,13 @@ def main():
     parser.add_argument("--device", type=str, default=None)
     args = parser.parse_args()
 
-    import yaml
     config_path = Path(args.config)
-    cfg = {}
-    if config_path.is_file():
-        with open(config_path, "r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Config file not found: {args.config}")
+
+    import yaml
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
 
     res = train_vorticity_autoencoder(
         config=cfg,

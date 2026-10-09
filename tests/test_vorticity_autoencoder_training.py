@@ -384,7 +384,168 @@ def test_checkpoint_resumption_numerical_consistency(tmp_path):
 
 
 # ==============================================================================
-# 6. Data Contract & Isolation Redline
+# 6. Production Training Entrypoint Resumption & Error Paths
+# ==============================================================================
+
+def test_production_train_vorticity_autoencoder_resumption_consistency(tmp_path):
+    """Verify that train_vorticity_autoencoder() produces numerically identical results
+    between continuous 2-epoch run (A) and interrupted 1+1 epoch resumed run (B)."""
+    from scripts.train_vorticity_autoencoder import train_vorticity_autoencoder
+
+    cfg = {
+        "model": {"latent_channels": 64, "base_channels": 16},
+        "domain": {"nx": 32, "ny": 32, "lx": 1.0, "ly": 1.0},
+        "synthetic_data": {
+            "num_train_samples": 16,
+            "num_val_samples": 8,
+            "base_wavenumber": 1,
+            "perturbation_modes": [[1, 0], [0, 1]],
+            "perturbation_amplitude": 0.1,
+            "seed": 2026,
+        },
+        "training": {"batch_size": 8, "lr": 1e-3, "weight_decay": 1e-4, "epochs": 2},
+    }
+
+    dir_a = tmp_path / "run_continuous_a"
+    dir_b = tmp_path / "run_resumed_b"
+
+    # Run A: Continuous 2 epochs
+    res_a = train_vorticity_autoencoder(config=cfg, output_dir=str(dir_a), override_epochs=2, device="cpu")
+
+    # Run B: 1 epoch -> save -> resume to epoch 2
+    res_b_phase1 = train_vorticity_autoencoder(config=cfg, output_dir=str(dir_b), override_epochs=1, device="cpu")
+    ckpt_b_path = Path(res_b_phase1["checkpoint_path"])
+    assert ckpt_b_path.is_file()
+
+    res_b = train_vorticity_autoencoder(
+        config=cfg,
+        resume_path=str(ckpt_b_path),
+        output_dir=str(dir_b),
+        override_epochs=2,
+        device="cpu",
+    )
+
+    # 1. Global step equality
+    assert res_a["summary"]["global_steps"] == res_b["summary"]["global_steps"]
+    assert res_a["summary"]["epochs_completed"] == res_b["summary"]["epochs_completed"]
+
+    # 2. Final loss numerical match
+    assert abs(res_a["summary"]["final_step_loss"] - res_b["summary"]["final_step_loss"]) < 1e-6
+
+    # 3. Parameter match within declared tolerances
+    atol = 1.0e-6
+    rtol = 1.0e-5
+    for (name_a, p_a), (name_b, p_b) in zip(res_a["model"].named_parameters(), res_b["model"].named_parameters()):
+        assert name_a == name_b
+        assert torch.allclose(p_a, p_b, atol=atol, rtol=rtol), f"Parameter mismatch in {name_a}"
+
+    # 4. Probe prediction match
+    probe = generate_synthetic_vorticity_dataset(2, nx=32, ny=32, seed=9999)
+    with torch.no_grad():
+        out_a = res_a["model"](probe)
+        out_b = res_b["model"](probe)
+    assert torch.allclose(out_a, out_b, atol=atol, rtol=rtol)
+
+
+def test_resume_missing_file_raises_filenotfound(tmp_path):
+    """Specifying a non-existent resume path must raise FileNotFoundError immediately, never silently fallback."""
+    from scripts.train_vorticity_autoencoder import train_vorticity_autoencoder
+
+    non_existent = tmp_path / "ghost_checkpoint.pt"
+    with pytest.raises(FileNotFoundError, match="Resume checkpoint file not found"):
+        train_vorticity_autoencoder(resume_path=str(non_existent))
+
+
+def test_resume_protected_config_mismatch_raises_valueerror(tmp_path):
+    """Resuming with altered data seed or model channels must raise ValueError."""
+    from scripts.train_vorticity_autoencoder import train_vorticity_autoencoder
+
+    cfg_base = {
+        "model": {"latent_channels": 64, "base_channels": 16},
+        "domain": {"nx": 32, "ny": 32, "lx": 1.0, "ly": 1.0},
+        "synthetic_data": {"num_train_samples": 16, "num_val_samples": 8, "seed": 42},
+        "training": {"batch_size": 8, "epochs": 1},
+    }
+    dir_base = tmp_path / "run_base"
+    res1 = train_vorticity_autoencoder(config=cfg_base, output_dir=str(dir_base), override_epochs=1, device="cpu")
+    ckpt_path = res1["checkpoint_path"]
+
+    # Attempt to resume with different seed
+    cfg_altered_seed = dict(cfg_base)
+    cfg_altered_seed["synthetic_data"] = {"num_train_samples": 16, "num_val_samples": 8, "seed": 999}
+    with pytest.raises(ValueError, match="Resume config mismatch for protected key 'synthetic_data.seed'"):
+        train_vorticity_autoencoder(config=cfg_altered_seed, resume_path=ckpt_path, override_epochs=2, device="cpu")
+
+    # Attempt to resume with different latent_channels
+    cfg_altered_channels = dict(cfg_base)
+    cfg_altered_channels["model"] = {"latent_channels": 32, "base_channels": 16}
+    with pytest.raises(ValueError, match="Resume config mismatch for protected key 'model.latent_channels'"):
+        train_vorticity_autoencoder(config=cfg_altered_channels, resume_path=ckpt_path, override_epochs=2, device="cpu")
+
+
+def test_resume_target_epoch_less_or_equal_raises_valueerror(tmp_path):
+    """Resuming with target epochs <= completed epoch must raise ValueError."""
+    from scripts.train_vorticity_autoencoder import train_vorticity_autoencoder
+
+    cfg = {
+        "model": {"latent_channels": 64, "base_channels": 16},
+        "domain": {"nx": 32, "ny": 32},
+        "synthetic_data": {"num_train_samples": 16, "num_val_samples": 8, "seed": 42},
+        "training": {"batch_size": 8, "epochs": 2},
+    }
+    dir_run = tmp_path / "run_epochs"
+    res = train_vorticity_autoencoder(config=cfg, output_dir=str(dir_run), override_epochs=2, device="cpu")
+
+    # Completed epoch is 2; attempting to resume to epoch 2 or 1 must fail
+    with pytest.raises(ValueError, match="Requested target epochs .* must be strictly greater"):
+        train_vorticity_autoencoder(config=cfg, resume_path=res["checkpoint_path"], override_epochs=2, device="cpu")
+
+
+def test_enstrophy_spectrum_persistence_in_checkpoint_and_summary(tmp_path):
+    """Verify that full enstrophy spectrum analysis (curves, ratios, spurious energy) is saved."""
+    import json
+    from scripts.train_vorticity_autoencoder import train_vorticity_autoencoder
+
+    cfg = {
+        "model": {"latent_channels": 64, "base_channels": 16},
+        "domain": {"nx": 32, "ny": 32, "lx": 1.0, "ly": 1.0},
+        "synthetic_data": {"num_train_samples": 16, "num_val_samples": 8, "seed": 42},
+        "training": {"batch_size": 8, "epochs": 1},
+    }
+    dir_run = tmp_path / "run_spec"
+    res = train_vorticity_autoencoder(config=cfg, output_dir=str(dir_run), override_epochs=1, device="cpu")
+
+    # 1. Check checkpoint contents
+    ckpt = torch.load(res["checkpoint_path"], weights_only=False)
+    assert "enstrophy_spectrum" in ckpt
+    spec = ckpt["enstrophy_spectrum"]
+    assert "k_bins" in spec and len(spec["k_bins"]) > 0
+    assert "spectrum_target" in spec and len(spec["spectrum_target"]) > 0
+    assert "spectrum_pred" in spec and len(spec["spectrum_pred"]) > 0
+    assert "spectrum_ratio" in spec and len(spec["spectrum_ratio"]) > 0
+    assert "spurious_energy_in_zero_bins" in spec
+
+    # 2. Check summary json contents
+    summary_path = dir_run / "training_summary.json"
+    assert summary_path.is_file()
+    with open(summary_path, "r", encoding="utf-8") as f:
+        summary_data = json.load(f)
+    assert "enstrophy_spectrum_summary" in summary_data
+    assert summary_data["enstrophy_spectrum_summary"]["valid_bins_count"] > 0
+
+
+def test_synthetic_data_generator_parameters_forwarding():
+    """Verify that base_wavenumber and perturbation_amplitude directly alter generated field properties."""
+    data_amp_small = generate_synthetic_vorticity_dataset(4, nx=32, ny=32, perturbation_amplitude=0.01, seed=42)
+    data_amp_large = generate_synthetic_vorticity_dataset(4, nx=32, ny=32, perturbation_amplitude=0.5, seed=42)
+
+    var_small = torch.var(data_amp_small, dim=0).mean().item()
+    var_large = torch.var(data_amp_large, dim=0).mean().item()
+    assert var_large > var_small, "Larger perturbation amplitude must yield larger ensemble variance"
+
+
+# ==============================================================================
+# 7. Data Contract & Isolation Redline
 # ==============================================================================
 
 def test_training_code_zero_stocbench_real_data_dependency():
