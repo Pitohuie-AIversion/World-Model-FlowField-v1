@@ -446,6 +446,23 @@ def test_production_train_vorticity_autoencoder_resumption_consistency(tmp_path)
         out_b = res_b["model"](probe)
     assert torch.allclose(out_a, out_b, atol=atol, rtol=rtol)
 
+    # 5. Optimizer state match within declared tolerances
+    opt_a = res_a["optimizer"]
+    opt_b = res_b["optimizer"]
+    assert len(opt_a.param_groups) == len(opt_b.param_groups)
+    for pg_a, pg_b in zip(opt_a.param_groups, opt_b.param_groups):
+        assert pg_a["lr"] == pg_b["lr"]
+        assert pg_a["weight_decay"] == pg_b["weight_decay"]
+
+    assert len(opt_a.state) == len(opt_b.state)
+    for s_a, s_b in zip(opt_a.state.values(), opt_b.state.values()):
+        if "step" in s_a and "step" in s_b:
+            assert s_a["step"] == s_b["step"]
+        if "exp_avg" in s_a and "exp_avg" in s_b:
+            assert torch.allclose(s_a["exp_avg"], s_b["exp_avg"], atol=atol, rtol=rtol)
+        if "exp_avg_sq" in s_a and "exp_avg_sq" in s_b:
+            assert torch.allclose(s_a["exp_avg_sq"], s_b["exp_avg_sq"], atol=atol, rtol=rtol)
+
 
 def test_resume_missing_file_raises_filenotfound(tmp_path):
     """Specifying a non-existent resume path must raise FileNotFoundError immediately, never silently fallback."""
@@ -457,14 +474,14 @@ def test_resume_missing_file_raises_filenotfound(tmp_path):
 
 
 def test_resume_protected_config_mismatch_raises_valueerror(tmp_path):
-    """Resuming with altered data seed or model channels must raise ValueError."""
+    """Resuming with altered data seed, channels, batch_size, or lr must raise ValueError."""
     from scripts.train_vorticity_autoencoder import train_vorticity_autoencoder
 
     cfg_base = {
         "model": {"latent_channels": 64, "base_channels": 16},
         "domain": {"nx": 32, "ny": 32, "lx": 1.0, "ly": 1.0},
         "synthetic_data": {"num_train_samples": 16, "num_val_samples": 8, "seed": 42},
-        "training": {"batch_size": 8, "epochs": 1},
+        "training": {"batch_size": 8, "lr": 1e-3, "weight_decay": 1e-4, "epochs": 1},
     }
     dir_base = tmp_path / "run_base"
     res1 = train_vorticity_autoencoder(config=cfg_base, output_dir=str(dir_base), override_epochs=1, device="cpu")
@@ -481,6 +498,65 @@ def test_resume_protected_config_mismatch_raises_valueerror(tmp_path):
     cfg_altered_channels["model"] = {"latent_channels": 32, "base_channels": 16}
     with pytest.raises(ValueError, match="Resume config mismatch for protected key 'model.latent_channels'"):
         train_vorticity_autoencoder(config=cfg_altered_channels, resume_path=ckpt_path, override_epochs=2, device="cpu")
+
+    # Attempt to resume with different batch_size
+    cfg_altered_bs = dict(cfg_base)
+    cfg_altered_bs["training"] = {"batch_size": 4, "lr": 1e-3, "weight_decay": 1e-4, "epochs": 2}
+    with pytest.raises(ValueError, match="Resume config mismatch for protected key 'training.batch_size'"):
+        train_vorticity_autoencoder(config=cfg_altered_bs, resume_path=ckpt_path, override_epochs=2, device="cpu")
+
+    # Attempt to resume with different lr
+    cfg_altered_lr = dict(cfg_base)
+    cfg_altered_lr["training"] = {"batch_size": 8, "lr": 5e-2, "weight_decay": 1e-4, "epochs": 2}
+    with pytest.raises(ValueError, match="Resume config mismatch for protected key 'training.lr'"):
+        train_vorticity_autoencoder(config=cfg_altered_lr, resume_path=ckpt_path, override_epochs=2, device="cpu")
+
+
+def test_checkpoint_atomic_write_failure_preserves_existing_checkpoint(tmp_path, monkeypatch):
+    """Verify that if temporary checkpoint saving fails during an epoch, the pre-existing valid checkpoint is preserved."""
+    from scripts.train_vorticity_autoencoder import train_vorticity_autoencoder
+
+    cfg = {
+        "model": {"latent_channels": 64, "base_channels": 16},
+        "domain": {"nx": 32, "ny": 32, "lx": 1.0, "ly": 1.0},
+        "synthetic_data": {"num_train_samples": 16, "num_val_samples": 8, "seed": 42},
+        "training": {"batch_size": 8, "epochs": 1},
+    }
+    dir_run = tmp_path / "run_failure_test"
+
+    # Step 1: Successful run for 1 epoch
+    res1 = train_vorticity_autoencoder(config=cfg, output_dir=str(dir_run), override_epochs=1, device="cpu")
+    ckpt_path = Path(res1["checkpoint_path"])
+    assert ckpt_path.is_file()
+
+    # Verify initial checkpoint loads cleanly
+    ckpt_initial = torch.load(ckpt_path, weights_only=False)
+    assert ckpt_initial["epoch"] == 1
+
+    # Step 2: Inject failure into torch.save on next save call
+    original_save = torch.save
+    def broken_save(obj, f, *args, **kwargs):
+        if "latest_checkpoint.pt.tmp" in str(f):
+            raise IOError("Simulated disk full / write failure during checkpoint save")
+        return original_save(obj, f, *args, **kwargs)
+
+    monkeypatch.setattr(torch, "save", broken_save)
+
+    # Step 3: Attempt to train epoch 2, which must raise IOError
+    with pytest.raises(IOError, match="Failed to atomic save checkpoint for epoch 2"):
+        train_vorticity_autoencoder(
+            config=cfg,
+            resume_path=str(ckpt_path),
+            output_dir=str(dir_run),
+            override_epochs=2,
+            device="cpu",
+        )
+
+    # Step 4: Verify the pre-existing checkpoint was NOT overwritten or corrupted
+    assert ckpt_path.is_file()
+    ckpt_after_failure = torch.load(ckpt_path, weights_only=False)
+    assert ckpt_after_failure["epoch"] == 1
+    assert ckpt_after_failure["global_step"] == ckpt_initial["global_step"]
 
 
 def test_resume_target_epoch_less_or_equal_raises_valueerror(tmp_path):

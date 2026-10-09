@@ -145,20 +145,27 @@ def _validate_resumption_config(
     current_config: Dict[str, Any],
     checkpoint_config: Dict[str, Any],
 ) -> None:
-    """Validate that protected dataset and model definition parameters match between current config and checkpoint."""
+    """Validate that protected dataset, model, and training definition parameters match between current config and checkpoint."""
     protected_keys = [
+        ("model", "in_channels"),
+        ("model", "out_channels"),
         ("model", "latent_channels"),
         ("model", "base_channels"),
+        ("model", "project_pressure"),
         ("domain", "nx"),
         ("domain", "ny"),
         ("domain", "lx"),
         ("domain", "ly"),
         ("synthetic_data", "seed"),
         ("synthetic_data", "num_train_samples"),
+        ("synthetic_data", "num_val_samples"),
         ("synthetic_data", "base_wavenumber"),
         ("synthetic_data", "perturbation_modes"),
         ("synthetic_data", "perturbation_amplitude"),
         ("training", "batch_size"),
+        ("training", "lr"),
+        ("training", "weight_decay"),
+        ("training", "loss_type"),
     ]
 
     for section, key in protected_keys:
@@ -412,9 +419,17 @@ def train_vorticity_autoencoder(
             },
         }
         latest_ckpt = out_path / "latest_checkpoint.pt"
-        temp_ckpt = out_path / "latest_checkpoint.pt.tmp"
-        torch.save(ckpt_data, temp_ckpt)
-        temp_ckpt.replace(latest_ckpt)
+        temp_ckpt = out_path / f"latest_checkpoint.pt.tmp_{epoch}"
+        try:
+            torch.save(ckpt_data, temp_ckpt)
+            temp_ckpt.replace(latest_ckpt)
+        except Exception as e:
+            if temp_ckpt.exists():
+                try:
+                    temp_ckpt.unlink()
+                except OSError:
+                    pass
+            raise IOError(f"Failed to atomic save checkpoint for epoch {epoch}: {e}") from e
 
     summary_file = out_path / "training_summary.json"
     summary_data = {
