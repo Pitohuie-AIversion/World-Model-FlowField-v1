@@ -409,6 +409,78 @@ def test_real_downloaded_stocbench_files_acceptance():
 # 12. Audit Output Anti-Collision & Anti-Overwrite Protection Test
 # ==============================================================================
 
+def test_empty_allocated_directory_is_not_reused(tmp_path):
+    """Regression test: verify that newly allocated empty directory is never reused by a subsequent call."""
+    from scripts.prepare_stocbench_data import allocate_exclusive_audit_dir
+
+    first, _ = allocate_exclusive_audit_dir(tmp_path, "same_run")
+    second, _ = allocate_exclusive_audit_dir(tmp_path, "same_run")
+    assert first != second
+    assert first.is_dir()
+    assert second.is_dir()
+    # First directory was left empty, second directory must not be the same path
+    assert not any(first.iterdir())
+
+
+def _worker_proc_a(base_dir_str, evt_a_done, evt_b_done, queue_res):
+    from pathlib import Path
+    from scripts.prepare_stocbench_data import allocate_exclusive_audit_dir
+    dir_a, _ = allocate_exclusive_audit_dir(Path(base_dir_str), "race_run", overwrite=False)
+    # Notify B that A has created directory but not yet written any files
+    evt_a_done.set()
+    # Wait for B to allocate its directory
+    evt_b_done.wait(timeout=5)
+    # Now write A's manifest
+    (dir_a / "manifest.json").write_text('{"owner": "process_A"}', encoding="utf-8")
+    queue_res.put(("A", str(dir_a)))
+
+
+def _worker_proc_b(base_dir_str, evt_a_done, evt_b_done, queue_res):
+    from pathlib import Path
+    from scripts.prepare_stocbench_data import allocate_exclusive_audit_dir
+    # Wait until A has created the empty directory
+    evt_a_done.wait(timeout=5)
+    # B requests the exact same run_id while A's directory is still empty
+    dir_b, _ = allocate_exclusive_audit_dir(Path(base_dir_str), "race_run", overwrite=False)
+    evt_b_done.set()
+    # Write B's manifest
+    (dir_b / "manifest.json").write_text('{"owner": "process_B"}', encoding="utf-8")
+    queue_res.put(("B", str(dir_b)))
+
+
+def test_interleaved_processes_empty_window_isolation(tmp_path):
+    """Verify that two independent processes with controlled empty-window timing acquire distinct directories."""
+    import multiprocessing as mp
+
+    ctx = mp.get_context("spawn")
+    evt_a = ctx.Event()
+    evt_b = ctx.Event()
+    q = ctx.Queue()
+
+    p_a = ctx.Process(target=_worker_proc_a, args=(str(tmp_path), evt_a, evt_b, q))
+    p_b = ctx.Process(target=_worker_proc_b, args=(str(tmp_path), evt_a, evt_b, q))
+
+    p_a.start()
+    p_b.start()
+    p_a.join(timeout=10)
+    p_b.join(timeout=10)
+
+    assert not p_a.is_alive(), "Process A timed out"
+    assert not p_b.is_alive(), "Process B timed out"
+    assert p_a.exitcode == 0
+    assert p_b.exitcode == 0
+
+    results = {}
+    while not q.empty():
+        owner, dir_path = q.get()
+        results[owner] = Path(dir_path)
+
+    assert "A" in results and "B" in results
+    assert results["A"] != results["B"]
+    assert (results["A"] / "manifest.json").read_text(encoding="utf-8") == '{"owner": "process_A"}'
+    assert (results["B"] / "manifest.json").read_text(encoding="utf-8") == '{"owner": "process_B"}'
+
+
 def test_audit_output_anti_collision_and_overwrite_protection(tmp_path):
     """Verify that audit output directory allocation never silently overwrites existing evidence,
     and guarantees atomic race-free concurrency across simultaneous invocations."""

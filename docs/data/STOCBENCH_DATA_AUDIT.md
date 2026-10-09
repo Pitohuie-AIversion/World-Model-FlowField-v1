@@ -234,12 +234,15 @@
 
 ### 2. 防覆写机制实测证据（持久化归档与并发安全保证）
 
-为防止重复执行审计时静默覆盖历史证据，`scripts/prepare_stocbench_data.py` 实施了原子排他分配与并发安全保护：
-- **原子排他分配机制**：通过 `allocate_exclusive_audit_dir` 使用操作系统原子系统调用 `Path.mkdir(exist_ok=False)`。若多个进程/线程并发申请同一 `run_id`，利用操作系统内核的排他性捕获 `FileExistsError`，自动追加时间戳与递增序列号重试，彻底杜绝 check-then-act 竞态条件；
+为防止重复执行审计时静默覆盖历史证据，`scripts/prepare_stocbench_data.py` 实施了严格排他分配与并发安全保护：
+- **严格排他分配机制**：通过 `allocate_exclusive_audit_dir`，当 `overwrite=False` 时，**每次成功返回的目录必须由当前这次调用通过操作系统内核原子系统调用 `Path.mkdir(parents=False, exist_ok=False)` 独占创建**。已存在的任何目录（无论是空目录还是非空目录）均严格禁止被直接认领或复用。若遇到 `FileExistsError`，自动追加时间戳与递增序列号原子探测新目录，彻底消除 check-then-act 竞态条件与空目录所有权误判；
 - **实测生成的两套持久化证据目录（已永久保存在磁盘，供随时查验）**：
   1. `outputs/data_audit/stocbench/run_anti_overwrite_verified/manifest.json`
   2. `outputs/data_audit/stocbench/run_anti_overwrite_verified_20261008_180405/manifest.json`
-- **并发自动化测试保障**：在 `tests/test_stocbench_data_audit.py` 的测试用例 `test_audit_output_anti_collision_and_overwrite_protection` 中，使用 10 线程并发竞争压测，确证 10 个并发工作者均获得互斥独立目录，且基线证据未被修改。
+- **并发与空目录防复用自动化测试矩阵**：在 `tests/test_stocbench_data_audit.py` 中建立三层防碰撞回归测试集：
+  1. `test_empty_allocated_directory_is_not_reused`：验证首次分配但尚未写入文件的空目录，绝不被后续调用重复认领；
+  2. `test_interleaved_processes_empty_window_isolation`：使用多进程（`spawn`）与事件同步，严格安排“进程 A 分配空目录未写入 $\to$ 进程 B 分配相同 run_id $\to$ 两者获得互斥目录并各自安全写入”的时间窗口测试；
+  3. `test_audit_output_anti_collision_and_overwrite_protection`：使用 10 线程并发竞争压测，确证 10 个并发工作者均获得互斥独立目录，且基线证据未被修改。
 
 ---
 
@@ -266,11 +269,12 @@
   4. `test_stocbench_reference_ensemble_dimension_and_latent_projection`：分叉参考集合 $K_{\text{ref}}=5000$ 维度契约与潜空间投影（PASSED）；
   5. `test_stocbench_physical_scaling_roundtrip`：$\times 3.0$ 存储到物理尺度无损往返缩放（PASSED）；
   6. `test_train_and_reference_data_isolation`：训练集（`traj_seed_42.npy`）与评测集（`step_seed_100.npz`）的物理隔离与防泄漏（PASSED）。
-- **早期草稿报错根因回溯（澄清非模型缺陷）**：
-  前期草稿运行出现的两处报错已被追溯并准确定性：
-  - `TypeError: LatentSTTransformer.__init__() got unexpected keyword argument 'in_channels'`：系草稿传参误写为 `in_channels`，正确参数名为 `latent_channels`；
-  - `TypeError: VarianceHead2D.__init__() got unexpected keyword argument 'in_channels'`：系草稿传参误写为 `in_channels`，正确签名要求 `embed_dim, latent_channels`；
-  - 结论：世界模型核心组件天然支持单通道潜空间，早期报错纯属测试草稿调用方式不匹配，而非模型架构缺陷，无需重构核心网络。
+- **早期草稿报错根因回溯与技术澄清**：
+  前期草稿运行出现的报错已被准确定位并纠正：
+  - `TypeError: LatentSTTransformer.__init__()` 与 `TypeError: VarianceHead2D.__init__()`：系测试草稿调用时构造参数误传为 `in_channels`，正确签名分别要求 `latent_channels` 与 `(embed_dim, latent_channels)`；
+  - **关于切片语法的技术更正**：PyTorch 基础切片遵循 NumPy 规范，单通道张量上的 `q[:, 2:3]` 切片会返回空通道 `(B, 0, H, W)`，而**不会直接抛出 IndexError**（只有整数索引 `q[:, 2]` 才会越界报错）；
+  - **单通道模型兼容性定性**：单通道涡量模型的兼容性以显式配置 `out_channels=1, project_pressure=False` 的实际前向测试通过为准，不假设任意单通道配置均天然兼容。
+  - **结论**：现有世界模型核心代码库在显式合法配置下完全支持单通道涡量，无须破坏性重构核心网络。
 
 ### 2. `src/models/decoder.py` 与冻结基线保持零差异（零代码变动）
 

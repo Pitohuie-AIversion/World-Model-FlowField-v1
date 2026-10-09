@@ -536,8 +536,7 @@ def allocate_exclusive_audit_dir(base_dir: Path, requested_run_id: str, overwrit
         target_dir.mkdir(parents=False, exist_ok=False)
         return target_dir, requested_run_id
     except FileExistsError:
-        if not any(target_dir.iterdir()):
-            return target_dir, requested_run_id
+        pass
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     counter = 1
