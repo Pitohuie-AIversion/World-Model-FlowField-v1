@@ -294,8 +294,13 @@ def train_vorticity_autoencoder(
         ckpt = torch.load(resume_path, map_location=dev, weights_only=False)
 
         # Validate configuration compatibility
-        if "config" in ckpt:
-            _validate_resumption_config(effective_config, ckpt["config"])
+        checkpoint_config = ckpt.get("config")
+        if not isinstance(checkpoint_config, dict):
+            raise ValueError(
+                "Strict resume requires a checkpoint with a valid config snapshot. "
+                "This checkpoint cannot be verified as a continuation of the same run."
+            )
+        _validate_resumption_config(effective_config, checkpoint_config)
 
         if epochs <= ckpt["epoch"]:
             raise ValueError(

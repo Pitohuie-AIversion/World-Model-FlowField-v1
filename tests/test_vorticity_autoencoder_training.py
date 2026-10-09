@@ -369,18 +369,112 @@ def test_checkpoint_resumption_numerical_consistency(tmp_path):
         assert name_a == name_b
         assert torch.allclose(p_a, p_b, atol=atol, rtol=rtol), f"Parameter mismatch in {name_a}"
 
-    # 2. Optimizer momentum match
-    for s_a, s_b in zip(opt_a.state.values(), opt_b_resumed.state.values()):
-        if "exp_avg" in s_a and "exp_avg" in s_b:
-            assert torch.allclose(s_a["exp_avg"], s_b["exp_avg"], atol=atol, rtol=rtol)
-        if "exp_avg_sq" in s_a and "exp_avg_sq" in s_b:
-            assert torch.allclose(s_a["exp_avg_sq"], s_b["exp_avg_sq"], atol=atol, rtol=rtol)
+    # 2. Optimizer momentum match (fail-closed parameter-aligned verification)
+    assert_optimizer_resumption_state_match(model_a, model_b_resumed, opt_a, opt_b_resumed, atol=atol, rtol=rtol)
 
     # 3. Step loss match
     assert abs(losses_a[-1] - losses_b[-1]) < 1e-6, f"Final loss diverged: {losses_a[-1]} vs {losses_b[-1]}"
 
     # 4. Probe prediction match
     assert torch.allclose(probe_out_a, probe_out_b, atol=atol, rtol=rtol), "Probe output mismatch after resumption"
+
+
+def assert_optimizer_resumption_state_match(
+    model_a: nn.Module,
+    model_b: nn.Module,
+    opt_a: torch.optim.Optimizer,
+    opt_b: torch.optim.Optimizer,
+    atol: float = 1e-6,
+    rtol: float = 1e-5,
+) -> None:
+    """Rigorous fail-closed verification of optimizer parameter groups and internal state.
+
+    Ensures:
+    1. Param groups match in count, lr, and weight_decay.
+    2. Every trainable parameter in the model has an active optimizer state entry.
+    3. State dictionaries contain all required keys for AdamW ({'step', 'exp_avg', 'exp_avg_sq'}).
+    4. Steps are identical integers and momentum tensors are numerical matches within (atol, rtol).
+    """
+    assert len(opt_a.param_groups) == len(opt_b.param_groups), "Optimizer param_groups length mismatch"
+    for pg_a, pg_b in zip(opt_a.param_groups, opt_b.param_groups):
+        assert pg_a["lr"] == pg_b["lr"], f"Learning rate mismatch: {pg_a['lr']} vs {pg_b['lr']}"
+        assert pg_a["weight_decay"] == pg_b["weight_decay"], (
+            f"Weight decay mismatch: {pg_a['weight_decay']} vs {pg_b['weight_decay']}"
+        )
+
+    required_keys = {"step", "exp_avg", "exp_avg_sq"}
+    params_a = [(n, p) for n, p in model_a.named_parameters() if p.requires_grad]
+    params_b = [(n, p) for n, p in model_b.named_parameters() if p.requires_grad]
+
+    assert len(params_a) > 0, "Model A has no trainable parameters"
+    assert len(params_a) == len(params_b), "Trainable parameter count mismatch between models"
+    assert len(opt_a.state) == len(params_a), (
+        f"Optimizer A state count ({len(opt_a.state)}) does not match trainable params ({len(params_a)})"
+    )
+    assert len(opt_b.state) == len(params_b), (
+        f"Optimizer B state count ({len(opt_b.state)}) does not match trainable params ({len(params_b)})"
+    )
+
+    for (name_a, p_a), (name_b, p_b) in zip(params_a, params_b):
+        assert name_a == name_b, f"Parameter alignment mismatch: {name_a} vs {name_b}"
+        assert p_a in opt_a.state, f"Parameter '{name_a}' missing in opt_a state"
+        assert p_b in opt_b.state, f"Parameter '{name_b}' missing in opt_b state"
+
+        s_a = opt_a.state[p_a]
+        s_b = opt_b.state[p_b]
+
+        assert required_keys <= s_a.keys(), f"opt_a missing required keys for '{name_a}': {required_keys - s_a.keys()}"
+        assert required_keys <= s_b.keys(), f"opt_b missing required keys for '{name_b}': {required_keys - s_b.keys()}"
+
+        step_a = int(s_a["step"].item()) if isinstance(s_a["step"], torch.Tensor) else int(s_a["step"])
+        step_b = int(s_b["step"].item()) if isinstance(s_b["step"], torch.Tensor) else int(s_b["step"])
+        assert step_a == step_b, f"Step counter mismatch for '{name_a}': {step_a} vs {step_b}"
+        assert torch.allclose(s_a["exp_avg"], s_b["exp_avg"], atol=atol, rtol=rtol), (
+            f"exp_avg momentum mismatch for '{name_a}'"
+        )
+        assert torch.allclose(s_a["exp_avg_sq"], s_b["exp_avg_sq"], atol=atol, rtol=rtol), (
+            f"exp_avg_sq momentum mismatch for '{name_a}'"
+        )
+
+
+def test_optimizer_resumption_missing_state_fails_closed():
+    """Verify that assert_optimizer_resumption_state_match strictly fails if states or keys are missing."""
+    model_a = nn.Linear(4, 4)
+    model_b = nn.Linear(4, 4)
+    opt_a = torch.optim.AdamW(model_a.parameters(), lr=1e-3)
+    opt_b = torch.optim.AdamW(model_b.parameters(), lr=1e-3)
+
+    # 1. Before any optimization step, state is empty -> must fail
+    with pytest.raises(AssertionError, match="Optimizer A state count"):
+        assert_optimizer_resumption_state_match(model_a, model_b, opt_a, opt_b)
+
+    # Run 1 optimization step on both
+    x = torch.randn(2, 4)
+    loss_a = model_a(x).sum()
+    loss_a.backward()
+    opt_a.step()
+
+    loss_b = model_b(x).sum()
+    loss_b.backward()
+    opt_b.step()
+
+    # Copy state to b so they match
+    opt_b.load_state_dict(opt_a.state_dict())
+    # Baseline check: now it should pass
+    assert_optimizer_resumption_state_match(model_a, model_b, opt_a, opt_b)
+
+    # 2. Delete a required key ('exp_avg') from one parameter state in opt_b -> must fail
+    first_param = next(p for p in model_b.parameters() if p.requires_grad)
+    saved_exp_avg = opt_b.state[first_param]["exp_avg"]
+    del opt_b.state[first_param]["exp_avg"]
+    with pytest.raises(AssertionError, match="opt_b missing required keys"):
+        assert_optimizer_resumption_state_match(model_a, model_b, opt_a, opt_b)
+    opt_b.state[first_param]["exp_avg"] = saved_exp_avg
+
+    # 3. Step mismatch -> must fail
+    opt_b.state[first_param]["step"] = opt_b.state[first_param]["step"] + 1
+    with pytest.raises(AssertionError, match="Step counter mismatch"):
+        assert_optimizer_resumption_state_match(model_a, model_b, opt_a, opt_b)
 
 
 # ==============================================================================
@@ -447,21 +541,9 @@ def test_production_train_vorticity_autoencoder_resumption_consistency(tmp_path)
     assert torch.allclose(out_a, out_b, atol=atol, rtol=rtol)
 
     # 5. Optimizer state match within declared tolerances
-    opt_a = res_a["optimizer"]
-    opt_b = res_b["optimizer"]
-    assert len(opt_a.param_groups) == len(opt_b.param_groups)
-    for pg_a, pg_b in zip(opt_a.param_groups, opt_b.param_groups):
-        assert pg_a["lr"] == pg_b["lr"]
-        assert pg_a["weight_decay"] == pg_b["weight_decay"]
-
-    assert len(opt_a.state) == len(opt_b.state)
-    for s_a, s_b in zip(opt_a.state.values(), opt_b.state.values()):
-        if "step" in s_a and "step" in s_b:
-            assert s_a["step"] == s_b["step"]
-        if "exp_avg" in s_a and "exp_avg" in s_b:
-            assert torch.allclose(s_a["exp_avg"], s_b["exp_avg"], atol=atol, rtol=rtol)
-        if "exp_avg_sq" in s_a and "exp_avg_sq" in s_b:
-            assert torch.allclose(s_a["exp_avg_sq"], s_b["exp_avg_sq"], atol=atol, rtol=rtol)
+    assert_optimizer_resumption_state_match(
+        res_a["model"], res_b["model"], res_a["optimizer"], res_b["optimizer"], atol=atol, rtol=rtol
+    )
 
 
 def test_resume_missing_file_raises_filenotfound(tmp_path):
@@ -510,6 +592,66 @@ def test_resume_protected_config_mismatch_raises_valueerror(tmp_path):
     cfg_altered_lr["training"] = {"batch_size": 8, "lr": 5e-2, "weight_decay": 1e-4, "epochs": 2}
     with pytest.raises(ValueError, match="Resume config mismatch for protected key 'training.lr'"):
         train_vorticity_autoencoder(config=cfg_altered_lr, resume_path=ckpt_path, override_epochs=2, device="cpu")
+
+
+def test_resume_missing_config_raises_valueerror(tmp_path):
+    """Resuming from a checkpoint lacking a 'config' snapshot must raise ValueError immediately."""
+    from scripts.train_vorticity_autoencoder import train_vorticity_autoencoder
+
+    cfg = {
+        "model": {"latent_channels": 64, "base_channels": 16},
+        "domain": {"nx": 32, "ny": 32},
+        "synthetic_data": {"num_train_samples": 16, "num_val_samples": 8, "seed": 42},
+        "training": {"batch_size": 8, "epochs": 1},
+    }
+    dir_run = tmp_path / "run_missing_cfg"
+    res = train_vorticity_autoencoder(config=cfg, output_dir=str(dir_run), override_epochs=1, device="cpu")
+    ckpt_path = Path(res["checkpoint_path"])
+
+    # Simulate legacy checkpoint by removing 'config' key
+    ckpt_data = torch.load(ckpt_path, weights_only=False)
+    assert "config" in ckpt_data
+    del ckpt_data["config"]
+    legacy_ckpt_path = tmp_path / "legacy_no_config_ckpt.pt"
+    torch.save(ckpt_data, legacy_ckpt_path)
+
+    with pytest.raises(ValueError, match="Strict resume requires a checkpoint with a valid config snapshot"):
+        train_vorticity_autoencoder(config=cfg, resume_path=str(legacy_ckpt_path), override_epochs=2, device="cpu")
+
+
+def test_resume_invalid_config_type_raises_valueerror(tmp_path):
+    """Resuming from a checkpoint where 'config' is None or not a dict must raise ValueError."""
+    from scripts.train_vorticity_autoencoder import train_vorticity_autoencoder
+
+    cfg = {
+        "model": {"latent_channels": 64, "base_channels": 16},
+        "domain": {"nx": 32, "ny": 32},
+        "synthetic_data": {"num_train_samples": 16, "num_val_samples": 8, "seed": 42},
+        "training": {"batch_size": 8, "epochs": 1},
+    }
+    dir_run = tmp_path / "run_invalid_cfg"
+    res = train_vorticity_autoencoder(config=cfg, output_dir=str(dir_run), override_epochs=1, device="cpu")
+    ckpt_path = Path(res["checkpoint_path"])
+
+    ckpt_data = torch.load(ckpt_path, weights_only=False)
+
+    # 1. Test config is None
+    ckpt_data_none = dict(ckpt_data)
+    ckpt_data_none["config"] = None
+    bad_ckpt_path_none = tmp_path / "bad_config_none_ckpt.pt"
+    torch.save(ckpt_data_none, bad_ckpt_path_none)
+
+    with pytest.raises(ValueError, match="Strict resume requires a checkpoint with a valid config snapshot"):
+        train_vorticity_autoencoder(config=cfg, resume_path=str(bad_ckpt_path_none), override_epochs=2, device="cpu")
+
+    # 2. Test config is non-dict type (string)
+    ckpt_data_str = dict(ckpt_data)
+    ckpt_data_str["config"] = "invalid_string_config"
+    bad_ckpt_path_str = tmp_path / "bad_config_str_ckpt.pt"
+    torch.save(ckpt_data_str, bad_ckpt_path_str)
+
+    with pytest.raises(ValueError, match="Strict resume requires a checkpoint with a valid config snapshot"):
+        train_vorticity_autoencoder(config=cfg, resume_path=str(bad_ckpt_path_str), override_epochs=2, device="cpu")
 
 
 def test_checkpoint_atomic_write_failure_preserves_existing_checkpoint(tmp_path, monkeypatch):
