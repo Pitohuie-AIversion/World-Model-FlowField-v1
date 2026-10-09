@@ -1,0 +1,59 @@
+{
+  "dataset_split": "test",
+  "split_type": "grouped",
+  "checkpoint_config_split_type": "grouped",
+  "checkpoint_split_binding_status": "VERIFIED_MATCH_AUDITED_MANIFEST",
+  "checkpoint_split_binding_source": "audited_historical_manifest",
+  "checkpoint_expected_split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+  "split_manifest_path": "outputs/splits/grouped_split.json",
+  "split_manifest_file_sha256": "cfee2ff891a65e399b5f6b6bde62462646183b5a5dcbcea059113310bb382a6a",
+  "split_content_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+  "split_hash": "41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d",
+  "historical_attestation": {
+    "manifest_path": "outputs/manifests/closure_r4_seed42.json",
+    "group_title": "E4: Full Physics Coupling",
+    "legacy_attestation": {
+      "status": "historical_untracked",
+      "checkpoint_sha256": "821891674ea80383ba07f02edbd1005e1005fc2a6b084b4146969c4f5570ca86",
+      "training_git_commit": "UNKNOWN",
+      "training_git_dirty": null,
+      "reason": "Historical Seed 42 checkpoint trained prior to automated git provenance capture; working-tree state was unrecorded and commit cannot be cryptographically reconstructed from disk. Cryptographic integrity is verified via file SHA-256."
+    }
+  },
+  "source_file_relative": "data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+  "source_file_absolute": "/root/autodl-tmp/datasets/shear_flow/data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5",
+  "traj_idx": 1,
+  "cluster_id": 1,
+  "time_window": {
+    "start_t": 0,
+    "split_t": 4,
+    "end_t": 5,
+    "history_indices": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "target_index": 4
+  },
+  "history_frames": 4,
+  "prediction_horizon": 1,
+  "checkpoint_path": "outputs/checkpoints/dynamics/closure_r4/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt",
+  "checkpoint_sha256": "821891674ea80383ba07f02edbd1005e1005fc2a6b084b4146969c4f5570ca86",
+  "representation_checkpoint_path": "outputs/checkpoints/representation/best_vrmse_mean.pt",
+  "representation_checkpoint_sha256": "a4a4061371552051441c6917f7da34cdf6401d394e546639171cbf3e26ba12c9",
+  "normalizer_path": "outputs/normalization/stats_grouped.pt",
+  "normalizer_hash": "3a0fe52689657618a92a90881aca42d349639502e956017c6fcbf0368c5d4bec",
+  "pressure_handling": "evaluation_zero_mean_gauge_post_denorm",
+  "decoder_project_pressure_at_forward": false,
+  "evaluation_type": "single_sample_diagnostic",
+  "note": "Individual test trajectory window evaluation; not to be conflated with full test set multi-seed average.",
+  "sample_metrics": {
+    "vrmse_u": 0.04258253425359726,
+    "vrmse_v": 0.44553443789482117,
+    "vrmse_p": 0.37460678815841675,
+    "vrmse_s": 0.08509974926710129,
+    "vrmse_mean": 0.23695587739348412,
+    "vorticity_rmse": 1.0480268001556396
+  }
+}

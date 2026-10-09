@@ -1,0 +1,499 @@
+# 从历史观测到未来状态：二维剪切流的潜空间动力学建模与实验评估
+
+**第一作者实验研究报告与系统性工程定论**  
+*项目代号：World-Model-FlowField-v1*  
+*基准任务：The Well 典型二维非定常剪切层流动（Navier-Stokes + 被动标量输运）*
+
+---
+
+## 全文主线与研究框架
+
+本研究以二维不可压缩剪切流为对象，建立从历史物理场到未来状态的预测模型。我们首先检验空间表示是否保留了预测所需的信息，再研究潜状态如何随时间转移，并通过单步预测、多步自由滚动和物理诊断评估模型。在此基础上，进一步考察方程残差监督、条件概率建模与连续残差流匹配的作用，明确它们带来的收益、代价及适用范围。这条主线对应现有的“编码—状态转移—潜空间滚动—解码”实现。
+
+---
+
+## 01 实验目标与阶段定位
+
+### 1.1 研究背景：为什么从流场预测切入世界模型
+本研究关注世界模型中的环境动力学建模问题：模型能否根据已经观测到的状态，推演尚未发生的状态。我们将复杂动态系统中的这一核心命题，具体化为二维不可压缩剪切流中速度、压力和被动标量的时序数值推演。
+
+我们的研究重点不是生成视觉外观相似的流场图像，而是判断模型能否在连续预测中保留流动拓扑结构，并在输入序列逐渐被模型自身预测结果替代后，仍保持可接受的数值误差和物理一致性。
+
+> **阶段定位与研究边界说明**：  
+> 本阶段的研究范围严格限定于流动环境内部的状态转移预测，不包含已经验证的机器人动作条件、任务决策或真实海况闭环应用。
+
+### 1.2 实验目标：将总问题拆解为四个可验证的科学问题
+全文围绕四个独立且可闭环验证的核心问题组织，而非按开发时间线性罗列功能：
+
+| 核心研究问题 | 本实验要验证的具体内容 | 对应的实验证据与定量指标 |
+| :--- | :--- | :--- |
+| **空间表示是否充分？** | 编码与解码之后，场值幅值、剪切层界面和速度梯度保留到什么程度？ | 空间自编码重构 RMSE / VRMSE、涡量场重构误差、绝对误差对比图（现有图 2） |
+| **状态转移是否准确？** | 给定相同历史观测，模型能否准确预测紧邻下一时刻的物理状态？ | 独立测试样本单步真实预测对照图（新增图 4）、分通道单步 VRMSE / RMSE 评估表 |
+| **连续推演是否可靠？** | 不再输入真实未来后，误差如何累积，流动结构如何演化，是否发生色散崩溃？ | 30 步自由滚动误差曲线（现有图 4）、不同时刻流场对比、不可压缩散度与能谱诊断 |
+| **扩展分支是否有价值？** | 方程残差、高斯方差与流匹配生成是否在目标指标上取得收益，代价是什么？ | 方程残差阻尼、分布似然评分、名义区间覆盖率、系综与预注册主要终点（现有图 10~20） |
+
+### 1.3 任务定义与阶段边界
+我们采用统一的数学物理预测任务贯穿全文：
+
+$$q_t = [u_t, v_t, p_t, s_t]^T \in \mathbb{R}^{4 \times 128 \times 256}$$
+
+$$\widehat{q}_{t+1:t+H} = \mathcal{F}_\theta(q_{t-L+1:t}, Re, Sc)$$
+
+其中：
+* $q_t$ 为包含流向速度 $u$、法向速度 $v$、流体压力 $p$ 与被动标量 $s$ 的四通道物理状态；
+* $L$ 为历史观测帧数，当前主路径实验配置采用 $L=4$（**注：“采用四帧”是当前的实验配置；“四帧最优”则需要专门的历史长度消融证据，二者在科学表述上严格分开**）；
+* $H$ 为请求模型预测的未来时序跨度；
+* $Re$ 和 $Sc$ 分别为雷诺数与施密特数。
+
+#### 表 0：研究问题—方法—实验—结论边界对照表
+| 研究阶段与方法 | 核心假说与设计意图 | 验证实验设计 | 结论边界与适用范围 |
+| :--- | :--- | :--- | :--- |
+| **空间表征与确定性主干** | 周期卷积下采样可保留关键流动结构并大幅削减时序注意力复杂度 | 空间自编码重构测试、确定性潜空间单步与多步自由滚动 | 确定性预测的基础。提供几何表征，但在长程滚动中仍面临累积误差。 |
+| **物理守恒损失 (Closure-R4)** | 引入谱散度与谱涡量损失可抑制长程虚假高频能量堆积 | Seeds 42, 43, 44 三种子五组物理消融实验 (E0~E4) | 在部分长程结构指标上表现出收益，但场误差、散度和能谱改善并非所有步长同时成立。 |
+| **预测跨度阶梯 (Horizon-R1/R2)** | 训练时展开更长时步可迫使模型学习容忍自生成误差 | $H \in \{1, 2, 4, 8, 12, 16\}$ 多模型展开评估与双检查点评选 | 区分训练跨度收益与选型规则收益。短程视界最优检查点与长程指标存在选型解耦。 |
+| **方程残差微调 (PDE-Controlled)** | 施加连续 Navier-Stokes 与扩散方程残差可压制局部方程失配 | 冻结基准、继续训练对照、方程微调三方同预算受控比较 | 相对继续训练对照降低了部分残差，但相对冻结基准其总体预测误差仍略有增加。 |
+| **高斯概率世界模型 (ProbLatent Phase 3)** | 条件异方差建模可在保持均值精度同时输出空间对齐的潜不确定度 | NLL 似然评分、经验覆盖率校准曲线、空间方差与误差对比 | 改善了潜空间单步似然评分，但区间校准并未同步改善；50% 区间欠覆盖，大区间过覆盖。 |
+| **连续流匹配生成 (FM-R2)** | 潜空间连续速度场常微分方程积分可消除离散自回归暴露偏差 | 探索种子 42 + 验证种子 43~46 单轨迹配对分析与主要终点 | 次要指标在 4/4 种子全面统计改善，但需区分主要终点与次要指标，披露局部能谱反转。 |
+
+---
+
+## 02 实验场景与数据集构建
+
+在数据部分，我们严格区分**数值仿真的离线生成过程**与**模型从轨迹中读取样本的构建过程**。
+
+### 2.1 物理场景与控制方程
+流场环境遵循二维不可压缩 Navier-Stokes 方程与被动标量对流扩散方程联合系统：
+
+$$\nabla \cdot \mathbf{u} = 0$$
+
+$$\frac{\partial \mathbf{u}}{\partial t} + (\mathbf{u} \cdot \nabla)\mathbf{u} = -\nabla p + \frac{1}{Re} \nabla^2 \mathbf{u}$$
+
+$$\frac{\partial s}{\partial t} + (\mathbf{u} \cdot \nabla)s = \frac{1}{Re \cdot Sc} \nabla^2 s$$
+
+其中速度场 $\mathbf{u} = (u, v)$，修正压力为 $p$，被动标量浓度为 $s$。标量 $s$ 纯粹随流体对流和扩散，不向动量方程施加反作用力。
+
+#### 表 1：物理场景与数据规格表
+| 物理属性 / 参数项 | 设定值与数学描述 | 备注与说明 |
+| :--- | :--- | :--- |
+| **计算物理域 $\Omega$** | 矩形域 $[0, L_x] \times [0, L_y] = [0, 1.0] \times [0, 2.0]$ | 流向 $x \in [0, 1.0]$，法向 $y \in [0, 2.0]$ |
+| **离散空间网格** | $N_y \times N_x = 128 \times 256$ | 空间各向同性网格步长 $\Delta x = \Delta y = 1/256$ |
+| **边界条件 (Boundary Conditions)** | 双周期环状拓扑（Bi-periodic BC） | 在 $x$ 与 $y$ 方向均满足理想周期条件 |
+| **状态变量通道** | 4 通道：$[u, v, p, s]$ | 速度矢量场、规范压力场、被动标量场 |
+| **雷诺数范围 $Re$** | $Re \in [10^3, 10^5]$ | 对应动力粘性系数 $\nu = 1/Re$ |
+| **施密特数范围 $Sc$** | $Sc \in [0.1, 1.0]$ | 标量扩散系数 $D = 1/(Re \cdot Sc)$ |
+| **保存帧时间间隔 $\Delta t$** | $\Delta t = 0.1$ | 模型输入和预测对应的宏观物理时间跨度 |
+| **求解器内部微步长 $\Delta \tau$** | $\Delta \tau \ll \Delta t$（通常 $\Delta \tau \sim 10^{-3}$） | 仅在 DNS 内部保证 CFL 数值稳定性，外部不可见 |
+
+### 2.2 数值轨迹如何生成
+数值仿真的生成流程如下：
+$$\text{初始剪切层与横向微扰} \longrightarrow \text{设定物理参数与周期边界} \longrightarrow \text{高精度拟谱法数值求解} \longrightarrow \text{按间隔 } \Delta t \text{ 存储完整轨迹}$$
+
+1. **初始场构造**：由反向双曲正切流速剪切层剖面与叠加在界面上的微弱随机高斯正弦扰动组成，触发剪切失稳；
+2. **求解器内部推进**：DNS 拟谱求解器在每个微步长 $\Delta \tau$ 内推进速度场，并逆解压力泊松方程 $\nabla^2 p = -\nabla \cdot [(\mathbf{u} \cdot \nabla)\mathbf{u}]$ 实现不可压缩投影；
+3. **轨迹存储**：每隔保存帧间隔 $\Delta t = 0.1$ 存储一帧离散物理场，形成包含 200 帧连续演化的完整数值参考轨迹。
+
+### 2.3 历史观测、仿真初态与未来真值的关系
+我们在下表中明确厘定各信息在数值仿真与模型中的不同作用：
+
+| 信息项 | 在数值仿真中的作用 | 在世界模型中的实际作用与约束 |
+| :--- | :--- | :--- |
+| **仿真时刻零的初始场** | 决定整条数值轨迹的起点 | 仅当滑动窗口实际包含时刻零时才作为历史帧被读取；不作为独立输入 |
+| **剪切层、扰动及层宽参数** | 离线构造不同仿真初态 | 属于求解器内部生成参数，当前不作为特征输入预测主干 |
+| **连续四帧历史状态 $q_{t-3:t}$** | 完整轨迹中的一段已知局部演化 | **预测模型的主要输入**（用于时空特征提取与动力学外推） |
+| **雷诺数 $Re$ 与施密特数 $Sc$** | 决定连续方程中的粘性与扩散系数 | 启用物理条件时，作为网络自适应层归一化调制输入 |
+| **周期边界条件** | 规定物理问题的空间拓扑 | 体现在固定场景、卷积 circular padding 与傅里叶谱算子中，非任意变化输入 |
+| **保存帧间隔 $\Delta t$** | 确定轨迹采样的时间尺度 | 用于真实时间对应及物理损失计算，当前确定性主干未将其显式编码为额外特征 |
+| **未来真实状态 $q^*_{t+1:t+H}$** | 数值求解得到的后续状态 | **用于训练监督、验证与测试评测；自由滚动推演时严禁回灌** |
+
+> **关键概念解释段落**：  
+> 预测窗口可以从轨迹内部任意合法时刻开始，因此，本次预测的当前状态不一定是仿真的初始状态。例如，输入保存时刻为 5.0、5.1、5.2 和 5.3 的四帧流场时，第一步预测对应 5.4，第二步对应 5.5。在自由滚动中，第二步使用模型生成的 5.4 状态更新历史，而不使用该时刻的真实状态纠正预测。
+
+![图 1（机制图）：数值仿真轨迹生成与世界模型样本构建关系图（上部：DNS 求解器离线生成管线；下部：轨迹切窗、模型动态输入、纯潜推演与因果单向监督隔离）](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/paper_synthesis/fig_data_generation_and_contract.png)
+
+### 2.4 数据规模、初态划分与归一化
+**关键工程与学术界定**：本项目的真实测试数据由 `outputs/splits/grouped_split.json` 统一管理。文件所在的物理目录名（如 `data/test/`）**不代表**其中的每条轨迹都属于测试分区。以 `data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5` 为例，根据初态聚类（Zero-IC-Leakage 协议）：
+- `traj_idx=0` 被划入训练集（Cluster 0）；
+- `traj_idx=1` 被划入测试集（Cluster 1）；
+- `traj_idx=2` 被划入训练集（Cluster 2）；
+- `traj_idx=3` 被划入验证集（Cluster 3）。
+因此，任何测试评测必须基于与检查点绑定的分区清单（`split_hash`），严禁根据文件名或目录名称推断样本身份。
+
+#### 表 2：实际数据划分与样本构建规格表
+| 数据分区 | 源轨迹条目数 | 对应初态簇数 | 历史长度 $L$ | 预测跨度 $H$ | 窗口切分步长 | 归一化统计量使用规则 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| **训练集 (Train)** | 33 | 27 | 4 帧 | 1 ~ 16 步 | 轨迹内部切窗，stride=1 | 仅使用此分区拟合通道均值与标准差 |
+| **验证集 (Val)** | 6 | 4 | 4 帧 | 1 ~ 16 步 | 初态与训练集隔离，stride=2 | 冻结使用训练集统计量，禁止重新拟合 |
+| **测试集 (Test)** | 5 | 4 | 4 帧 | 30 步滚动 | 初态完全独立，stride=1 | 冻结使用训练集统计量，严防信息泄漏 |
+
+![现有图 1：典型二维剪切层流动 4 通道真实参考流场演化快照矩阵（从上至下依次为流向速度 u、法向速度 v、流体压力 p、被动标量 s）](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/dataset_viz/field_snapshots.png)
+
+*现有图 1 读图说明*：各行对应一个状态变量，各列表示不同物理演化时刻。可清晰观察到初始水平剪切层在扰动诱导下逐渐卷起、失稳并形成局部高涡量旋涡对；压力场在涡核中心形成显著低压陷阱；被动标量被卷吸形成微细条带。此为数值求解得到的参考轨迹，不是模型预测结果。注意不同子图的色标范围因幅值演化略有不同。
+
+---
+
+## 03 模型架构与预测方法
+
+### 3.1 整体架构与张量变化
+模型由共享的空间表示基础主干与可选的实验分支构成。共享主干由空间编码器、空间—时间分解状态转移网络和空间解码器组成。
+
+![图 2（机制图）：流场世界模型整体架构图：共享基础主干拓扑与独立扩展实验分支及参数冻结矩阵](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/paper_synthesis/fig_model_architecture_detailed.png)
+
+在默认训练路径下，数据流在各模块间的精确张量规格流转如下：
+
+$$\underbrace{B \times 4 \times 4 \times 128 \times 256}_{\text{历史物理场输入 } q_{t-3:t}} \xrightarrow[\text{Encoder2D (Frozen)}]{64\times \text{ 周期卷积压缩}} \underbrace{B \times 4 \times 64 \times 16 \times 32}_{\text{历史潜状态序列 } Z_{t-3:t}}$$
+
+$$\underbrace{B \times 4 \times 64 \times 16 \times 32}_{\text{输入时空状态转移网络}} \xrightarrow[\text{LatentSTTransformer (Trainable)}]{\text{AdaLN 条件调制}} \underbrace{B \times 1 \times 64 \times 16 \times 32}_{\text{下一潜状态预测 } \widehat{Z}_{t+1}}$$
+
+$$\underbrace{B \times 1 \times 64 \times 16 \times 32}_{\text{下一潜状态}} \xrightarrow[\text{Decoder2D (Frozen)}]{8\times \text{ 双线性插值上采样 + 周期残差卷积}} \underbrace{B \times 1 \times 4 \times 128 \times 256}_{\text{下一时刻物理场 } \widehat{q}_{t+1}}$$
+
+#### 表 3：网络结构及张量规格表
+| 子模块名称 | 输入张量尺寸 | 输出张量尺寸 | 核心操作与层级 | 结构实现特性 |
+| :--- | :--- | :--- | :--- | :--- |
+| **空间编码器 (Encoder2D)** | $(B, 4, 128, 256)$ | $(B, 64, 16, 32)$ | 3 级步幅为 2 的周期残差卷积块，通道由 4 升至 64 | 空间面积下采样 64 倍 |
+| **物理条件网络 (Embedding)**| $(B, 2)$ | $(B, 128)$ | 2 层 MLP，输入 $[\log_{10} Re, \log_{10} Sc]$，生成条件嵌入 | 零初始化调制投影 |
+| **时空主干 (LatentSTTransformer)**| $(B, L, 64, 16, 32)$| $(B, 1, 64, 16, 32)$| 6 层空间—时间分解注意力，AdaLN 调制，隐藏维 256 | 分离空间潜网格与时序维度 |
+| **空间解码器 (Decoder2D)** | $(B, 64, 16, 32)$ | $(B, 4, 128, 256)$ | 3 级 UpBlock2D（双线性插值 2x + 周期卷积 + 残差块） | 累计放大 8 倍；`project_pressure=False` |
+
+### 3.2 空间编码、时序融合与物理条件
+1. **空间编码**：采用双周期卷积填充（`padding_mode='circular'`），确保流场几何边界的连续性；采用 3 级残差块将空间面积压缩 64 倍；潜流形依然保留 $16 \times 32$ 的二维空间相对布局，保留流体结构的局部平移等变性。
+2. **时序融合（空间—时间分解注意力）**：
+   * 空间多头自注意力在同一时刻的不同空间潜位置之间计算相互作用；
+   * 时间多头自注意力在同一潜位置的历史时刻之间融合信息；
+   * 避免直接展平整个 3D 张量造成的二次方显存爆炸，且注意力不拆分 $x, y$ 轴。
+3. **物理条件调制**：
+   * 物理参数通过**采用零初始化调制投影的自适应层归一化（AdaLN）**注入隐藏特征：
+     $$\text{out} = (1 + \gamma) \cdot \text{LayerNorm}(x) + \beta$$
+   * 调制投影层的线性层权重与偏置显式零初始化，使网络在初始阶段等价于标准归一化，确保数值稳定性。
+4. **解码器与压力处理位置**：
+   * 空间解码器由 3 级 `UpBlock2D` 构成，每级包含 $2\times$ 双线性插值上采样、周期填充卷积与残差块，实现各空间方向累计 $8\times$ 放大；
+   * 动力学训练与推理前向过程中，解码器实例化参数明确设置为 `project_pressure=False`，内部不进行硬投影；
+   * **压力零均值规范属于评测协议后处理步骤**：在输出张量反归一化还原为真实物理量后，分别对预测压力与真值压力减去空间均值，以对齐自由规范常数。
+
+### 3.3 从一步预测到多步自由滚动
+在多步自回归推演中，我们采用纯潜空间固定长度缓存更新机制：
+
+$$\text{步骤 1:} \quad [Z_{t-3}, Z_{t-2}, Z_{t-1}, Z_t] \longrightarrow \widehat{Z}_{t+1}$$
+
+$$\text{步骤 2:} \quad [Z_{t-2}, Z_{t-1}, Z_t, \widehat{Z}_{t+1}] \longrightarrow \widehat{Z}_{t+2}$$
+
+$$\text{步骤 3:} \quad [Z_{t-1}, Z_t, \widehat{Z}_{t+1}, \widehat{Z}_{t+2}] \longrightarrow \widehat{Z}_{t+3}$$
+
+![图 3（机制图）：自由滚动推演与训练条件机制对照图（左侧：纯潜空间 FIFO 队列更新；右上：真实历史 vs 自生成历史微调条件区别；右下：概率采样系综轴与连续流匹配）](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/paper_synthesis/fig_rollout_and_training_mechanisms.png)
+
+> **关键机制说明**：  
+> 真实历史只在开始时编码一次，之后将预测潜状态写回固定长度缓存；自由滚动期间不读取真实未来，也不要求每一步都解码后重新编码。现有实现先完成潜空间滚动，再解码输出预测序列。后续每一步均以模型此前生成的潜状态为条件。
+
+### 3.4 损失函数、监督训练机制与方程残差设计
+确定性主干的损失函数由物理场基础误差项与谱空间导数项构成：
+
+$$\mathcal{L} = \sum_{h=1}^H w_h \mathcal{L}_{\mathrm{field}, h} + \lambda_{\mathrm{div}} \mathcal{L}_{\mathrm{div}} + \lambda_\omega \mathcal{L}_\omega$$
+
+其中：
+1. **基础场值损失**：$\mathcal{L}_{\mathrm{field}, h} = \frac{1}{4} \sum_{c=1}^4 \|\widehat{q}_{t+h, c} - q^*_{t+h, c}\|_1$；
+2. **谱不可压缩散度损失**：$\mathcal{L}_{\mathrm{div}} = \|\nabla \cdot \widehat{\mathbf{u}}\|_2^2 = \|\mathcal{F}^{-1}(i k_x \widehat{u} + i k_y \widehat{v})\|_2^2$；
+3. **谱涡量损失**：$\mathcal{L}_\omega = \|\widehat{\omega} - \omega^*\|_2^2 = \|\mathcal{F}^{-1}(i k_x \widehat{v} - i k_y \widehat{u}) - \omega^*\|_2^2$。
+
+#### 连续方程残差（PDE-Controlled）构造与约束：
+在方程微调分支中，基于谱导数计算物理动量残差与标量输运残差：
+$$\mathcal{R}_{\text{mom}} = \frac{\widehat{\mathbf{u}}_{t+1} - \mathbf{u}_t}{\Delta t} + (\mathbf{u} \cdot \nabla)\mathbf{u} + \nabla p - \frac{1}{Re}\nabla^2\mathbf{u}$$
+$$\mathcal{R}_{\text{tracer}} = \frac{\widehat{s}_{t+1} - s_t}{\Delta t} + (\mathbf{u} \cdot \nabla)s - \frac{1}{Re \cdot Sc}\nabla^2 s$$
+$$\mathcal{L}_{\text{PDE}} = \lambda_{\text{mom}}\|\mathcal{R}_{\text{mom}}\|_2^2 + \lambda_{\text{tracer}}\|\mathcal{R}_{\text{tracer}}\|_2^2$$
+
+> **代码约束与设置澄清**：  
+> 方程残差监督**可以用于多步预测（如项目已有的 $H=12$ 受控实验）**。当前代码实现中明确要求 `pushforward_steps = 0`，**不允许与非零推前预热同时启用**。这是为了避免推前预热使得预测时间起点离开历史 $t_0$ 边界后，方程残差的时间差分基准与历史末帧产生时间步长错位。
+
+#### 表 4：训练阶段、可训练参数、损失组成与训练参数隔离矩阵
+| 训练阶段 / 实验分支 | 可训练参数模块 (Trainable) | 冻结参数模块 (Frozen) | 启用的损失函数项 | 训练周期与批大小 |
+| :--- | :--- | :--- | :--- | :--- |
+| **阶段 1：空间自编码器** | Encoder2D, Decoder2D | 无 (端到端优化) | $\mathcal{L}_{\text{field}} + 0.1\mathcal{L}_\omega + \text{Gauge}$ | 50 Epochs, Batch=16 |
+| **阶段 2：单步基线 (E0)**| LatentSTTransformer | Encoder2D, Decoder2D | 单步 $\mathcal{L}_{\text{field}}$ ($H=1$) | 40 Epochs, Batch=8 |
+| **阶段 2：多步基线 (E1)**| LatentSTTransformer | Encoder2D, Decoder2D | 多步 $\mathcal{L}_{\text{field}}$ ($H=2$ 或 $4$) | 40 Epochs, Batch=8 |
+| **阶段 2：全物理约束 (E4)**| LatentSTTransformer | Encoder2D, Decoder2D | $\mathcal{L}_{\text{field}} + 0.01\mathcal{L}_{\text{div}} + 0.05\mathcal{L}_\omega$ | 40 Epochs, Batch=8 |
+| **阶段 3：方程残差微调** | LatentSTTransformer | Encoder2D, Decoder2D | $\mathcal{L}_{\text{base}} + \lambda_{\text{mom}}\mathcal{L}_{\text{mom}} + \lambda_{\text{tr}}\mathcal{L}_{\text{tr}}$ ($H=12, \text{pushforward}=0$) | 50 Epochs, Batch=4 |
+| **阶段 4：概率方差头 (G1)**| **VarianceHead2D 独占更新** | **确定性主干, 编解码器全冻结** | 潜空间高斯负对数似然 (Latent NLL) | 30 Epochs, Batch=8 |
+| **阶段 5：残差流匹配 (FM)**| **潜速度场网络 $v_\theta$ 独占更新** | **确定性主干, 编解码器全冻结** | 流匹配速度场回归损失 $\mathcal{L}_{\text{FM}}$ | 40 Epochs, Batch=4 |
+
+### 3.5 概率预测与残差流匹配模型说明
+1. **潜空间高斯分布与非线性解码**：
+   * 高斯模型的方差预测与随机采样严格在潜空间进行：
+     $$z_{t+1} \mid z_{\text{hist}}, c \sim \mathcal{N}\left(\mu_t, \operatorname{diag}(\sigma_t^2)\right)$$
+     $$\widehat{q}_{t+1}^{(k)} = \mathcal{D}_\psi\left(z_{t+1}^{(k)}\right)$$
+   * **空间属性与非线性解码澄清**：因为空间解码器 $\mathcal{D}_\psi$ 是包含双线性插值与多层非线性激活的复杂网络，潜变量对角高斯分布并不直接等价于物理场服从对角高斯分布。解码器是非线性映射，因此不能将预测潜状态均值的解码结果，默认等同于解码后物理场的系综均值。两者不保证相等，需要分别计算。
+2. **残差流匹配连续生成**：
+   * 区分物理预测时间 $t$ 与流匹配生成内部连续时间 $\tau \in [0, 1]$；
+   * 在潜空间求解神经 ODE：$\frac{dZ}{d\tau} = v_\theta(Z, \tau; Q, c)$。
+
+---
+
+## 04 实验设计与结果评估
+
+### 4.1 统一评测协议
+所有比较登记相同的数据划分、输入信息、网格与归一化。
+* **指标定义**：方差归一化均方根误差 (VRMSE)、散度均方根 (Divergence RMS)、涡量 RMSE、负对数似然 (NLL) 与名义区间覆盖率；
+* **图件表示规范**：多随机种子曲线中的阴影严格表示**均值加减一个标准差（$\pm 1\sigma$）**，不代表 95% 置信区间。
+
+---
+
+### 4.2 空间重构实验（非预测实验）
+我们先检验编码—解码是否保留场值和速度梯度，再讨论时间预测。
+
+![现有图 2：空间自编码器在测试集样本上的闭环重构对比云图（第一行：真实场；第二行：重构场；第三行：五通道绝对误差场）](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/representation/sample_autoencoder_reconstruction.png)
+
+#### 表：空间自编码器测试集分通道重构表现（$N_{\text{test}}=45$ 轨迹切片，来源：representation_metrics.json）
+| 物理通道 | 验证集 RMSE | 验证集 VRMSE | 测试集 RMSE | 测试集 VRMSE |
+| :--- | :---: | :---: | :---: | :---: |
+| 流向速度 $u$ | 0.0232 | 0.0924 | 0.0221 | 0.0884 |
+| 法向速度 $v$ | 0.0158 | 0.1294 | 0.0152 | 0.1245 |
+| 规范压力 $p$ | 0.0048 | 0.0638 | 0.0046 | 0.0612 |
+| 被动标量 $s$ | 0.0245 | 0.1389 | 0.0232 | 0.1318 |
+| **四通道平均** | **0.0171** | **0.1061** | **0.0163** | **0.1015** |
+| 涡量 RMSE ($\|\omega - \omega^*\|$) | \multicolumn{2}{c}{0.2215} | \multicolumn{2}{c}{0.2140} |
+| 压力零均值漂移误差 ($|\bar{p}|$) | \multicolumn{2}{c}{$1.15 \times 10^{-7}$} | \multicolumn{2}{c}{$1.08 \times 10^{-7}$} |
+
+* **结论边界**：重构实验仅检验空间降采样是否保留足够的几何与梯度信息，**不构成未来状态预测的证据**。
+
+---
+
+### 4.3 训练收敛实验
+我们同时检查训练目标与统一验证误差，判断最佳模型是否出现在训练结束之前。
+
+![现有图 3：Closure-R4 训练阶段各物理消融组（E0~E4）在三随机种子下的损失下降轨迹与收敛诊断曲线](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/closure_r4/training_convergence_curves.png)
+
+* **结论边界**：验证集最优轮次普遍出现在第 25~32 轮之间，必须依据验证指标而非最终训练轮次保存检查点。
+
+---
+
+### 4.4 独立测试样本单步预测实验
+在相同四帧历史下，比较真实下一帧与模型预测，定位误差集中于哪些物理结构。
+
+![图 4（实验图）：测试集独立样本单步预测真实对齐评估云图（Latent World Model E4，第一列：下一帧真实场；第二列：模型单步预测；第三列：逐点绝对误差）](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/paper_synthesis/fig_single_step_prediction_eval.png)
+
+#### 样本身份与可追溯信息：
+- **数据源与轨迹身份**：`data/test/shear_flow_Reynolds_1e4_Schmidt_1e-1.hdf5` 内的 **`traj_idx=1`**，对应初态 **`cluster_id=1`**（在 `outputs/splits/grouped_split.json` 中确认为留出测试集样本，`split_hash: 41fbe6ebe7edd460b4353fd6cf20ad064f1222fdcb4558b04ff1a50be390b93d`）；
+- **时间窗口**：起始时刻帧 $t=0..3$ 作为历史输入（$L=4$），目标为第 $t=4$ 帧真值（单步预测 $H=1$）；
+- **模型检查点**：`outputs/checkpoints/dynamics/closure_r4/ablation_E4_full_physics/latent_transformer/best_vrmse_mean.pt`（SHA256: `821891674ea80383ba07f02edbd1005e1005fc2a6b084b4146969c4f5570ca86`）；
+- **归一化统计量**：`outputs/normalization/stats_grouped.pt`（哈希严格匹配）；
+- **评测协议与压力处理**：前向推理时解码器设置 `project_pressure=False`；反归一化后执行测试协议规定的后处理空间去均值操作（`zero_mean_pressure_gauge`）；
+- **真实保存数据**：预测数组保存于 `outputs/figures/paper_synthesis/single_step_real_prediction_arrays.npz`；元数据记录于 `outputs/figures/paper_synthesis/single_step_real_prediction_provenance.json`。
+
+#### 表：该独立测试样本的单步实际预测指标（单案例诊断）
+| 物理通道 | 该样本单步 VRMSE | 该样本单步 RMSE | 局部误差分布特征 |
+| :--- | :---: | :---: | :--- |
+| 流向速度 $u$ | 0.0426 | 0.0108 | 剪切过渡带轻微位移 |
+| 法向速度 $v$ | 0.4455 | 0.0215 | 横向卷吸波峰处幅值偏差 |
+| 规范压力 $p$ | 0.3746 | 0.0028 | 低压涡核中心处轻微偏浅 |
+| 被动标量 $s$ | 0.0851 | 0.0216 | 细丝条带卷吸前沿 |
+| **四通道平均** | **0.2370** | **0.0142** | 涡量 RMSE = 1.0480 |
+
+> **审慎声明**：  
+> 上述数值为该特定测试样本的切片诊断结果，**不能与后续全测试集多轨迹、多随机种子的加权平均值（$0.0532 \pm 0.0088$）混淆**。单步精度良好仅证明状态转移网络具备短程推演能力，无法保证多步自回归时不发生累积发散。
+
+---
+
+### 4.5 多步自由滚动与学术基线比较
+我们检验无真值回灌时的误差积累，同时比较持续性预测、物理网格时空模型、二维傅里叶神经算子和潜空间模型。
+
+![现有图 4：30 步自回归长程推演对比基线（Persistence B0 与 FNO-2D）的 8 面板物理指标曲线](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/benchmark/rollout_benchmark_curves.png)
+
+#### 表 5-1：架构与基线模型在自回归滚动中的定量表现（依据 outputs/tables/table_4_architecture_ablation.tex）
+| 模型架构 | 参数量 | 物理评价指标 | Step 1 ($t=1$) | Step 5 ($t=5$) | Step 10 ($t=10$) | Step 20 ($t=20$) | Step 30 ($t=30$) |
+| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: |
+| **Persistence 基线** | — | 全场平均 VRMSE | 0.0299 | 0.1390 | 0.2294 | 0.3593 | 0.4879 |
+| | | 散度 RMSE ($\|\nabla \cdot \mathbf{u}\|$) | 4.6998 | 4.6998 | 4.6998 | 4.6998 | 4.6998 |
+| | | 涡量 RMSE ($\|\omega - \omega^*\|$) | 0.0662 | 0.3177 | 0.4108 | 0.4107 | 0.4630 |
+| **Direct ST (网格时空模型)** | 7.73M | 全场平均 VRMSE | 0.8511 | 1.9948 | 6.3670 | 22.3700 | 26.8328 |
+| | | 散度 RMSE ($\|\nabla \cdot \mathbf{u}\|$) | 8.9352 | 16.6996 | **33.2842** | 79.9667 | **89.7318** |
+| | | 涡量 RMSE ($\|\omega - \omega^*\|$) | 6.9586 | 11.0093 | 26.6111 | 70.4159 | 81.1527 |
+| **FNO-2D (傅里叶神经算子)** | 16.80M | 全场平均 VRMSE | 0.6450 | 0.7575 | 0.8385 | 0.9580 | 1.0720 |
+| | | 散度 RMSE ($\|\nabla \cdot \mathbf{u}\|$) | 0.1708 | 0.0913 | 0.0779 | 0.0559 | **0.0389** |
+| | | 涡量 RMSE ($\|\omega - \omega^*\|$) | 0.1170 | 0.3241 | 0.5166 | 0.6903 | 0.7961 |
+| **潜世界模型 E0 (单步, $H=1$)** | 9.75M | 全场平均 VRMSE | 0.0446 | 0.8473 | 1.3356 | 1.4044 | 1.2572 |
+| | | 散度 RMSE ($\|\nabla \cdot \mathbf{u}\|$) | 0.1644 | 1.3167 | 0.9851 | 0.5415 | 0.0654 |
+| | | 涡量 RMSE ($\|\omega - \omega^*\|$) | 0.4882 | 2.5398 | 2.4354 | 2.5371 | 2.9736 |
+| **潜世界模型 E4 (联合物理约束)** | 9.75M | 全场平均 VRMSE | 0.0532 $\pm$ 0.0088 | 0.4375 $\pm$ 0.1502 | 1.1607 $\pm$ 0.4868 | 1.2751 $\pm$ 0.1776 | 1.5560 $\pm$ 0.1334 |
+| | | 散度 RMSE ($\|\nabla \cdot \mathbf{u}\|$) | 0.1455 $\pm$ 0.0189 | 0.7818 $\pm$ 0.2465 | 2.0637 $\pm$ 0.9234 | 2.2140 $\pm$ 1.2845 | **1.8302 $\pm$ 1.3583** |
+| | | 涡量 RMSE ($\|\omega - \omega^*\|$) | 0.2847 $\pm$ 0.0345 | 1.4191 $\pm$ 0.4512 | 3.5561 $\pm$ 1.6115 | 3.5439 $\pm$ 1.3137 | 3.9015 $\pm$ 1.3585 |
+
+* **读图与客观结论**：
+  1. 物理网格时空模型在第 10 步散度增至 33.2842，第 30 步达到 89.7318，场误差恶化至 26.8328，表现出高频色散发散；
+  2. 二维傅里叶神经算子通过频模截断抑制了散度膨胀（第 30 步散度为 0.0389），但其单步场误差较高（VRMSE=0.6450），长程推演存在明显的能量耗散和平滑；
+  3. 潜空间物理约束模型 E4 在第 1 步取得较低的初始场误差（VRMSE=$0.0532$），第 30 步散度为 $1.8302 \pm 1.3583$，相较网格时空模型显著抑制了色散，但散度数值高于具有频模硬截断的 FNO-2D；
+* **结论边界**：各模型在不同指标上各有侧重，潜空间模型在初始保真度与长程抗色散上取得了一定平衡，但并未在所有预测步长和所有指标上实现一致最优。
+
+---
+
+### 4.6 物理损失消融与频域诊断
+我们分别检验散度和涡量监督改变了什么，是否改善结构但未改善全部场值指标。
+
+![现有图 5：Closure-R4 物理损失消融在三随机种子下的 4 面板误差曲线（带 ±1σ 阴影）](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/closure_r4/closure_r4_physics_ablation_tri_seed_curves.png)
+
+![现有图 7：E0 单步基线 vs E4 全物理约束模型在 Step 10 长程推演下的定性涡量场比对云图](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/closure_r4/compare_e0_vs_e4_vorticity.png)
+
+![现有图 6：各向异性能谱流向与展向耗散比率演化曲线](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/manuscript/directional_spectral_ratio_curves.png)
+
+#### 表 5-2：物理损失消融多随机种子综合表现（Seeds 42, 43, 44，来源：table_2_multi_seed_ablation.tex）
+| 消融配置代号 | 启用的损失组合 | 单步 VRMSE (Step 1) | 第 5 步 VRMSE | 第 10 步 VRMSE | 第 30 步散度 RMSE | 第 30 步涡量 RMSE |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **E0 (Single-Step)** | 单步场损失 ($H=1$) | **0.0446** | 0.8473 | 1.3356 | 0.0654 | 2.9736 |
+| **E1 (Rollout-H2)** | 两步场损失 ($H=2$) | 0.0449 $\pm$ 0.0048 | 0.5845 $\pm$ 0.4449 | 1.0436 $\pm$ 0.4329 | 1.9192 $\pm$ 1.5992 | 4.7293 $\pm$ 1.5311 |
+| **E2 (+Divergence)**| 场损失 + 谱散度 | 0.0483 $\pm$ 0.0062 | 0.5012 $\pm$ 0.2105 | 1.1240 $\pm$ 0.3802 | 1.5420 $\pm$ 0.8920 | 4.1205 $\pm$ 1.2104 |
+| **E3 (+Vorticity)** | 场损失 + 谱涡量 | 0.0510 $\pm$ 0.0075 | 0.4850 $\pm$ 0.1802 | 1.1902 $\pm$ 0.4201 | 2.1504 $\pm$ 1.1025 | 3.7501 $\pm$ 1.1502 |
+| **E4 (Full-Physics)**| 场损失 + 谱散度 + 谱涡量 | 0.0532 $\pm$ 0.0088 | **0.4375 $\pm$ 0.1502**| 1.1607 $\pm$ 0.4868 | 1.8302 $\pm$ 1.3583 | 3.9015 $\pm$ 1.3585 |
+
+* **读图与审慎结论**：
+  * 联合散度与涡量监督（E4）在第 5 步的中程 VRMSE 上取得收益（0.4375 vs E1 的 0.5845），并在第 10 步定性涡量比对中抑制了破碎伪涡；
+  * **但场误差并非在所有步长上都更低**：单步 VRMSE 从 E0 的 0.0446 略微升高至 E4 的 0.0532；第 10 步与第 30 步的场值误差与 E1 互有交叠；
+  * 图件阴影表示均值加减一个标准差（$\pm 1\sigma$）；
+* **结论边界**：联合物理约束在抑制特定非物理结构退化上有明确收益，但不能概括为在所有步长、所有指标上的一致绝对胜出。
+
+---
+
+### 4.7 训练跨度与检查点选择
+我们区分更长训练展开带来的收益与选型规则带来的收益。
+
+![现有图 8：Horizon-R1 跨度消融下短程最优与长程指定视界检查点的长程指标对比柱状图](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/horizon_r1/horizon_r1_checkpoint_selection.png)
+
+![现有图 9：水平速度 u 在超长时序展开下的定性云图对照](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/h16_comparison_v2/comparison_fixed_ref_u.png)
+
+* **选型规则澄清**：当训练展开长度 $H>1$ 时，普通最优检查点（Short-best）依据**前 $H$ 步的平均 VRMSE** 选择；只有 $H=1$ 时才是真正的单步指标。长程检查点（Long-best）则根据指定长程视界诊断步（第 10、20、30 步）的平均 VRMSE 选择。
+
+---
+
+### 4.8 连续 Navier-Stokes 与示踪物方程残差受控微调
+我们同时回答“新增残差是否优于同预算继续训练”和“候选是否超过冻结基准”。
+
+![现有图 14：PDE 受控实验三面板综合柱状图（全场误差、物理残差阻尼、参数敏感性）](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/pde_controlled/figure_pde_controlled_comparison.png)
+
+![现有图 16：连续性散度与示踪物物理残差空间阻尼对比图](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/pde_controlled/sample_pde_residuals_comparison.png)
+
+#### 表 5-3：同预算下三方受控微调评估对照（预测视界 $H=12, \text{pushforward\_steps}=0$）
+| 候选模型配置 | 训练预算 | 示踪物扩散残差 RMS | 散度残差 RMS | 全场 VRMSE (Step 1) | 裁定结论 |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **D0 (冻结确定性基准)** | 0 (初始基准) | 0.0458 | 0.0382 | **0.3615** | **当前主路径推荐保留基准** |
+| **P0 (继续训练对照组)** | 50 Epochs | 0.0462 (+0.87%) | 0.0390 (+2.09%) | 0.3708 (+2.57%) | 出现微弱继续训练漂移 |
+| **PDE (方程残差微调组)**| 50 Epochs | **0.0448 (-2.18%)**| **0.0375 (-1.83%)**| 0.3702 (+2.42%) | **具有局部正则化作用，未超冻结基准** |
+
+* **读图与结论**：
+  * 相对同预算继续训练对照组 P0，新增方程残差降低了部分残差（示踪物残差下降 2.18%）；
+  * **但相对冻结基准 D0，PDE 微调的总体场误差 VRMSE 仍增加了 2.42%**；
+* **结论边界**：实验支持方程残差具有局部物理正则化作用，**但不支持用该候选替换冻结基准**。
+
+---
+
+### 4.9 高斯概率预测实验
+我们分别评价分布评分、区间校准和样本物理质量，不以其中一项代替整体判断。
+
+![现有图 10：ProbLatent-R1 Phase 3 综合成果总图（长程 VRMSE 演化、预测不确定度 vs 误差空间相关性、置信区间校准曲线与集合生成样本）](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/probabilistic/figure_summary_phase3.png)
+
+![现有图 12：空间预测不确定度标准差场 σ 与实际经验预测误差绝对值对比云图](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/probabilistic/sample_gaussian_uncertainty_vs_error.png)
+
+![现有图 13：流向中截线剖面的 50%、80%、90%、95% 置信区间条带与真实观测曲线对比](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/probabilistic/sample_gaussian_prediction_intervals.png)
+
+#### 表 5-4：高斯概率模型单步潜空间评测结果（来源：phase3_probabilistic_evaluation.json）
+| 名义预测区间水平 | 实际经验覆盖率 (PICP) | 绝对校准偏差 (ACE) | 评估结论与状态 |
+| :---: | :---: | :---: | :--- |
+| **50%** | **26.5051%** | **23.4949 个百分点** | **严重欠覆盖（中心区间过窄）** |
+| **80%** | **82.6432%** | **2.6432 个百分点** | 轻微过覆盖 |
+| **90%** | **94.9432%** | **4.9432 个百分点** | 过覆盖（校准误差较基准未改善） |
+| **95%** | **98.0074%** | **3.0074 个百分点** | 轻微过覆盖 |
+| **负对数似然变化 (Delta NLL)** | \multicolumn{2}{c}{**-0.197432 nats/latent element**} | 概率评分相对固定方差显著改善 |
+
+* **读图与真实结论**：
+  * 条件异方差模型改善了单步潜空间的概率评分（NLL 降低 0.1974 nats/element）；
+  * **但区间校准并未同步改善**：50% 名义区间实际覆盖率仅为 26.51%（欠覆盖 23.49 个百分点），80% 和 90% 名义区间则分别出现约 2.64 和 4.94 个百分点的过覆盖；
+* **结论边界**：条件方差有效聚焦于强剪切界面，但潜变量高斯对角假设无法完全拟合中心厚尾分布，且解码后物理场分布进一步失配。
+
+---
+
+### 4.10 自生成历史条件流匹配（FM-R2）
+我们检验改变训练历史来源是否改善自由滚动表现，并严格依据预注册协议分别报告主要终点与次要指标。
+
+![现有图 18：预注册多随机种子主要结局图（h=10 系综误差、h=10 能谱误差及 Seed 45 反转、h=5 短程误差，严格区分探索种子 42 与验证种子 43-46）](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/paper/fig2_primary_multiseed.png)
+
+![现有图 19：预指定次要物理指标图（呈现 24 对单轨迹配对斜率细线与 4 个种子的均值粗线，展示 4/4 种子全面改善）](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/paper/fig3_secondary_physics.png)
+
+![现有图 20：潜流匹配模型（FM-R2）定性推演流场高保真对比云图（真实场 vs C2 标准流匹配 vs R2-A 自条件流匹配）](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/paper/fig4_qualitative_rollout_fields.png)
+
+#### 表 5-5：预注册流匹配多随机种子主要终点与次要指标统计结果表（来源：fm_r2_multiseed_trajectory_paired_analysis.json）
+> **统计口径与效应量说明**：
+> 1. 正式推断严格统一采用验证种子层级均值效应（$G=4, \text{df}=3$ 单样本双侧 $t$ 检验，提取字段 `cluster_p_value` 与 `cluster_ci_95`），推断微调随机种子间的效应稳定性，杜绝与 24 个单轨迹配对检验（`standard_p_value`）混用。
+> 2. 表中 95% 置信区间对应**原指标均值差（绝对效应量）的置信区间**：$\Delta M = M_{\text{自生成历史条件}} - M_{\text{真实历史条件}}$，而非相对变化百分比的置信区间。
+
+| 协议编号 | 具体终点指标名称 | 对应代码指标字段 | 统计对象与推断层级 | 相对变化 (%) | 原指标均值差的 95% 置信区间 | 种子层级 $p$ 值 | 统计结论与学术披露 |
+| :---: | :--- | :--- | :--- | :---: | :---: | :---: | :--- |
+| **主要终点 1** | 第 10 步系综均值场 VRMSE | `primary1_h10_ens_vrmse` | 系综均值场误差（种子层级） | **-3.14%** | `[-0.1094, 0.0251]` | $p=0.140$ | 3/4 种子改善，未达 0.05 统计显著门槛 |
+| **主要终点 2** | 第 10 步系综均值场能谱相对误差 | `primary2_h10_ens_spec_rel_err` | 系综均值场能谱（种子层级） | **-5.58%** | `[-0.0132, 0.0077]` | $p=0.462$ | **Seed 45 明确反转 (+11.99%)**，未达全种子改善 |
+| **主要终点 3** | 第 10 步单成员能谱相对误差 | `primary3_h10_indiv_spec_rel_err` | 单成员能谱均值（种子层级） | **-5.21%** | `[-0.0122, 0.0064]` | $p=0.392$ | 3/4 种子改善，离散度较大，未达显著门槛 |
+| **主要终点 4** | 第 5 步系综均值场 VRMSE | `primary4_h5_ens_vrmse` | 短程第 5 步误差（种子层级） | **-0.18%** | `[-0.0262, 0.0238]` | $p=0.885$ | 当前复现队列未检测到明确差异；未进行等价性验证 |
+| **次要指标** | 单样本 VRMSE, 散度 RMS, 涡量 RMSE | `sample_vrmse_h10`, `div_rms_h10`, `vort_rmse_h10` | 24 对单轨迹配对推演指标 | 均值下降 | 见下文详细报告 | — | 三项预指定次要指标在四个复现种子的均值上均下降；轨迹级差异另行展示 |
+
+* **统计推断与学术客观定论**：在固定父模型和验证轨迹集合下，四项主要终点的平均变化分别为 −3.14%、−5.58%、−5.21% 和 −0.18%。按四个复现种子的均值效应进行推断，对应双侧 $p$ 值分别为 0.140、0.462、0.392 和 0.885，均未达到 0.05 水平。三个次要物理指标的改善应另行报告，不替代主要终点的判断。这不表示“方法没有作用”或“两种方法等价”，而是当前队列尚未提供足够的主要终点证据；预注册协议也明确禁止由不显著直接推导等价。
+* **统计对象与反转归属澄清**：主要终点 2 是对系综均值场计算能谱，主要终点 3 则是对每个独立系综成员分别计算能谱后再求平均。两者属于不同统计量。**Seed 45 的 $+11.99\%$ 反转严格归属于主要终点 2（系综均值场能谱）**。
+* **读图与客观定论**：次要物理指标在 4/4 验证种子上均值呈现一致性下降；但主要终点中的能谱误差在 Seed 45 上发生反转。次要指标的均值改善不能替代主要终点判断，严格遵循预注册方案，认定该阶段尚未达到主要终点全种子显著改善标准。
+
+---
+
+## 05 问题分析与后续设计方向
+
+### 5.1 从失败案例识别误差类型
+我们进一步检查平均指标之外的代表案例，分析误差出现在什么位置、从哪个预测步开始积累。
+
+![现有图 23：全测试集最优案例、中位案例与最差发散案例的涡量场云图与 30 步累积发散曲线](file:///root/mzy/Flow%20Field%20Prediction%20in%20World%20Models/World-Model-FlowField-v1/outputs/figures/benchmark/failure_cases_analysis.png)
+
+#### 观察事实与待验证假设区分：
+1. **直接观察事实**：
+   * 误差主要集中在强剪切层交界面和涡核边缘；
+   * 在长程推演后期，涡核出现空间位置偏差（相位滞后）；
+   * 最差案例由于真实场自身背景方差极小，导致归一化 VRMSE 指标被数值放大，但绝对误差 RMSE 仍在有限范围（$\le 0.19$）。
+2. **待验证机制假设（非已证实结论）**：
+   * “空间编码压缩导致几何相位延迟”或“低维潜流形表达容量对极端强剪切失稳不足”目前仅作为后续实验的机理假设，尚需专门实验分离验证。
+
+### 5.2 将局限转化为可检验的后续任务
+
+#### 表 6：局限性识别与可检验的下一轮实验设计表
+| 当前识别的事实 | 待检验的科学问题 | 下一轮实验控制变量设计 | 主要考核终点指标 | 完成标准与判定门槛 |
+| :--- | :--- | :--- | :--- | :--- |
+| **阶段数据清单历史差异** | 不同历史结果是否基于相同划分？ | 在统一清单与划分指纹下重新评测 | 统一基线下的 30 步 VRMSE | 测试清单与划分指纹 100% 对齐 |
+| **物理监督与场值存在妥协** | 散度改善是否伴随场值精度代价？ | 固定模型容量，系统扫描物理权重 $\lambda$ | 散度、涡量 RMSE 与场值 VRMSE | 绘制 Pareto 前沿，确认权衡区间 |
+| **检查点评选规则存在分异** | 改善来自训练跨度还是选型规则？ | 统一评测各模型的短程与长程检查点 | 指定长程加权指标 $J_{\text{long}}$ | 分离展开步长与选型规则贡献量 |
+| **高斯模型窄区间严重欠覆盖** | 对角高斯是否无法刻画厚尾特征？ | 引入 Student-t 分布或混合高斯头 | 50% 与 90% 名义区间绝对覆盖率 | 50% 名义区间覆盖率达到 $45\% \sim 55\%$ |
+| **方程微调未超冻结基准** | 梯度尺度失衡是否限制了学习？ | 引入自适应梯度平衡优化 (GradNorm) | 全场 VRMSE 与示踪物平流扩散残差 | 全场误差不劣化且物理残差显著下降 |
+
+### 5.3 下一阶段：检验同一条件下的未来分布
+后续研究将从确定性剪切流推进至随机流场条件下的未来分布建模。现有 StocBench 数据审计包含单通道涡量轨迹及同一初态对应的 5,000 个单步真实未来样本。后续工作将优先建立单通道确定性基线，再比较固定方差、条件方差和残差生成模型，分别评价条件均值、方差及单成员物理结构。
+
+### 5.4 阶段结论
+本研究建立了从历史流场到未来状态的潜空间预测与诊断流程。
+
+实验表明，空间重构、单步精度、长程结构和概率质量需要分别验证；一种方法在某项指标上的改善，不必然转化为整体预测能力的提升。后续研究将优先统一数据与评测条件，再通过受控实验检验长程结构误差和条件未来分布，逐步明确模型能够可靠预测的范围。
+
+---
+
+# 附录：全套图件核验清单与数据对应表
+
+| 序号 | 报告内图号 | 对应文件路径 | 章节位置 | 数据源 / 检查点 / 分区 | 生成方式与状态 | 旧图演进关系说明 |
+| :---: | :--- | :--- | :---: | :--- | :--- | :--- |
+| **1** | **图 1 (机制图)** | `outputs/figures/paper_synthesis/fig_data_generation_and_contract.png` | 02.3 | DNS 离线管线与分组划分契约 | Matplotlib 架构生成 | **新生成机制图**：形式化定义数据生成与因果防火墙 |
+| **2** | **现有图 1** | `outputs/dataset_viz/field_snapshots.png` | 02.4 | `data/train` 真实参考流场切片 | 实际数值切片提取 | **保留既有图**：展示多通道剪切层物理演化真值 |
+| **3** | **图 2 (机制图)** | `outputs/figures/paper_synthesis/fig_model_architecture_detailed.png` | 03.1 | 架构代码、张量流转与参数状态表 | Matplotlib 架构生成 | **新生成机制图**：解耦主干拓扑与阶段训练/冻结矩阵 |
+| **4** | **图 3 (机制图)** | `outputs/figures/paper_synthesis/fig_rollout_and_training_mechanisms.png`| 03.3 | 潜 FIFO 算法与自条件训练机制 | Matplotlib 机制生成 | **新生成机制图**：解构纯潜推进、自条件微调与概率空间 |
+| **5** | **现有图 2** | `outputs/figures/representation/sample_autoencoder_reconstruction.png` | 04.2 | `representation_metrics.json` | 自编码测试推理输出 | **保留既有图**：空间表征保真度诊断（非预测实验） |
+| **6** | **现有图 3** | `outputs/figures/closure_r4/training_convergence_curves.png` | 04.3 | `training_convergence_summary.json` | 训练日志追踪与平滑 | **保留既有图**：三随机种子下各消融组收敛轨迹 |
+| **7** | **图 4 (实验图)** | `outputs/figures/paper_synthesis/fig_single_step_prediction_eval.png` | 04.4 | `data/test/...hdf5` (traj 1, cluster 1) + E4 检查点 | 真实 GPU 前向推理数组渲染 | **新生成实验图**：严格绑定测试集样本，附带完整溯源 |
+| **8** | **现有图 4** | `outputs/figures/benchmark/rollout_benchmark_curves.png` | 04.5 | `table_4_architecture_ablation.tex` | 30 步滚动评测记录 | **保留既有图**：基线对比（散度数值归属已核正） |
+| **9** | **现有图 5** | `outputs/figures/closure_r4/closure_r4_physics_ablation_tri_seed_curves.png` | 04.6 | `closure_r4_physics_ablation_tri_seed_summary.json`| 3 种子消融统计评测 | **保留既有图**：物理损失消融 4 面板误差（带 $\pm 1\sigma$） |
+| **10**| **现有图 6** | `outputs/figures/manuscript/directional_spectral_ratio_curves.png` | 04.6 | `directional_spectral_analysis.json` | 各向异性能谱分析 | **保留既有图**：流向与展向能量比率演化 |
+| **11**| **现有图 7** | `outputs/figures/closure_r4/compare_e0_vs_e4_vorticity.png` | 04.6 | E0 与 E4 第 10 步预测场切片 | 真实切片涡量对比 | **保留既有图**：第 10 步长程推演涡量拓扑定性对比 |
+| **12**| **现有图 8** | `outputs/figures/horizon_r1/horizon_r1_checkpoint_selection.png` | 04.7 | `horizon_r1_summary.json` | 短程 vs 长程选型对比 | **保留既有图**：短程视界 vs 长程视界检查点评选差异 |
+| **13**| **现有图 9** | `outputs/figures/h16_comparison_v2/comparison_fixed_ref_u.png` | 04.7 | H16 模型真实预测流场切片 | 预测切片对比大盘 | **保留既有图**：超长时序展开定性流场对照 |
+| **14**| **现有图 14**| `outputs/figures/pde_controlled/figure_pde_controlled_comparison.png` | 04.8 | `probe_pde_gradient_scales` 评测 | 三方受控定量对比 | **保留既有图**：全场误差、残差阻尼与参数敏感性柱状图 |
+| **15**| **现有图 16**| `outputs/figures/pde_controlled/sample_pde_residuals_comparison.png` | 04.8 | P0 vs PDE 物理残差切片 | 空间残差阻尼场 | **保留既有图**：物理残差空间分布对照 |
+| **16**| **现有图 10**| `outputs/figures/probabilistic/figure_summary_phase3.png` | 04.9 | `phase3_probabilistic_evaluation.json` | Phase 3 综合成果总图 | **保留既有图**：高斯概率模型长程误差、校准与集合生成总图 |
+| **17**| **现有图 12**| `outputs/figures/probabilistic/sample_gaussian_uncertainty_vs_error.png` | 04.9 | G1 模型单步测试推理切片 | 空间方差 vs 绝对误差 | **保留既有图**：空间不确定度与实际误差相关性云图 |
+| **18**| **现有图 13**| `outputs/figures/probabilistic/sample_gaussian_prediction_intervals.png` | 04.9 | G1 模型中截线抽样切片 | 置信区间与观测曲线 | **保留既有图**：50%~95% 置信区间条带剖面图 |
+| **19**| **现有图 18**| `outputs/figures/paper/fig2_primary_multiseed.png` | 04.10 | 流匹配预注册多随机种子评测 | 主要终点评测面板 | **保留既有图**：多随机种子主要终点及 Seed 45 能谱反转 |
+| **20**| **现有图 19**| `outputs/figures/paper/fig3_secondary_physics.png` | 04.10 | 24 对单轨迹配对推演数据 | 次要物理指标图 | **保留既有图**：次要物理指标 24 对单轨迹配对斜率图 |
+| **21**| **现有图 20**| `outputs/figures/paper/fig4_qualitative_rollout_fields.png` | 04.10 | C2 vs R2-A 预测切片 | 定性高保真流场云图 | **保留既有图**：潜流匹配模型定性推演流场对照 |
+| **22**| **现有图 23**| `outputs/figures/benchmark/failure_cases_analysis.png` | 05.1 | `failure_cases_analysis.json` | 测试集最优/中位/最差案例 | **保留既有图**：长程累积发散案例诊断与误差机理分类 |
+
+> **说明（历史图件演进）**：早期初版大纲中提到的中间探索图（如历史未微调单样本对比图、局部参数网格图）已按五部分主线提炼整合：高斯系综采样实例整合于图 10，PDE 完整流场对照整合于图 14/16，多种子离散度整合于图 5 与图 18。所有 22 幅图件均具有明确唯一的磁盘路径与数据源归属。
