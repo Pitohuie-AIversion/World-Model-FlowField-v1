@@ -22,6 +22,7 @@ Engineering Contracts:
 """
 
 import argparse
+import datetime
 import hashlib
 import json
 import math
@@ -105,6 +106,83 @@ def load_frozen_autoencoder(
         p.requires_grad = False
 
     return model, ckpt, sha256_before
+
+
+def classify_enstrophy_decay_behavior(
+    gt_z_total_decay_pct: float,
+    recon_z_total_decay_pct: float,
+    zero_decay_tolerance: float = 1e-4,
+) -> Tuple[str, bool]:
+    """Classify enstrophy decay behavior comparing reconstructed flow against ground truth.
+
+    Priority Order:
+        1. Unphysical Energy Growth: recon decay is negative (enstrophy increases over time)
+        2. Attenuated Dissipation Bias: recon decay is less than 20% of true viscous decay
+        3. Excessive Dissipation Bias: recon decay exceeds 200% of true viscous decay
+        4. Decay Magnitude Comparable: recon decay falls within [20%, 200%] of true decay
+
+    For near-zero ground truth decay (|gt_decay| < zero_decay_tolerance):
+        - recon < -zero_decay_tolerance -> UNPHYSICAL_ENERGY_GROWTH
+        - recon > zero_decay_tolerance -> EXCESSIVE_DISSIPATION_BIAS
+        - otherwise -> DECAY_MAGNITUDE_COMPARABLE
+
+    Returns:
+        decay_diagnosis (str): One of UNPHYSICAL_ENERGY_GROWTH, ATTENUATED_DISSIPATION_BIAS,
+                               EXCESSIVE_DISSIPATION_BIAS, DECAY_MAGNITUDE_COMPARABLE.
+        dissipation_attenuated (bool): True if ATTENUATED_DISSIPATION_BIAS.
+    """
+    if abs(gt_z_total_decay_pct) < zero_decay_tolerance:
+        if recon_z_total_decay_pct < -zero_decay_tolerance:
+            return "UNPHYSICAL_ENERGY_GROWTH", False
+        if recon_z_total_decay_pct > zero_decay_tolerance:
+            return "EXCESSIVE_DISSIPATION_BIAS", False
+        return "DECAY_MAGNITUDE_COMPARABLE", False
+
+    # Check unphysical energy growth first (priority 1)
+    if recon_z_total_decay_pct < 0.0:
+        return "UNPHYSICAL_ENERGY_GROWTH", False
+    # Check attenuated dissipation bias (priority 2)
+    if recon_z_total_decay_pct < 0.20 * gt_z_total_decay_pct:
+        return "ATTENUATED_DISSIPATION_BIAS", True
+    # Check excessive dissipation bias (priority 3)
+    if recon_z_total_decay_pct > 2.0 * gt_z_total_decay_pct:
+        return "EXCESSIVE_DISSIPATION_BIAS", False
+    # Decay magnitude is comparable (priority 4)
+    return "DECAY_MAGNITUDE_COMPARABLE", False
+
+
+def classify_physical_budget_verdict(
+    decay_diagnosis: str,
+    dissipation_attenuated: bool,
+    max_recon_residual: float,
+    threshold_budget_residual: Optional[float] = None,
+) -> str:
+    """Determine physical budget verdict based on residual and decay behavior.
+
+    - If threshold_budget_residual is specified:
+        - If max residual <= threshold and decay is comparable -> PHYSICALLY_BALANCED
+        - Else if decay has a specific bias -> returns that diagnosis
+        - Else -> PHYSICAL_BUDGET_RESIDUAL_EXCEEDED
+    - If threshold_budget_residual is None:
+        - If dissipation attenuated -> ATTENUATED_DISSIPATION_BIAS
+        - Else if decay has a specific bias (e.g. growth/excessive) -> returns that diagnosis
+        - Else -> BUDGET_CONSISTENCY_NOT_ASSESSED (never blindly returns PHYSICALLY_BALANCED)
+    """
+    if threshold_budget_residual is not None:
+        thresh = float(threshold_budget_residual)
+        if max_recon_residual <= thresh and decay_diagnosis == "DECAY_MAGNITUDE_COMPARABLE":
+            return "PHYSICALLY_BALANCED"
+        if dissipation_attenuated:
+            return "ATTENUATED_DISSIPATION_BIAS"
+        if decay_diagnosis != "DECAY_MAGNITUDE_COMPARABLE":
+            return decay_diagnosis
+        return "PHYSICAL_BUDGET_RESIDUAL_EXCEEDED"
+
+    if dissipation_attenuated:
+        return "ATTENUATED_DISSIPATION_BIAS"
+    if decay_diagnosis != "DECAY_MAGNITUDE_COMPARABLE":
+        return decay_diagnosis
+    return "BUDGET_CONSISTENCY_NOT_ASSESSED"
 
 
 def run_temporal_representation_audit(
@@ -200,7 +278,8 @@ def run_temporal_representation_audit(
         "metadata": {
             "experiment_name": cfg["experiment"]["name"],
             "protocol": cfg["experiment"]["protocol"],
-            "date": cfg["experiment"].get("date", "2026-10-10"),
+            "date": str(cfg["experiment"].get("date", datetime.date.today().isoformat())),
+            "execution_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "device": dev_str,
             "domain": dom_cfg,
             "physical_parameters": phys_cfg,
@@ -321,41 +400,20 @@ def run_temporal_representation_audit(
         max_recon_residual = float(max(abs(r) for r in recon_budget_residuals))
         mean_recon_residual = float(np.mean(recon_budget_residuals))
 
-        # 1. Decay magnitude diagnosis
-        if recon_z_total_decay_pct < 0.20 * gt_z_total_decay_pct:
-            decay_diagnosis = "ATTENUATED_DISSIPATION_BIAS"
-            dissipation_attenuated = True
-        elif recon_z_total_decay_pct < 0.0:
-            decay_diagnosis = "UNPHYSICAL_ENERGY_GROWTH"
-            dissipation_attenuated = False
-        elif recon_z_total_decay_pct > 2.0 * gt_z_total_decay_pct:
-            decay_diagnosis = "EXCESSIVE_DISSIPATION_BIAS"
-            dissipation_attenuated = False
-        else:
-            decay_diagnosis = "DECAY_MAGNITUDE_COMPARABLE"
-            dissipation_attenuated = False
+        # 1. Decay magnitude diagnosis (prioritizes unphysical energy growth before attenuation)
+        decay_diagnosis, dissipation_attenuated = classify_enstrophy_decay_behavior(
+            gt_z_total_decay_pct=gt_z_total_decay_pct,
+            recon_z_total_decay_pct=recon_z_total_decay_pct,
+        )
 
-        # 2. Physical budget consistency verdict:
-        # Avoid granting PHYSICALLY_BALANCED unless a budget threshold is explicitly declared
-        # and both residual condition and decay comparability are rigorously met.
+        # 2. Physical budget consistency verdict (requires explicit threshold to grant PHYSICALLY_BALANCED)
         threshold_budget_res = eval_cfg.get("threshold_budget_residual", None)
-        if threshold_budget_res is not None:
-            threshold_budget_res = float(threshold_budget_res)
-            if max_recon_residual <= threshold_budget_res and decay_diagnosis == "DECAY_MAGNITUDE_COMPARABLE":
-                budget_verdict = "PHYSICALLY_BALANCED"
-            elif dissipation_attenuated:
-                budget_verdict = "ATTENUATED_DISSIPATION_BIAS"
-            elif decay_diagnosis != "DECAY_MAGNITUDE_COMPARABLE":
-                budget_verdict = decay_diagnosis
-            else:
-                budget_verdict = "PHYSICAL_BUDGET_RESIDUAL_EXCEEDED"
-        else:
-            if dissipation_attenuated:
-                budget_verdict = "ATTENUATED_DISSIPATION_BIAS"
-            elif decay_diagnosis != "DECAY_MAGNITUDE_COMPARABLE":
-                budget_verdict = decay_diagnosis
-            else:
-                budget_verdict = "BUDGET_CONSISTENCY_NOT_ASSESSED"
+        budget_verdict = classify_physical_budget_verdict(
+            decay_diagnosis=decay_diagnosis,
+            dissipation_attenuated=dissipation_attenuated,
+            max_recon_residual=max_recon_residual,
+            threshold_budget_residual=threshold_budget_res,
+        )
 
         results["models"][str(cz)] = {
             "checkpoint_path": str(ckpt_path),

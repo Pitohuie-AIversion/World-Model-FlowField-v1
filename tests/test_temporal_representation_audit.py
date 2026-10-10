@@ -7,11 +7,14 @@ in clean checkout and CI environments.
 
 import json
 from pathlib import Path
+from typing import Optional
 import pytest
 import torch
 import yaml
 
 from scripts.audit_temporal_vorticity_representation import (
+    classify_enstrophy_decay_behavior,
+    classify_physical_budget_verdict,
     compute_file_sha256,
     load_frozen_autoencoder,
     run_temporal_representation_audit,
@@ -296,3 +299,60 @@ def test_physical_budget_verdict_contract(tmp_path):
     )
     physics_strict = res_strict["models"]["64"]["summary_metrics"]["enstrophy_physics"]
     assert physics_strict["physical_budget_verdict"] != "PHYSICALLY_BALANCED"
+
+
+@pytest.mark.parametrize(
+    "gt_decay,recon_decay,expected_diag,expected_attenuated",
+    [
+        (15.0, -2.0, "UNPHYSICAL_ENERGY_GROWTH", False),
+        (15.0, 1.0, "ATTENUATED_DISSIPATION_BIAS", True),
+        (15.0, 15.0, "DECAY_MAGNITUDE_COMPARABLE", False),
+        (15.0, 35.0, "EXCESSIVE_DISSIPATION_BIAS", False),
+        # Near-zero ground truth decay (e.g. inviscid limits)
+        (0.0, -1.0, "UNPHYSICAL_ENERGY_GROWTH", False),
+        (0.0, 0.0, "DECAY_MAGNITUDE_COMPARABLE", False),
+        (0.0, 5.0, "EXCESSIVE_DISSIPATION_BIAS", False),
+    ],
+)
+def test_classify_enstrophy_decay_behavior_exhaustive(
+    gt_decay: float,
+    recon_decay: float,
+    expected_diag: str,
+    expected_attenuated: bool,
+):
+    """Verify enstrophy decay classification priority order, especially that negative decay yields UNPHYSICAL_ENERGY_GROWTH."""
+    diag, is_att = classify_enstrophy_decay_behavior(gt_decay, recon_decay)
+    assert diag == expected_diag
+    assert is_att == expected_attenuated
+
+
+@pytest.mark.parametrize(
+    "diag,is_att,max_res,thresh,expected_verdict",
+    [
+        # No threshold declared: never PHYSICALLY_BALANCED
+        ("DECAY_MAGNITUDE_COMPARABLE", False, 0.05, None, "BUDGET_CONSISTENCY_NOT_ASSESSED"),
+        ("ATTENUATED_DISSIPATION_BIAS", True, 0.08, None, "ATTENUATED_DISSIPATION_BIAS"),
+        ("UNPHYSICAL_ENERGY_GROWTH", False, 0.10, None, "UNPHYSICAL_ENERGY_GROWTH"),
+        ("EXCESSIVE_DISSIPATION_BIAS", False, 0.12, None, "EXCESSIVE_DISSIPATION_BIAS"),
+        # Threshold declared:
+        ("DECAY_MAGNITUDE_COMPARABLE", False, 0.005, 0.01, "PHYSICALLY_BALANCED"),
+        ("DECAY_MAGNITUDE_COMPARABLE", False, 0.02, 0.01, "PHYSICAL_BUDGET_RESIDUAL_EXCEEDED"),
+        ("ATTENUATED_DISSIPATION_BIAS", True, 0.005, 0.01, "ATTENUATED_DISSIPATION_BIAS"),
+        ("UNPHYSICAL_ENERGY_GROWTH", False, 0.005, 0.01, "UNPHYSICAL_ENERGY_GROWTH"),
+    ],
+)
+def test_classify_physical_budget_verdict_branches(
+    diag: str,
+    is_att: bool,
+    max_res: float,
+    thresh: Optional[float],
+    expected_verdict: str,
+):
+    """Verify physical budget verdict determines correct label across all threshold and decay combinations."""
+    verdict = classify_physical_budget_verdict(
+        decay_diagnosis=diag,
+        dissipation_attenuated=is_att,
+        max_recon_residual=max_res,
+        threshold_budget_residual=thresh,
+    )
+    assert verdict == expected_verdict
