@@ -1,7 +1,7 @@
 \begin{table*}[t]
 \centering
 \small
-\caption{\textbf{Architectural and Operator Baseline Comparison Across Autoregressive Rollout Horizons.} Compares direct physical-space forecasting, neural operator baselines, and our latent world model framework across horizons $t \in \{1, 5, 10, 20, 30\}$. Direct ST-Transformer operates on raw $128 \times 128$ physical fields and suffers from catastrophic derivative explosion ($\|\nabla \cdot \mathbf{u}\| = 89.73$ at $t=30$). FNO-2D maintains stability via Fourier mode truncation but incurs high initial field error ($\mathrm{VRMSE} = 0.6450$ at $t=1$). Our Latent World Model with physics regularization (E4) achieves high initial fidelity ($\mathrm{VRMSE} = 0.0532 \pm 0.0076$) while stabilizing vorticity and enstrophy over 30 autoregressive steps. $^\dagger$E0 evaluated on Seed 42.}
+\caption{\textbf{Architectural and Operator Baseline Comparison Across Autoregressive Rollout Horizons.} Compares direct physical-space forecasting, neural operator baselines, and our latent world model framework across horizons $t \in \{1, 5, 10, 20, 30\}$. Direct ST-Transformer operates directly on raw $128 \times 256$ physical fields via $8 \times 8$ patches and suffers from catastrophic derivative explosion ($\|\nabla \cdot \mathbf{u}\| = 89.73$ at $t=30$). FNO-2D maintains stability via Fourier mode truncation but incurs high initial field error ($\mathrm{VRMSE} = 0.6450$ at $t=1$). Our Latent World Model with physics regularization (E4) achieves high initial fidelity ($\mathrm{VRMSE} = 0.0532 \pm 0.0076$) while stabilizing vorticity and enstrophy over 30 autoregressive steps. $^\dagger$E0 evaluated on Seed 42.}
 \label{tab:architecture_and_baselines}
 \resizebox{\textwidth}{!}{
 \begin{tabular}{llcccccc}
