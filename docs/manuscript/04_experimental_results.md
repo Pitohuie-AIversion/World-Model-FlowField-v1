@@ -7,13 +7,13 @@
 ## 4.1 统一评测协议与核心考核指标
 
 ### 1. 评测指标定义
-- **方差归一化均方根误差 (VRMSE)**：消除各物理量背景方差尺度的无量纲误差（分子为均方根误差，分母加入数值稳定项 $\epsilon = 10^{-6}$）：
-  $$\operatorname{VRMSE}(q_c, q^*_c) = \frac{\sqrt{\frac{1}{|\Omega|} \iint_{\Omega} (\widehat{q}_c - q^*_c)^2 \, dx dy}}{\sqrt{\frac{1}{|\Omega|} \iint_{\Omega} (q^*_c - \bar{q}^*_c)^2 \, dx dy} + \epsilon}$$
-  其中 $\bar{q}^*_c$ 为真实场的全场空间均值，$\epsilon = 10^{-6}$ 用于防止常数场除零。
+- **方差归一化均方根误差 (VRMSE)**：消除各物理量背景方差尺度的无量纲误差（遵循 The Well 基准与 `src.metrics.field.compute_vrmse` 规范）：
+  $$\operatorname{VRMSE}(q_c, q^*_c) = \sqrt{\frac{\frac{1}{|\Omega|} \iint_{\Omega} (\widehat{q}_c - q^*_c)^2 \, dx dy}{\frac{1}{|\Omega|} \iint_{\Omega} (q^*_c - \bar{q}^*_c)^2 \, dx dy + 10^{-6}}}$$
+  计算时先在二维空间网格上分别计算预测场的均方误差（MSE）与目标场的空间方差 $\operatorname{Var}(q^*_c)$，分母加入数值稳定常数 $10^{-6}$ 以防止零方差场除零；两项相比后再取平方根得到单通道空间 VRMSE，最后依评测协议在通道与样本维度聚合平均。预测常数均值场将对应约 1.0 的 VRMSE。
 - **速度散度均方根 (Divergence RMS)**：衡量不可压缩质量守恒满足程度：
-  $$\|\nabla \cdot \mathbf{u}\| = \sqrt{\frac{1}{|\Omega|} \iint_{\Omega} \left(\frac{\partial \widehat{u}}{\partial x} + \frac{\partial \widehat{v}}{\partial y}\right)^2 \, dx dy}$$
+  $$\Vert \nabla \cdot \mathbf{u} \Vert = \sqrt{\frac{1}{|\Omega|} \iint_{\Omega} \left(\frac{\partial \widehat{u}}{\partial x} + \frac{\partial \widehat{v}}{\partial y}\right)^2 \, dx dy}$$
 - **涡量场均方根误差 (Vorticity RMSE)**：衡量旋转剪切拓扑保真度：
-  $$\|\omega - \omega^*\| = \sqrt{\frac{1}{|\Omega|} \iint_{\Omega} (\widehat{\omega} - \omega^*)^2 \, dx dy}, \quad \omega = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}$$
+  $$\Vert \omega - \omega^* \Vert = \sqrt{\frac{1}{|\Omega|} \iint_{\Omega} (\widehat{\omega} - \omega^*)^2 \, dx dy}, \quad \omega = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}$$
 - **相对拟能误差 (Relative Enstrophy Error)**：衡量拟能 $\Omega = \frac{1}{2} \iint \omega^2 dx dy$ 守恒性：$\frac{|\widehat{\Omega} - \Omega^*|}{\Omega^*}$；
 - **各向异性傅里叶能谱比率 (Directional Spectral Ratio)**：$R_x(k_x)$ 与 $R_y(k_y)$，用于诊断高波数微细尺度耗散与虚假堆积。
 
@@ -36,7 +36,7 @@
 | 规范压力 $p$ | 0.0034 | 0.5396 (53.96%) | 0.0046 | **0.1504** (15.04%) |
 | 被动标量 $s$ | 0.0287 | 0.0881 (8.81%) | 0.0232 | **0.1204** (12.04%) |
 | **四通道平均** | **0.0139** | **0.2586** (25.86%) | **0.0140** | **0.1015** (10.15%) |
-| 涡量 RMSE ($\|\omega - \omega^*\|$) | 0.2605 | — | 0.3902 | — |
+| 涡量 RMSE ($\Vert \omega - \omega^* \Vert$) | 0.2605 | — | 0.3902 | — |
 | 压力零均值残余 ($|\bar{p}|$) | $2.49 \times 10^{-7}$ | — | $2.49 \times 10^{-7}$ | — |
 
 **实验分析与边界结论**：
@@ -91,23 +91,23 @@
 | 模型架构 | 参数量 | 物理评价指标 | Step 1 ($t=1$) | Step 5 ($t=5$) | Step 10 ($t=10$) | Step 20 ($t=20$) | Step 30 ($t=30$) |
 | :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: |
 | **Persistence (惯性基准)** | — | 全场平均 VRMSE | **0.0299** | **0.1390** | **0.2294** | **0.3593** | **0.4879** |
-| | | 散度 RMSE ($\|\nabla \cdot \mathbf{u}\|$) | 4.6998 | 4.6998 | 4.6998 | 4.6998 | 4.6998 |
-| | | 涡量 RMSE ($\|\omega - \omega^*\|$) | 0.0662 | 0.3177 | 0.4108 | 0.4107 | 0.4630 |
+| | | 散度 RMSE ($\Vert \nabla \cdot \mathbf{u} \Vert$) | 4.6998 | 4.6998 | 4.6998 | 4.6998 | 4.6998 |
+| | | 涡量 RMSE ($\Vert \omega - \omega^* \Vert$) | 0.0662 | 0.3177 | 0.4108 | 0.4107 | 0.4630 |
 | **Direct ST (网格时空模型)** | 7.73M | 全场平均 VRMSE | 0.8511 | 1.9948 | 6.3670 | 22.3700 | 26.8328 |
-| | | 散度 RMSE ($\|\nabla \cdot \mathbf{u}\|$) | 8.9352 | 16.6996 | **33.2842** | 79.9667 | **89.7318** |
-| | | 涡量 RMSE ($\|\omega - \omega^*\|$) | 6.9586 | 11.0093 | 26.6111 | 70.4159 | 81.1527 |
+| | | 散度 RMSE ($\Vert \nabla \cdot \mathbf{u} \Vert$) | 8.9352 | 16.6996 | **33.2842** | 79.9667 | **89.7318** |
+| | | 涡量 RMSE ($\Vert \omega - \omega^* \Vert$) | 6.9586 | 11.0093 | 26.6111 | 70.4159 | 81.1527 |
 | **FNO-2D (傅里叶神经算子)** | 16.80M | 全场平均 VRMSE | 0.6450 | 0.7575 | 0.8385 | 0.9580 | 1.0720 |
-| | | 散度 RMSE ($\|\nabla \cdot \mathbf{u}\|$) | 0.1708 | 0.0913 | 0.0779 | 0.0559 | **0.0389** |
-| | | 涡量 RMSE ($\|\omega - \omega^*\|$) | **0.1170** | **0.3241** | **0.5166** | **0.6903** | **0.7961** |
+| | | 散度 RMSE ($\Vert \nabla \cdot \mathbf{u} \Vert$) | 0.1708 | 0.0913 | 0.0779 | 0.0559 | **0.0389** |
+| | | 涡量 RMSE ($\Vert \omega - \omega^* \Vert$) | **0.1170** | **0.3241** | **0.5166** | **0.6903** | **0.7961** |
 | **潜世界模型 E0 (单步, $H=1$)** | 9.75M | 全场平均 VRMSE | **0.0446** | 0.8473 | 1.3356 | 1.4044 | 1.2572 |
-| | | 散度 RMSE ($\|\nabla \cdot \mathbf{u}\|$) | 0.1644 | 1.3167 | 0.9851 | 0.5415 | 0.0654 |
-| | | 涡量 RMSE ($\|\omega - \omega^*\|$) | 0.4882 | 2.5398 | 2.4354 | 2.5371 | 2.9736 |
+| | | 散度 RMSE ($\Vert \nabla \cdot \mathbf{u} \Vert$) | 0.1644 | 1.3167 | 0.9851 | 0.5415 | 0.0654 |
+| | | 涡量 RMSE ($\Vert \omega - \omega^* \Vert$) | 0.4882 | 2.5398 | 2.4354 | 2.5371 | 2.9736 |
 | **潜世界模型 E1 (两步, $H=2$)** | 9.75M | 全场平均 VRMSE | 0.0449 $\pm$ 0.0048 | 0.5845 $\pm$ 0.4449 | 1.0436 $\pm$ 0.4329 | 1.3964 $\pm$ 0.1909 | 1.5132 $\pm$ 0.0962 |
-| | | 散度 RMSE ($\|\nabla \cdot \mathbf{u}\|$) | 0.1715 $\pm$ 0.0277 | 1.1089 $\pm$ 1.0283 | 1.5667 $\pm$ 0.7079 | 2.2179 $\pm$ 1.3706 | 1.9192 $\pm$ 1.5992 |
-| | | 涡量 RMSE ($\|\omega - \omega^*\|$) | 0.4595 $\pm$ 0.0388 | 1.8746 $\pm$ 1.2722 | 3.0814 $\pm$ 1.4725 | 4.2214 $\pm$ 1.7304 | 4.7293 $\pm$ 1.5311 |
+| | | 散度 RMSE ($\Vert \nabla \cdot \mathbf{u} \Vert$) | 0.1715 $\pm$ 0.0277 | 1.1089 $\pm$ 1.0283 | 1.5667 $\pm$ 0.7079 | 2.2179 $\pm$ 1.3706 | 1.9192 $\pm$ 1.5992 |
+| | | 涡量 RMSE ($\Vert \omega - \omega^* \Vert$) | 0.4595 $\pm$ 0.0388 | 1.8746 $\pm$ 1.2722 | 3.0814 $\pm$ 1.4725 | 4.2214 $\pm$ 1.7304 | 4.7293 $\pm$ 1.5311 |
 | **潜世界模型 E4 (全物理约束)** | 9.75M | 全场平均 VRMSE | 0.0532 $\pm$ 0.0088 | **0.4375 $\pm$ 0.1502** | 1.1607 $\pm$ 0.4868 | 1.2751 $\pm$ 0.1776 | 1.5560 $\pm$ 0.1334 |
-| | | 散度 RMSE ($\|\nabla \cdot \mathbf{u}\|$) | **0.1455 $\pm$ 0.0189** | **0.7818 $\pm$ 0.2465** | 2.0637 $\pm$ 0.9234 | 2.2140 $\pm$ 1.2845 | 1.8302 $\pm$ 1.3583 |
-| | | 涡量 RMSE ($\|\omega - \omega^*\|$) | 0.2847 $\pm$ 0.0345 | 1.4191 $\pm$ 0.4512 | 3.5561 $\pm$ 1.6115 | 3.5439 $\pm$ 1.3137 | 3.9015 $\pm$ 1.3585 |
+| | | 散度 RMSE ($\Vert \nabla \cdot \mathbf{u} \Vert$) | **0.1455 $\pm$ 0.0189** | **0.7818 $\pm$ 0.2465** | 2.0637 $\pm$ 0.9234 | 2.2140 $\pm$ 1.2845 | 1.8302 $\pm$ 1.3583 |
+| | | 涡量 RMSE ($\Vert \omega - \omega^* \Vert$) | 0.2847 $\pm$ 0.0345 | 1.4191 $\pm$ 0.4512 | 3.5561 $\pm$ 1.6115 | 3.5439 $\pm$ 1.3137 | 3.9015 $\pm$ 1.3585 |
 
 **实证对比与客观物理发现**：
 1. **统一评测协议与基线公平性核实**：所有对比基线（Persistence、Direct ST-Transformer、FNO-2D 与潜世界模型）均严格在相同的 $128 \times 256$ 各向同性物理网格、相同的数据划分契约（`grouped_split.json`）与相同的反归一化物理单位下评测。其中，Direct ST-Transformer 采用 $8 \times 8$ 的物理空间 Patch 划分（对应 $16 \times 32$ 个空间 Patches），直接在物理网格空间学习时空自注意力；历史文档或表格标题中曾出现的个别“$128 \times 128$”提法系早期文字笔误，已在此核实更正，确保所有基线在完全相同的物理输入、空间网格和预处理条件下公平对比；
