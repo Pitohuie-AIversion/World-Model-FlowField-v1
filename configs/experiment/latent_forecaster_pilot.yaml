@@ -1,0 +1,65 @@
+# ==============================================================================
+# Phase 2 A: Deterministic Latent Space Forecaster Pilot Experiment
+# 周期性标量场平流-扩散动力学 确定性潜空间单步预测先导实验
+# ==============================================================================
+
+experiment:
+  name: "latent_forecaster_pilot"
+  protocol: "periodic_scalar_advection_diffusion_v1"
+  phase: "2A_deterministic_pilot"
+  date: "2026-10-10"
+
+domain:
+  nx: 64
+  ny: 64
+  lx: 1.0
+  ly: 1.0
+
+physical_params:
+  u0: 0.5
+  v0: 0.5
+  nu: 0.001
+  base_wavenumber: 1
+  perturbation_modes:
+    - [1, 0]
+    - [0, 1]
+    - [1, 1]
+    - [2, 1]
+  perturbation_amplitude: 0.1
+
+temporal_params:
+  dt: 0.05
+  num_steps: 20
+  total_time: 1.0
+
+trajectories:
+  num_train: 32
+  num_val: 16
+  num_test: 16
+  train_seed_base: 1000
+  val_seed_base: 2000
+  test_seed_base: 3000
+
+windowing:
+  history_len: 4
+  future_len: 1
+  stride: 1
+
+model:
+  latent_channels: 64
+  embed_dim: 128
+  cond_dim: 64
+  depth: 4
+  num_heads: 4
+  prediction_mode: "direct"
+
+training:
+  epochs: 20
+  batch_size: 16
+  lr: 0.0005
+  weight_decay: 0.0001
+  device: "cuda"
+
+checkpoints:
+  ae_checkpoint: "outputs/experiments/vorticity_capacity/cz_64/latest_checkpoint.pt"
+  output_dir: "outputs/experiments/latent_forecaster_pilot"
