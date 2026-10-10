@@ -1,0 +1,57 @@
+# ==============================================================================
+# Temporal Representation Audit Configuration
+# 周期性标量场平流-扩散解析动力学与冻结自编码器表示适配性评测协议
+# ==============================================================================
+
+experiment:
+  name: "temporal_representation_audit"
+  description: "Evaluate frozen VorticityAutoencoder checkpoints (Cz=64, Cz=16) on dynamic periodic advection-diffusion trajectories."
+  protocol: "periodic_scalar_advection_diffusion_v1"
+  date: "2026-10-10"
+
+domain:
+  nx: 64
+  ny: 64
+  lx: 1.0
+  ly: 1.0
+
+physical_params:
+  # 阶段一固定速度与黏性，严禁将其映射为无关的 Re/Sc 参数
+  u0: 0.5
+  v0: 0.5
+  nu: 0.001
+  base_wavenumber: 1
+  perturbation_modes:
+    - [1, 0]
+    - [0, 1]
+    - [1, 1]
+    - [2, 1]
+  perturbation_amplitude: 0.1
+
+temporal_params:
+  dt: 0.05
+  num_steps: 20
+  total_time: 1.0
+
+trajectories:
+  num_train: 32
+  num_val: 16
+  num_test: 16
+  # 轨迹身份严格隔离种子
+  train_seed_base: 1000
+  val_seed_base: 2000
+  test_seed_base: 3000
+
+windowing:
+  history_len: 4
+  future_len: 16
+  stride: 1
+
+evaluation:
+  capacities:
+    - 64
+    - 16
+  checkpoint_dir: "outputs/experiments/vorticity_capacity"
+  # 预声明诊断警报阈值：相对 L2 误差达到 20% 时触发分布外诊断警报，避免事后主观定义合理性
+  threshold_diagnosis_rel_l2: 0.20
+  output_dir: "outputs/experiments/temporal_representation_audit"
