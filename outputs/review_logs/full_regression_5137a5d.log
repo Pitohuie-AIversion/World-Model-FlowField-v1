@@ -1,0 +1,11 @@
+# Pytest Full Regression Raw Log
+TESTED_COMMIT=5137a5d483657600d98729178c586bd08471db42
+TESTED_TREE=81f0c00773e25a5ee56dad4d6a873a7bbcaa7f48
+EXECUTION_COMMAND=OMP_NUM_THREADS=4 CUDA_VISIBLE_DEVICES=0 python -m pytest -q $(git ls-files 'tests/test_*.py')
+DURATION=143.76s (0:02:23)
+STATUS=PASSED
+TOTAL_PASSED=617
+WARNINGS=14
+
+============================== RAW PYTEST STDOUT ==============================
+......................
