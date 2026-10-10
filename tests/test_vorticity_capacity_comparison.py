@@ -274,3 +274,120 @@ def test_capacity_comparison_zero_real_data_leakage():
     assert "step_seed_100.npz" not in content
     assert "traj_seed_42.npy" not in content
     assert "outputs/data/stocbench" not in content
+
+
+def test_verify_dataset_separation_rejects_nan_inf_and_invalid_inputs():
+    """Verify verify_dataset_separation fails closed on NaN, Inf, empty, or incompatible shapes."""
+    clean_train = torch.randn(8, 1, 16, 16)
+    clean_val = torch.randn(4, 1, 16, 16)
+
+    # 1. NaN in val tensor must raise ValueError
+    nan_val = clean_val.clone()
+    nan_val[0, 0, 0, 0] = float("nan")
+    with pytest.raises(ValueError, match="NaN or Inf detected"):
+        verify_dataset_separation(clean_train, nan_val)
+
+    # 2. NaN in train tensor must raise ValueError
+    nan_train = clean_train.clone()
+    nan_train[0, 0, 0, 0] = float("nan")
+    with pytest.raises(ValueError, match="NaN or Inf detected"):
+        verify_dataset_separation(nan_train, clean_val)
+
+    # 3. Inf in tensor must raise ValueError
+    inf_val = clean_val.clone()
+    inf_val[0, 0, 0, 0] = float("inf")
+    with pytest.raises(ValueError, match="NaN or Inf detected"):
+        verify_dataset_separation(clean_train, inf_val)
+
+    # 4. Empty tensor must raise ValueError
+    empty_tensor = torch.empty(0, 1, 16, 16)
+    with pytest.raises(ValueError, match="Empty dataset tensor"):
+        verify_dataset_separation(empty_tensor, clean_val)
+    with pytest.raises(ValueError, match="Empty dataset tensor"):
+        verify_dataset_separation(clean_train, empty_tensor)
+
+    # 5. Non-4D input must raise ValueError
+    with pytest.raises(ValueError, match="4D tensors"):
+        verify_dataset_separation(torch.randn(8, 16, 16), clean_val)
+
+    # 6. Mismatched spatial dimensions must raise ValueError
+    mismatched_val = torch.randn(4, 1, 32, 32)
+    with pytest.raises(ValueError, match="dimensions must match"):
+        verify_dataset_separation(clean_train, mismatched_val)
+
+
+def test_evaluate_existing_checkpoints_rejects_mismatched_data_contracts(tmp_path):
+    """Enforce fail-closed termination when checkpoints have inconsistent data definitions or seeds."""
+    ckpt_root = tmp_path / "checkpoints"
+
+    # Checkpoint for Cz=32 with seed=42
+    dir_32 = ckpt_root / "cz_32"
+    dir_32.mkdir(parents=True)
+    m32 = VorticityAutoencoder(in_channels=1, out_channels=1, latent_channels=32, base_channels=8)
+    ckpt_32 = {
+        "epoch": 5,
+        "step": 10,
+        "model_state_dict": m32.state_dict(),
+        "config": {
+            "model": {"base_channels": 8},
+            "domain": {"nx": 16, "ny": 16, "lx": 1.0, "ly": 1.0},
+            "synthetic_data": {
+                "seed": 42,
+                "num_train_samples": 8,
+                "num_val_samples": 4,
+                "perturbation_amplitude": 0.1,
+            },
+        },
+    }
+    torch.save(ckpt_32, dir_32 / "latest_checkpoint.pt")
+
+    # Checkpoint for Cz=16 with conflicting seed=43
+    dir_16 = ckpt_root / "cz_16"
+    dir_16.mkdir(parents=True)
+    m16 = VorticityAutoencoder(in_channels=1, out_channels=1, latent_channels=16, base_channels=8)
+    ckpt_16_mismatched_seed = {
+        "epoch": 5,
+        "step": 10,
+        "model_state_dict": m16.state_dict(),
+        "config": {
+            "model": {"base_channels": 8},
+            "domain": {"nx": 16, "ny": 16, "lx": 1.0, "ly": 1.0},
+            "synthetic_data": {
+                "seed": 43,  # Inconsistent seed!
+                "num_train_samples": 8,
+                "num_val_samples": 4,
+                "perturbation_amplitude": 0.1,
+            },
+        },
+    }
+    torch.save(ckpt_16_mismatched_seed, dir_16 / "latest_checkpoint.pt")
+
+    eval_out = tmp_path / "eval_out"
+    # Calling evaluate_existing_checkpoints must fail closed and refuse to rank models
+    with pytest.raises(ValueError, match="Cross-checkpoint dataset contract mismatch detected"):
+        evaluate_existing_checkpoints(
+            checkpoint_dir=str(ckpt_root),
+            capacities=[32, 16],
+            output_dir=str(eval_out),
+            device="cpu",
+        )
+
+    # Also verify rejection when checkpoint lacks required configuration
+    ckpt_16_no_synth = {
+        "epoch": 5,
+        "step": 10,
+        "model_state_dict": m16.state_dict(),
+        "config": {
+            "model": {"base_channels": 8},
+            "domain": {"nx": 16, "ny": 16, "lx": 1.0, "ly": 1.0},
+            # missing synthetic_data section!
+        },
+    }
+    torch.save(ckpt_16_no_synth, dir_16 / "latest_checkpoint.pt")
+    with pytest.raises(ValueError, match="missing 'synthetic_data' section"):
+        evaluate_existing_checkpoints(
+            checkpoint_dir=str(ckpt_root),
+            capacities=[32, 16],
+            output_dir=str(eval_out),
+            device="cpu",
+        )

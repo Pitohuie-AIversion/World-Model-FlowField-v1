@@ -19,6 +19,7 @@ Zero dependency on real StocBench data; strictly operates on synthetic dev pipel
 import argparse
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -106,8 +107,30 @@ def verify_dataset_separation(
         float: Minimum pairwise L2 distance found across all (val, train) pairs.
 
     Raises:
-        ValueError: If any validation sample has L2 distance < min_dist_threshold to a training sample.
+        ValueError: If inputs are invalid (not a Tensor, empty, non-4D, shape mismatch, containing NaN/Inf)
+                    or if any validation sample has L2 distance < min_dist_threshold to a training sample.
     """
+    if not isinstance(train_data, torch.Tensor) or not isinstance(val_data, torch.Tensor):
+        raise ValueError("Inputs train_data and val_data must be torch.Tensor instances.")
+
+    if train_data.numel() == 0 or val_data.numel() == 0:
+        raise ValueError("Empty dataset tensor passed to verify_dataset_separation.")
+
+    if train_data.ndim != 4 or val_data.ndim != 4:
+        raise ValueError(
+            f"Inputs must be 4D tensors (N, C, H, W), got train_data.ndim={train_data.ndim}, "
+            f"val_data.ndim={val_data.ndim}."
+        )
+
+    if train_data.shape[1:] != val_data.shape[1:]:
+        raise ValueError(
+            f"Spatial and channel dimensions must match: train_data shape {train_data.shape[1:]} "
+            f"vs val_data shape {val_data.shape[1:]}."
+        )
+
+    if not (torch.isfinite(train_data).all() and torch.isfinite(val_data).all()):
+        raise ValueError("Dataset tensors must contain only finite numerical values (NaN or Inf detected).")
+
     n_train = train_data.shape[0]
     n_val = val_data.shape[0]
 
@@ -120,13 +143,16 @@ def verify_dataset_separation(
     for i in range(n_val):
         diff = train_flat - val_flat[i : i + 1]  # (N_train, D)
         dists = torch.linalg.norm(diff, dim=1)  # (N_train,)
+        if not torch.isfinite(dists).all():
+            raise ValueError(f"Non-finite distance encountered during separation check for val sample {i}.")
+
         min_d = float(torch.min(dists).item())
         min_idx = int(torch.argmin(dists).item())
         if min_d < min_l2_dist:
             min_l2_dist = min_d
             closest_pair = (i, min_idx)
 
-    if min_l2_dist < min_dist_threshold:
+    if not math.isfinite(min_l2_dist) or min_l2_dist < min_dist_threshold:
         raise ValueError(
             f"Data leakage detected! Validation sample {closest_pair[0]} is identical or near-identical "
             f"to training sample {closest_pair[1]} (L2 distance = {min_l2_dist:.6e} < {min_dist_threshold}). "
@@ -421,13 +447,62 @@ def generate_comparison_plots(
     return generated_files
 
 
+def extract_checkpoint_dataset_contract(ckpt_data: Dict[str, Any], cz: int) -> Dict[str, Any]:
+    """Extract and validate the dataset generation contract from checkpoint configuration.
+
+    Fail-closed: raises ValueError if config is missing, sections are missing, seed is absent,
+    or critical contract fields are invalid.
+    """
+    cfg = ckpt_data.get("config")
+    if not isinstance(cfg, dict):
+        raise ValueError(f"Checkpoint for Cz={cz} is missing 'config' dictionary.")
+
+    synth_cfg = cfg.get("synthetic_data")
+    if not isinstance(synth_cfg, dict):
+        raise ValueError(f"Checkpoint for Cz={cz} is missing 'synthetic_data' section in config.")
+
+    domain_cfg = cfg.get("domain")
+    if not isinstance(domain_cfg, dict):
+        raise ValueError(f"Checkpoint for Cz={cz} is missing 'domain' section in config.")
+
+    if "seed" not in synth_cfg:
+        raise ValueError(f"Checkpoint for Cz={cz} config.synthetic_data is missing required field 'seed'.")
+
+    perturbation_modes = synth_cfg.get("perturbation_modes", [[1, 0], [0, 1], [1, 1], [2, 1]])
+    if isinstance(perturbation_modes, list):
+        modes_tuple = tuple(tuple(m) if isinstance(m, (list, tuple)) else m for m in perturbation_modes)
+    else:
+        modes_tuple = tuple(perturbation_modes)
+
+    contract = {
+        "seed": synth_cfg["seed"],
+        "num_train_samples": synth_cfg.get("num_train_samples", 128),
+        "num_val_samples": synth_cfg.get("num_val_samples", 32),
+        "base_wavenumber": synth_cfg.get("base_wavenumber", 1),
+        "perturbation_modes": modes_tuple,
+        "perturbation_amplitude": synth_cfg.get("perturbation_amplitude", 0.1),
+        "nx": domain_cfg.get("nx", 64),
+        "ny": domain_cfg.get("ny", 64),
+        "lx": domain_cfg.get("lx", 1.0),
+        "ly": domain_cfg.get("ly", 1.0),
+    }
+    return contract
+
+
 def evaluate_existing_checkpoints(
     checkpoint_dir: str = "outputs/experiments/vorticity_capacity",
     capacities: List[int] = (64, 32, 16),
     output_dir: Optional[str] = None,
     device: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Load existing trained checkpoints and re-evaluate strictly on independent validation set."""
+    """Load existing trained checkpoints and re-evaluate strictly on independent validation set.
+
+    Enforces fail-closed cross-checkpoint dataset configuration identity before evaluation to ensure
+    all models are compared on the exact same ground-truth validation split.
+    """
+    if not capacities:
+        raise ValueError("Capacities list cannot be empty.")
+
     ckpt_root = Path(checkpoint_dir)
     out_path = Path(output_dir) if output_dir else ckpt_root / "independent_eval"
     out_path.mkdir(parents=True, exist_ok=True)
@@ -435,7 +510,9 @@ def evaluate_existing_checkpoints(
     dev_str = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
     dev = torch.device(dev_str)
 
-    results = {}
+    # Stage 1: Load all checkpoints and enforce cross-checkpoint dataset identity
+    loaded_ckpts = {}
+    contracts = {}
 
     for cz in capacities:
         ckpt_file = ckpt_root / f"cz_{cz}" / "latest_checkpoint.pt"
@@ -443,41 +520,62 @@ def evaluate_existing_checkpoints(
             raise FileNotFoundError(f"Checkpoint for Cz={cz} not found at {ckpt_file}")
 
         ckpt = torch.load(ckpt_file, map_location=dev, weights_only=False)
-        cfg = ckpt.get("config", {})
-        synth_cfg = cfg.get("synthetic_data", {})
-        domain_cfg = cfg.get("domain", {})
+        loaded_ckpts[cz] = (ckpt, ckpt_file)
+        contracts[cz] = extract_checkpoint_dataset_contract(ckpt, cz)
 
-        nx = domain_cfg.get("nx", 64)
-        ny = domain_cfg.get("ny", 64)
-        lx = domain_cfg.get("lx", 1.0)
-        ly = domain_cfg.get("ly", 1.0)
-        domain_size = (lx, ly)
+    # Fail-closed cross-checkpoint consistency assertion
+    ref_cz = capacities[0]
+    ref_contract = contracts[ref_cz]
+    for cz in capacities[1:]:
+        curr_contract = contracts[cz]
+        mismatches = []
+        for k, ref_val in ref_contract.items():
+            curr_val = curr_contract.get(k)
+            if curr_val != ref_val:
+                mismatches.append(f"{k} (Cz={ref_cz}: {ref_val} vs Cz={cz}: {curr_val})")
+        if mismatches:
+            raise ValueError(
+                f"Cross-checkpoint dataset contract mismatch detected between Cz={ref_cz} and Cz={cz}: "
+                f"{', '.join(mismatches)}. Checkpoints evaluated together must share identical data definition, "
+                f"seeds, perturbation parameters, and domain specifications."
+            )
 
-        train_seed = synth_cfg.get("seed", 42)
-        val_seed = train_seed + 1000  # Strictly separate seed
+    # Stage 2: Generate canonical train split (for separation assertion) and unified independent val split
+    train_seed = ref_contract["seed"]
+    val_seed = train_seed + 1000  # Strictly separate seed
+    nx = int(ref_contract["nx"])
+    ny = int(ref_contract["ny"])
+    lx = float(ref_contract["lx"])
+    ly = float(ref_contract["ly"])
+    domain_size = (lx, ly)
+    perturbation_modes = [list(m) if isinstance(m, (list, tuple)) else m for m in ref_contract["perturbation_modes"]]
 
-        # Generate canonical train set and independent val set
-        train_data = generate_synthetic_vorticity_dataset(
-            num_samples=synth_cfg.get("num_train_samples", 128),
-            nx=nx, ny=ny, lx=lx, ly=ly,
-            base_wavenumber=synth_cfg.get("base_wavenumber", 1),
-            perturbation_modes=synth_cfg.get("perturbation_modes", [[1, 0], [0, 1], [1, 1], [2, 1]]),
-            perturbation_amplitude=synth_cfg.get("perturbation_amplitude", 0.1),
-            seed=train_seed,
-        )
-        val_data = generate_synthetic_vorticity_dataset(
-            num_samples=synth_cfg.get("num_val_samples", 32),
-            nx=nx, ny=ny, lx=lx, ly=ly,
-            base_wavenumber=synth_cfg.get("base_wavenumber", 1),
-            perturbation_modes=synth_cfg.get("perturbation_modes", [[1, 0], [0, 1], [1, 1], [2, 1]]),
-            perturbation_amplitude=synth_cfg.get("perturbation_amplitude", 0.1),
-            seed=val_seed,
-        )
+    train_data = generate_synthetic_vorticity_dataset(
+        num_samples=ref_contract["num_train_samples"],
+        nx=nx, ny=ny, lx=lx, ly=ly,
+        base_wavenumber=ref_contract["base_wavenumber"],
+        perturbation_modes=perturbation_modes,
+        perturbation_amplitude=ref_contract["perturbation_amplitude"],
+        seed=train_seed,
+    )
+    val_data = generate_synthetic_vorticity_dataset(
+        num_samples=ref_contract["num_val_samples"],
+        nx=nx, ny=ny, lx=lx, ly=ly,
+        base_wavenumber=ref_contract["base_wavenumber"],
+        perturbation_modes=perturbation_modes,
+        perturbation_amplitude=ref_contract["perturbation_amplitude"],
+        seed=val_seed,
+    )
 
-        min_dist = verify_dataset_separation(train_data, val_data)
+    min_dist = verify_dataset_separation(train_data, val_data)
+    train_digest = compute_tensor_digest(train_data)
+    val_digest = compute_tensor_digest(val_data)
 
-        # Build model and load weights
-        model_cfg = cfg.get("model", {})
+    # Stage 3: Evaluate each model strictly on the unified validation set
+    results = {}
+    for cz in capacities:
+        ckpt, ckpt_file = loaded_ckpts[cz]
+        model_cfg = ckpt.get("config", {}).get("model", {})
         model = VorticityAutoencoder(
             in_channels=1,
             out_channels=1,
@@ -490,8 +588,6 @@ def evaluate_existing_checkpoints(
         eval_res = run_single_capacity_evaluation(model, val_data, device=dev, domain_size=domain_size)
         capacity_meta = compute_capacity_metadata(nx, ny, 1, cz)
 
-        train_digest = compute_tensor_digest(train_data)
-        val_digest = compute_tensor_digest(val_data)
         ckpt_sha256 = compute_file_sha256(ckpt_file)
         ckpt_size_bytes = ckpt_file.stat().st_size
 
@@ -506,7 +602,7 @@ def evaluate_existing_checkpoints(
             "evaluation": eval_res,
         }
 
-        print(f"--- Evaluated Checkpoint Cz={cz} on Independent Set (seed={val_seed}) ---")
+        print(f"--- Evaluated Checkpoint Cz={cz} on Unified Independent Set (seed={val_seed}) ---")
         print(f"    Relative L2 Error: {eval_res['relative_l2']*100:.2f}%")
         print(f"    Pairwise Difference Error (PDE): {eval_res['pairwise_difference_error']*100:.2f}%")
         print(f"    Variance Ratio (VR): {eval_res['variance_ratio']:.4f}")
@@ -515,7 +611,7 @@ def evaluate_existing_checkpoints(
         print(f"    Physical-Space Enstrophy Ratio: {eval_res['physical_enstrophy_ratio']:.4f}")
         print(f"    Single-Request Latency (B=1): {eval_res['latency_benchmarks']['single_request_latency']['median_ms']:.2f}ms")
 
-    # Generate plots
+    # Generate plots using unified Ground Truth
     plot_files = generate_comparison_plots(results, val_data, out_path)
 
     # Build summary JSON
@@ -532,6 +628,11 @@ def evaluate_existing_checkpoints(
                 "val_samples": int(val_data.shape[0]),
                 "train_data_digest": train_digest,
                 "val_data_digest": val_digest,
+                "cross_checkpoint_consistency": {
+                    "status": "VERIFIED_IDENTICAL",
+                    "reference_capacity": ref_cz,
+                    "verified_fields": list(ref_contract.keys()),
+                },
                 "dataset_separation": {
                     "min_pairwise_l2": min_dist,
                     "threshold": 1e-3,
@@ -542,7 +643,7 @@ def evaluate_existing_checkpoints(
             "device": dev_str,
             "capacities_evaluated": list(capacities),
             "generated_plots": plot_files,
-            "note": "Re-evaluation conducted on strictly separated validation set (seed 1042) without retraining.",
+            "note": "Re-evaluation conducted on strictly separated validation set (seed 1042) across verified identical dataset contracts.",
         },
         "models": {},
     }
