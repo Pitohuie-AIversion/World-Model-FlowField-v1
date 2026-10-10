@@ -116,7 +116,14 @@ def test_evaluation_dataset_isolation_from_train_split(monkeypatch, tmp_path):
         "config": {
             "model": {"base_channels": 8},
             "domain": {"nx": 16, "ny": 16, "lx": 1.0, "ly": 1.0},
-            "synthetic_data": {"seed": 42, "num_train_samples": 8, "num_val_samples": 4},
+            "synthetic_data": {
+                "seed": 42,
+                "num_train_samples": 8,
+                "num_val_samples": 4,
+                "base_wavenumber": 1,
+                "perturbation_modes": [[1, 0], [0, 1], [1, 1], [2, 1]],
+                "perturbation_amplitude": 0.1,
+            },
         },
     }
     torch.save(ckpt_data, cz_dir / "latest_checkpoint.pt")
@@ -245,7 +252,14 @@ def test_evaluate_existing_checkpoints_pipeline(tmp_path):
             "config": {
                 "model": {"base_channels": 8},
                 "domain": {"nx": 16, "ny": 16, "lx": 1.0, "ly": 1.0},
-                "synthetic_data": {"seed": 42, "num_train_samples": 8, "num_val_samples": 4},
+                "synthetic_data": {
+                    "seed": 42,
+                    "num_train_samples": 8,
+                    "num_val_samples": 4,
+                    "base_wavenumber": 1,
+                    "perturbation_modes": [[1, 0], [0, 1], [1, 1], [2, 1]],
+                    "perturbation_amplitude": 0.1,
+                },
             },
         }
         torch.save(ckpt_data, cz_dir / "latest_checkpoint.pt")
@@ -335,6 +349,8 @@ def test_evaluate_existing_checkpoints_rejects_mismatched_data_contracts(tmp_pat
                 "seed": 42,
                 "num_train_samples": 8,
                 "num_val_samples": 4,
+                "base_wavenumber": 1,
+                "perturbation_modes": [[1, 0], [0, 1], [1, 1], [2, 1]],
                 "perturbation_amplitude": 0.1,
             },
         },
@@ -356,6 +372,8 @@ def test_evaluate_existing_checkpoints_rejects_mismatched_data_contracts(tmp_pat
                 "seed": 43,  # Inconsistent seed!
                 "num_train_samples": 8,
                 "num_val_samples": 4,
+                "base_wavenumber": 1,
+                "perturbation_modes": [[1, 0], [0, 1], [1, 1], [2, 1]],
                 "perturbation_amplitude": 0.1,
             },
         },
@@ -388,6 +406,43 @@ def test_evaluate_existing_checkpoints_rejects_mismatched_data_contracts(tmp_pat
         evaluate_existing_checkpoints(
             checkpoint_dir=str(ckpt_root),
             capacities=[32, 16],
+            output_dir=str(eval_out),
+            device="cpu",
+        )
+
+
+def test_evaluate_existing_checkpoints_rejects_missing_contract_fields(tmp_path):
+    """Enforce fail-closed termination when a checkpoint misses any required parameter (e.g. perturbation_amplitude)."""
+    ckpt_root = tmp_path / "checkpoints_missing_field"
+    cz_dir = ckpt_root / "cz_16"
+    cz_dir.mkdir(parents=True)
+    m = VorticityAutoencoder(in_channels=1, out_channels=1, latent_channels=16, base_channels=8)
+
+    # Missing 'perturbation_amplitude'
+    ckpt_missing_amplitude = {
+        "epoch": 1,
+        "step": 1,
+        "model_state_dict": m.state_dict(),
+        "config": {
+            "model": {"base_channels": 8},
+            "domain": {"nx": 16, "ny": 16, "lx": 1.0, "ly": 1.0},
+            "synthetic_data": {
+                "seed": 42,
+                "num_train_samples": 8,
+                "num_val_samples": 4,
+                "base_wavenumber": 1,
+                "perturbation_modes": [[1, 0], [0, 1], [1, 1], [2, 1]],
+                # 'perturbation_amplitude' is absent!
+            },
+        },
+    }
+    torch.save(ckpt_missing_amplitude, cz_dir / "latest_checkpoint.pt")
+
+    eval_out = tmp_path / "eval_out"
+    with pytest.raises(ValueError, match="missing required field 'perturbation_amplitude'"):
+        evaluate_existing_checkpoints(
+            checkpoint_dir=str(ckpt_root),
+            capacities=[16],
             output_dir=str(eval_out),
             device="cpu",
         )

@@ -450,8 +450,8 @@ def generate_comparison_plots(
 def extract_checkpoint_dataset_contract(ckpt_data: Dict[str, Any], cz: int) -> Dict[str, Any]:
     """Extract and validate the dataset generation contract from checkpoint configuration.
 
-    Fail-closed: raises ValueError if config is missing, sections are missing, seed is absent,
-    or critical contract fields are invalid.
+    Fail-closed: raises ValueError if config is missing, sections are missing,
+    or any required dataset/domain field is absent (no silent defaults permitted).
     """
     cfg = ckpt_data.get("config")
     if not isinstance(cfg, dict):
@@ -465,10 +465,31 @@ def extract_checkpoint_dataset_contract(ckpt_data: Dict[str, Any], cz: int) -> D
     if not isinstance(domain_cfg, dict):
         raise ValueError(f"Checkpoint for Cz={cz} is missing 'domain' section in config.")
 
-    if "seed" not in synth_cfg:
-        raise ValueError(f"Checkpoint for Cz={cz} config.synthetic_data is missing required field 'seed'.")
+    required_synth_fields = [
+        "seed",
+        "num_train_samples",
+        "num_val_samples",
+        "base_wavenumber",
+        "perturbation_modes",
+        "perturbation_amplitude",
+    ]
+    required_domain_fields = ["nx", "ny", "lx", "ly"]
 
-    perturbation_modes = synth_cfg.get("perturbation_modes", [[1, 0], [0, 1], [1, 1], [2, 1]])
+    for f in required_synth_fields:
+        if f not in synth_cfg:
+            raise ValueError(
+                f"Checkpoint for Cz={cz} config.synthetic_data missing required field '{f}'. "
+                f"Implicit defaults are forbidden; dataset configuration must be explicitly defined."
+            )
+
+    for f in required_domain_fields:
+        if f not in domain_cfg:
+            raise ValueError(
+                f"Checkpoint for Cz={cz} config.domain missing required field '{f}'. "
+                f"Implicit defaults are forbidden; domain configuration must be explicitly defined."
+            )
+
+    perturbation_modes = synth_cfg["perturbation_modes"]
     if isinstance(perturbation_modes, list):
         modes_tuple = tuple(tuple(m) if isinstance(m, (list, tuple)) else m for m in perturbation_modes)
     else:
@@ -476,15 +497,15 @@ def extract_checkpoint_dataset_contract(ckpt_data: Dict[str, Any], cz: int) -> D
 
     contract = {
         "seed": synth_cfg["seed"],
-        "num_train_samples": synth_cfg.get("num_train_samples", 128),
-        "num_val_samples": synth_cfg.get("num_val_samples", 32),
-        "base_wavenumber": synth_cfg.get("base_wavenumber", 1),
+        "num_train_samples": synth_cfg["num_train_samples"],
+        "num_val_samples": synth_cfg["num_val_samples"],
+        "base_wavenumber": synth_cfg["base_wavenumber"],
         "perturbation_modes": modes_tuple,
-        "perturbation_amplitude": synth_cfg.get("perturbation_amplitude", 0.1),
-        "nx": domain_cfg.get("nx", 64),
-        "ny": domain_cfg.get("ny", 64),
-        "lx": domain_cfg.get("lx", 1.0),
-        "ly": domain_cfg.get("ly", 1.0),
+        "perturbation_amplitude": synth_cfg["perturbation_amplitude"],
+        "nx": domain_cfg["nx"],
+        "ny": domain_cfg["ny"],
+        "lx": domain_cfg["lx"],
+        "ly": domain_cfg["ly"],
     }
     return contract
 
