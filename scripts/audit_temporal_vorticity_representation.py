@@ -170,6 +170,8 @@ def classify_physical_budget_verdict(
     """
     if threshold_budget_residual is not None:
         thresh = float(threshold_budget_residual)
+        if not math.isfinite(thresh) or thresh < 0.0:
+            raise ValueError(f"threshold_budget_residual must be a non-negative finite float, got {thresh}")
         if max_recon_residual <= thresh and decay_diagnosis == "DECAY_MAGNITUDE_COMPARABLE":
             return "PHYSICALLY_BALANCED"
         if dissipation_attenuated:

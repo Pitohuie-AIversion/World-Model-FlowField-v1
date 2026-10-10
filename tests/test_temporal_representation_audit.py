@@ -356,3 +356,13 @@ def test_classify_physical_budget_verdict_branches(
         threshold_budget_residual=thresh,
     )
     assert verdict == expected_verdict
+
+
+def test_classify_physical_budget_verdict_rejects_negative_and_nan():
+    """Verify classify_physical_budget_verdict raises ValueError for negative, NaN, or Inf threshold."""
+    with pytest.raises(ValueError, match="non-negative finite"):
+        classify_physical_budget_verdict("DECAY_MAGNITUDE_COMPARABLE", False, 0.01, threshold_budget_residual=-0.05)
+    with pytest.raises(ValueError, match="non-negative finite"):
+        classify_physical_budget_verdict("DECAY_MAGNITUDE_COMPARABLE", False, 0.01, threshold_budget_residual=float("nan"))
+    with pytest.raises(ValueError, match="non-negative finite"):
+        classify_physical_budget_verdict("DECAY_MAGNITUDE_COMPARABLE", False, 0.01, threshold_budget_residual=float("inf"))
