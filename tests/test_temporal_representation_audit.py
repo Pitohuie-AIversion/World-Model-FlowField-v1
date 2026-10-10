@@ -228,3 +228,71 @@ def test_audit_pipeline_end_to_end_smoke_decoupled(tmp_path):
     assert summary_file.is_file()
     disk_data = json.loads(summary_file.read_text())
     assert disk_data["capacities_evaluated"] == [64, 16]
+
+
+def test_physical_budget_verdict_contract(tmp_path):
+    """Verify that PHYSICALLY_BALANCED is never granted without explicit residual evaluation against declared threshold."""
+    ckpt_dir = tmp_path / "mock_ckpts"
+    create_mock_checkpoint(ckpt_dir, latent_channels=64)
+
+    cfg_file = tmp_path / "budget_audit_cfg.yaml"
+    out_dir = tmp_path / "budget_output"
+
+    cfg_dict = {
+        "experiment": {
+            "name": "test_budget_verdict",
+            "protocol": "periodic_scalar_advection_diffusion_v1",
+        },
+        "domain": {"nx": 16, "ny": 16, "lx": 1.0, "ly": 1.0},
+        "physical_params": {
+            "u0": 0.5, "v0": 0.5, "nu": 0.001,
+            "base_wavenumber": 1,
+            "perturbation_modes": [[1, 0]],
+            "perturbation_amplitude": 0.1,
+        },
+        "temporal_params": {"dt": 0.05, "num_steps": 3, "total_time": 0.15},
+        "trajectories": {
+            "num_train": 2, "num_val": 2, "num_test": 2,
+            "train_seed_base": 10, "val_seed_base": 20, "test_seed_base": 30,
+        },
+        "windowing": {"history_len": 1, "future_len": 1, "stride": 1},
+        "evaluation": {
+            "capacities": [64],
+            "checkpoint_dir": str(ckpt_dir),
+            "threshold_diagnosis_rel_l2": 2.0,
+            "output_dir": str(out_dir),
+        },
+    }
+
+    # 1. Without threshold_budget_residual declared: verdict must be attenuated bias or unassessed, NEVER physically balanced
+    with open(cfg_file, "w") as f:
+        yaml.safe_dump(cfg_dict, f)
+
+    res = run_temporal_representation_audit(
+        config_path=cfg_file,
+        device_str="cpu",
+        output_dir_override=out_dir,
+        generate_plots=False,
+    )
+    physics = res["models"]["64"]["summary_metrics"]["enstrophy_physics"]
+    assert physics["physical_budget_verdict"] != "PHYSICALLY_BALANCED"
+    assert physics["physical_budget_verdict"] in [
+        "ATTENUATED_DISSIPATION_BIAS",
+        "BUDGET_CONSISTENCY_NOT_ASSESSED",
+        "UNPHYSICAL_ENERGY_GROWTH",
+        "EXCESSIVE_DISSIPATION_BIAS",
+    ]
+
+    # 2. With ultra-low threshold_budget_residual: residual must exceed threshold, rejecting PHYSICALLY_BALANCED
+    cfg_dict["evaluation"]["threshold_budget_residual"] = 1e-8
+    with open(cfg_file, "w") as f:
+        yaml.safe_dump(cfg_dict, f)
+
+    res_strict = run_temporal_representation_audit(
+        config_path=cfg_file,
+        device_str="cpu",
+        output_dir_override=out_dir,
+        generate_plots=False,
+    )
+    physics_strict = res_strict["models"]["64"]["summary_metrics"]["enstrophy_physics"]
+    assert physics_strict["physical_budget_verdict"] != "PHYSICALLY_BALANCED"

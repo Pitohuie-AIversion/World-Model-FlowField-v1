@@ -276,3 +276,64 @@ def test_step_spectral_bandlimited_consistency():
 
     max_err = torch.max(torch.abs(f_alg - f_spec)).item()
     assert max_err < 1e-12, f"Spectral vs algebraic mismatch on bandlimited field: {max_err}"
+
+
+def test_trajectory_isolation_rejects_nan_inf_and_empty():
+    """Verify verify_trajectory_split_isolation strictly rejects NaN, Inf, and empty inputs."""
+    cfg = AdvectionDiffusionConfig(nx=16, ny=16)
+    train_trajs, _ = generate_trajectory_dataset(2, 2, 0.05, 10, cfg=cfg)
+    val_trajs, _ = generate_trajectory_dataset(2, 2, 0.05, 20, cfg=cfg)
+
+    # 1. NaN in train trajectory
+    nan_train = train_trajs.clone()
+    nan_train[0, 0, 0, 0, 0] = float("nan")
+    with pytest.raises(ValueError, match="non-finite|NaN"):
+        verify_trajectory_split_isolation(nan_train, val_trajs)
+
+    # 2. Inf in val trajectory
+    inf_val = val_trajs.clone()
+    inf_val[0, 0, 0, 0, 0] = float("inf")
+    with pytest.raises(ValueError, match="non-finite|NaN"):
+        verify_trajectory_split_isolation(train_trajs, inf_val)
+
+    # 3. Empty tensor
+    empty_t = torch.empty(0, 3, 1, 16, 16)
+    with pytest.raises(ValueError, match="cannot be empty"):
+        verify_trajectory_split_isolation(empty_t, val_trajs)
+
+
+def test_manifest_rejects_seed_mismatch_and_duplicates():
+    """Verify build_trajectory_dataset_manifest validates seed count alignment, uniqueness, and non-finite inputs."""
+    cfg = AdvectionDiffusionConfig(nx=16, ny=16)
+    train_trajs, train_seeds = generate_trajectory_dataset(2, 2, 0.05, 10, cfg=cfg)
+    val_trajs, val_seeds = generate_trajectory_dataset(2, 2, 0.05, 20, cfg=cfg)
+    test_trajs, test_seeds = generate_trajectory_dataset(2, 2, 0.05, 30, cfg=cfg)
+
+    time_cfg = {"num_steps": 2, "dt": 0.05, "total_time": 0.10}
+    window_cfg = {"history_len": 1, "future_len": 1, "stride": 1}
+
+    # 1. Seed count mismatch (3 seeds for 2 trajectories)
+    with pytest.raises(ValueError, match="seed count .* does not match trajectory count"):
+        build_trajectory_dataset_manifest(
+            train_trajs, val_trajs, test_trajs,
+            [10, 11, 12], val_seeds, test_seeds,
+            adv_cfg=cfg, time_cfg=time_cfg, window_cfg=window_cfg,
+        )
+
+    # 2. Duplicate seed inside single partition
+    with pytest.raises(ValueError, match="contains duplicate seed"):
+        build_trajectory_dataset_manifest(
+            train_trajs, val_trajs, test_trajs,
+            [10, 10], val_seeds, test_seeds,
+            adv_cfg=cfg, time_cfg=time_cfg, window_cfg=window_cfg,
+        )
+
+    # 3. Non-finite values in manifest generation
+    nan_train = train_trajs.clone()
+    nan_train[0, 0, 0, 0, 0] = float("nan")
+    with pytest.raises(ValueError, match="non-finite"):
+        build_trajectory_dataset_manifest(
+            nan_train, val_trajs, test_trajs,
+            train_seeds, val_seeds, test_seeds,
+            adv_cfg=cfg, time_cfg=time_cfg, window_cfg=window_cfg,
+        )

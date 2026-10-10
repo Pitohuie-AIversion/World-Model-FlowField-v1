@@ -433,10 +433,11 @@ def verify_trajectory_split_isolation(
     val_trajectories: torch.Tensor,
     test_trajectories: Optional[torch.Tensor] = None,
     min_dist_threshold: float = 1e-3,
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """Verify strictly zero data leakage across trajectory splits by initial states.
 
     Computes minimum pairwise L2 distance between t=0 initial fields across partitions.
+    Validates that inputs and pairwise distances are non-empty and strictly finite.
 
     Args:
         train_trajectories: Tensor of shape (N_train, T+1, C, H, W)
@@ -445,26 +446,46 @@ def verify_trajectory_split_isolation(
         min_dist_threshold: Threshold below which initial states are flagged as leaked.
 
     Returns:
-        Dict with minimum distances between split pairs.
+        Dict with minimum distances between split pairs and isolation verdict.
     """
+    for name, t in [("train", train_trajectories), ("val", val_trajectories)]:
+        if t.numel() == 0 or t.shape[0] == 0:
+            raise ValueError(f"Trajectory tensor for {name} partition cannot be empty.")
+        if not torch.isfinite(t).all():
+            raise ValueError(f"Trajectory tensor for {name} partition contains non-finite values (NaN/Inf).")
+
+    if test_trajectories is not None:
+        if test_trajectories.numel() == 0 or test_trajectories.shape[0] == 0:
+            raise ValueError("Trajectory tensor for test partition cannot be empty.")
+        if not torch.isfinite(test_trajectories).all():
+            raise ValueError("Trajectory tensor for test partition contains non-finite values (NaN/Inf).")
+
     train_init = train_trajectories[:, 0].flatten(start_dim=1)  # (N_train, D)
     val_init = val_trajectories[:, 0].flatten(start_dim=1)      # (N_val, D)
 
     # Val vs Train
     dist_val_train = torch.cdist(val_init, train_init, p=2)
+    if not torch.isfinite(dist_val_train).all():
+        raise ValueError("Computed distance matrix between Val and Train contains non-finite values (NaN/Inf).")
     min_vt = float(torch.min(dist_val_train).item())
+    if not math.isfinite(min_vt):
+        raise ValueError(f"Minimum distance between Val and Train is not finite: {min_vt}")
     if min_vt < min_dist_threshold:
         raise ValueError(
             f"Data leakage detected between Validation and Train initial states: "
             f"min L2 distance {min_vt:.6e} < {min_dist_threshold}."
         )
 
-    results = {"val_vs_train_min_l2": min_vt}
+    results: Dict[str, Any] = {"val_vs_train_min_l2": min_vt}
 
     if test_trajectories is not None:
         test_init = test_trajectories[:, 0].flatten(start_dim=1)
         dist_test_train = torch.cdist(test_init, train_init, p=2)
+        if not torch.isfinite(dist_test_train).all():
+            raise ValueError("Computed distance matrix between Test and Train contains non-finite values (NaN/Inf).")
         min_tt = float(torch.min(dist_test_train).item())
+        if not math.isfinite(min_tt):
+            raise ValueError(f"Minimum distance between Test and Train is not finite: {min_tt}")
         if min_tt < min_dist_threshold:
             raise ValueError(
                 f"Data leakage detected between Test and Train initial states: "
@@ -472,7 +493,11 @@ def verify_trajectory_split_isolation(
             )
 
         dist_test_val = torch.cdist(test_init, val_init, p=2)
+        if not torch.isfinite(dist_test_val).all():
+            raise ValueError("Computed distance matrix between Test and Val contains non-finite values (NaN/Inf).")
         min_tv = float(torch.min(dist_test_val).item())
+        if not math.isfinite(min_tv):
+            raise ValueError(f"Minimum distance between Test and Val is not finite: {min_tv}")
         if min_tv < min_dist_threshold:
             raise ValueError(
                 f"Data leakage detected between Test and Validation initial states: "
@@ -498,7 +523,31 @@ def build_trajectory_dataset_manifest(
     window_cfg: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Build a comprehensive dataset manifest recording seeds, digests, and window-to-trajectory mappings."""
-    # Partition seeds disjointness check
+    # Validate non-empty and finite tensors
+    for name, t in [("train", train_trajectories), ("val", val_trajectories), ("test", test_trajectories)]:
+        if t.numel() == 0 or t.shape[0] == 0:
+            raise ValueError(f"{name} partition trajectory tensor cannot be empty.")
+        if not torch.isfinite(t).all():
+            raise ValueError(f"{name} partition trajectory tensor contains non-finite values (NaN/Inf).")
+
+    # Validate seed counts and uniqueness within each partition
+    partitions_data = [
+        ("train", train_trajectories, train_seeds),
+        ("val", val_trajectories, val_seeds),
+        ("test", test_trajectories, test_seeds),
+    ]
+    for name, trajs, seeds in partitions_data:
+        n_traj = trajs.shape[0]
+        if len(seeds) != n_traj:
+            raise ValueError(
+                f"{name} partition seed count ({len(seeds)}) does not match trajectory count ({n_traj})."
+            )
+        if len(set(seeds)) != len(seeds):
+            raise ValueError(
+                f"{name} partition contains duplicate seed values."
+            )
+
+    # Partition seeds disjointness check across partitions
     s_train, s_val, s_test = set(train_seeds), set(val_seeds), set(test_seeds)
     if not s_train.isdisjoint(s_val) or not s_train.isdisjoint(s_test) or not s_val.isdisjoint(s_test):
         raise ValueError("Trajectory seeds across train, val, and test partitions must be strictly disjoint!")
@@ -513,12 +562,15 @@ def build_trajectory_dataset_manifest(
     _, _, val_map = build_trajectory_windows(val_trajectories, h_len, f_len, stride, val_seeds, return_mapping=True)
     _, _, test_map = build_trajectory_windows(test_trajectories, h_len, f_len, stride, test_seeds, return_mapping=True)
 
+    total_windows = len(train_map) + len(val_map) + len(test_map)
+
     manifest: Dict[str, Any] = {
         "manifest_version": "1.0.0",
         "protocol": "periodic_scalar_advection_diffusion_v1",
         "physical_configuration": adv_cfg.to_dict(),
         "temporal_parameters": time_cfg,
         "window_parameters": window_cfg,
+        "total_windows_all_partitions": total_windows,
         "isolation_metrics": isolation_check,
         "partitions": {
             "train": {

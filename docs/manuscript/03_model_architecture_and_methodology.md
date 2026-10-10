@@ -87,9 +87,14 @@ $$p(x, y, t) \sim p(x, y, t) + C(t)$$
 
 $$\mathcal{L}_{\text{total}} = \sum_{h=1}^H w_h \mathcal{L}_{\mathrm{field}, h} + \lambda_{\mathrm{div}} \mathcal{L}_{\mathrm{div}} + \lambda_\omega \mathcal{L}_\omega$$
 
+### 1. 确定性基础损失与谱物理监督 (Closure-R4)
+为使预测场既满足数值逼真度，又符合流体力学基本守恒定律，确定性主干的联合优化目标由基础场值损失与频域谱物理正则项构成：
+
+$$\mathcal{L}_{\text{total}} = \sum_{h=1}^H w_h \mathcal{L}_{\mathrm{field}, h} + \lambda_{\mathrm{div}} \mathcal{L}_{\mathrm{div}} + \lambda_\omega \mathcal{L}_\omega$$
+
 其中：
-- **基础场值重构损失**：采用鲁棒的平均绝对误差（$L_1$ 范数），遍历所有物理通道：
-  $$\mathcal{L}_{\mathrm{field}, h} = \frac{1}{4} \sum_{c \in \{u, v, p, s\}} \frac{1}{N_x N_y} \sum_{i, j} \left| \widehat{q}_{t+h, c}(i, j) - q^*_{t+h, c}(i, j) \right|$$
+- **基础场值重构损失**：采用均方误差（Mean Squared Error, MSE 范数），遍历所有物理通道：
+  $$\mathcal{L}_{\mathrm{field}, h} = \frac{1}{4} \sum_{c \in \{u, v, p, s\}} \frac{1}{N_x N_y} \sum_{i, j} \left( \widehat{q}_{t+h, c}(i, j) - q^*_{t+h, c}(i, j) \right)^2$$
 - **傅里叶谱不可压缩散度损失 ($\mathcal{L}_{\mathrm{div}}$)**：
   流体不可压缩性要求速度场在物理空间散度为零。基于二维正交离散傅里叶变换（2D FFT），谱空间散度算子具有精确的解析频域表示：
   $$\mathcal{L}_{\mathrm{div}} = \left\| \nabla \cdot \widehat{\mathbf{u}} \right\|_2^2 = \left\| \mathcal{F}^{-1}\left( i k_x \widehat{U}(k_x, k_y) + i k_y \widehat{V}(k_x, k_y) \right) \right\|_2^2$$
@@ -100,9 +105,9 @@ $$\mathcal{L}_{\text{total}} = \sum_{h=1}^H w_h \mathcal{L}_{\mathrm{field}, h} 
   强力约束剪切失稳界面的卷吸几何与微细涡旋尺度。
 
 ### 2. 连续方程残差（PDE-Controlled）微调机制
-在方程控制微调分支中，模型直接基于时空导数计算 Navier-Stokes 动量方程残差与被动标量输运残差：
-$$\mathcal{R}_{\text{mom}} = \frac{\widehat{\mathbf{u}}_{t+1} - \mathbf{u}_t}{\Delta t} + (\mathbf{u}_t \cdot \nabla)\mathbf{u}_t + \nabla p_t - \frac{1}{Re}\nabla^2 \mathbf{u}_t$$
-$$\mathcal{R}_{\text{tracer}} = \frac{\widehat{s}_{t+1} - s_t}{\Delta t} + (\mathbf{u}_t \cdot \nabla)s_t - \frac{1}{Re \cdot Sc}\nabla^2 s_t$$
+在方程控制微调分支中，模型基于相邻状态区间 $[q_n, q_{n+1}]$ 计算 Crank-Nicolson / 梯形时间离散残差。设动量与示踪物空间微分算子分别为 $\mathcal{A}_{\mathbf{u}}(q) = (\mathbf{u} \cdot \nabla)\mathbf{u} + \nabla p - \frac{1}{Re}\nabla^2\mathbf{u}$ 与 $\mathcal{A}_s(q) = (\mathbf{u} \cdot \nabla)s - \frac{1}{Re \cdot Sc}\nabla^2 s$，残差定义为两端点算子的对称平均：
+$$\mathcal{R}_{\text{mom}, n+1/2} = \frac{\widehat{\mathbf{u}}_{n+1} - \mathbf{u}_n}{\Delta t} + \frac{1}{2}\left[\mathcal{A}_{\mathbf{u}}(\widehat{q}_{n+1}) + \mathcal{A}_{\mathbf{u}}(q_n)\right]$$
+$$\mathcal{R}_{\text{tracer}, n+1/2} = \frac{\widehat{s}_{n+1} - s_n}{\Delta t} + \frac{1}{2}\left[\mathcal{A}_s(\widehat{q}_{n+1}) + \mathcal{A}_s(q_n)\right]$$
 $$\mathcal{L}_{\text{PDE}} = \lambda_{\text{mom}}\left\| \mathcal{R}_{\text{mom}} \right\|_2^2 + \lambda_{\text{tracer}}\left\| \mathcal{R}_{\text{tracer}} \right\|_2^2$$
 
 > **代码约束与时间差分设置澄清**：
@@ -115,12 +120,13 @@ $$\mathcal{L}_{\text{PDE}} = \lambda_{\text{mom}}\left\| \mathcal{R}_{\text{mom}
 | 训练阶段 / 实验分支代号 | 可训练参数模块 (Trainable) | 严格冻结模块 (Frozen) | 优化目标与权重设置 | 训练周期与超参 |
 | :--- | :--- | :--- | :--- | :--- |
 | **阶段 1：空间自编码器** | Encoder2D, Decoder2D | 无 (端到端空间表征优化) | $\mathcal{L}_{\mathrm{field}} + 0.1 \mathcal{L}_\omega + \text{Gauge}$ | 50 Epochs, Batch=16, AdamW, $\text{lr}=10^{-3}$ |
-| **阶段 2：单步基线 (E0)** | LatentSTTransformer | Encoder2D, Decoder2D 严格冻结 | 仅单步场值损失 $\mathcal{L}_{\mathrm{field}}$ ($H=1$) | 40 Epochs, Batch=8, AdamW, $\text{lr}=5 \times 10^{-4}$ |
-| **阶段 2：多步基线 (E1)** | LatentSTTransformer | Encoder2D, Decoder2D 严格冻结 | 2 步自回归场损失 $\mathcal{L}_{\mathrm{field}}$ ($H=2$) | 40 Epochs, Batch=8, AdamW, $\text{lr}=5 \times 10^{-4}$ |
+| **阶段 2：单步基线 (E0)** | LatentSTTransformer | Encoder2D, Decoder2D 严格冻结 | 仅单步场值 MSE 损失 ($H=1$) | 40 Epochs, Batch=8, AdamW, $\text{lr}=5 \times 10^{-4}$ |
+| **阶段 2：多步基线 (E1)** | LatentSTTransformer | Encoder2D, Decoder2D 严格冻结 | 2 步自回归场 MSE 损失 ($H=2$) | 40 Epochs, Batch=8, AdamW, $\text{lr}=5 \times 10^{-4}$ |
 | **阶段 2：全物理约束 (E4)**| LatentSTTransformer | Encoder2D, Decoder2D 严格冻结 | $\mathcal{L}_{\mathrm{field}} + 0.01\mathcal{L}_{\mathrm{div}} + 0.05\mathcal{L}_\omega$ | 40 Epochs, Batch=8, AdamW, $\text{lr}=5 \times 10^{-4}$ |
-| **阶段 3：PDE 受控微调** | LatentSTTransformer | Encoder2D, Decoder2D 严格冻结 | $\mathcal{L}_{\mathrm{base}} + \lambda_{\text{mom}}\mathcal{L}_{\text{mom}} + \lambda_{\text{tr}}\mathcal{L}_{\text{tr}}$ ($H=12, \text{pushforward}=0$) | 50 Epochs, Batch=4, 恒定学习率 $10^{-5}$ |
+| **阶段 3：PDE 受控微调** | LatentSTTransformer | Encoder2D, Decoder2D 严格冻结 | $\mathcal{L}_{\mathrm{base}} + \lambda_{\text{mom}}\mathcal{L}_{\text{mom}} + \lambda_{\text{tr}}\mathcal{L}_{\text{tr}}$ ($H=12, \text{pushforward}=0$) | 50 Steps, Batch=8, 恒定学习率 $5 \times 10^{-5}$ (基于父模型 D0) |
 | **阶段 4：概率方差头 (G1)** | **VarianceHead2D 独占更新** | **确定性主干网络及编解码器全冻结** | 潜空间高斯负对数似然 (Latent NLL) | 30 Epochs, Batch=8, 预测局部方差 $\sigma_z^2$ |
-| **阶段 5：残差流匹配 (FM)** | **潜速度场网络 $v_\theta$ 独占更新** | **确定性主干网络及编解码器全冻结** | 流匹配速度场平方误差回归损失 $\mathcal{L}_{\text{FM}}$ | 40 Epochs, Batch=4, 神经 ODE 连续积分推演 |
+| **阶段 5：基础残差流匹配 (FM)** | **潜速度场网络 $v_\theta$ 独占更新** | **确定性主干网络及编解码器全冻结** | 流匹配速度场平方误差回归损失 $\mathcal{L}_{\text{FM}}$ | 40 Epochs, Batch=4, 预训练连续潜速度场 |
+| **阶段 5：自生成历史微调 (FM R2-A)** | **潜速度场网络 $v_\theta$ 独占更新** | **确定性主干网络及编解码器全冻结** | 自条件流匹配损失 $\mathcal{L}_{\text{FM}}$ | 1 Epoch, Batch=4, $\text{lr}=5 \times 10^{-5}$ (受控复现微调) |
 
 ---
 
@@ -135,7 +141,7 @@ $$\widehat{q}_{t+1}^{(k)} = \mathcal{D}_\psi\left(Z_{t+1}^{(k)}\right)$$
 > **重要的非线性测度映射与均值关系说明**：
 > 由于空间解码器 $\mathcal{D}_\psi$ 包含多层双线性插值与带非线性激活函数的卷积残差块，属于典型的非线性映射（Non-linear Push-forward Operator）。在严格数学推导中：
 > 1. 潜变量服从对角高斯分布，**并不必然推导**物理空间流场也服从对称高斯分布；
-> 2. 预测潜状态均值的解码结果，**一般情况下并不保证等同于**物理空间后验采样的系综均值，即通常 $\mathcal{D}_\psi(\mathbb{E}[Z]) \neq \mathbb{E}[\mathcal{D}_\psi(Z)]$（除非映射退化为仿射线性变换）；
+> 2. 预测潜状态均值的解码结果，**一般情况下并不保证等同于**物理空间后验采样的系综均值，即通常 $\mathcal{D}_\psi(\mathbb{E}[Z]) \neq \mathbb{E}[\mathcal{D}_\psi(Z)]$（除非映射完全退化为仿射线性变换，或在特定对称零测度分布下偶然成立）；
 > 3. 因此，针对潜状态分布评价的指标（如 Latent NLL 与潜空间区间覆盖率），不能直接等同于解码后物理空间流场分布已经得到保形校准，两者必须分别进行实证评估。
 
 ### 2. 连续残差流匹配生成 (Residual Flow Matching)
@@ -143,4 +149,4 @@ $$\widehat{q}_{t+1}^{(k)} = \mathcal{D}_\psi\left(Z_{t+1}^{(k)}\right)$$
 $$\frac{d Z_\tau}{d \tau} = v_\theta\left(Z_\tau, \tau; \mathcal{H}, c\right), \quad Z_{\tau=0} \sim \mathcal{N}(0, I), \quad Z_{\tau=1} = Z_{t+1}$$
 通过条件流匹配目标（Conditional Flow Matching）监督速度场网络：
 $$\mathcal{L}_{\mathrm{FM}} = \mathbb{E}_{\tau, Z_0, Z_1} \left\| v_\theta(Z_\tau, \tau; \mathcal{H}, c) - \frac{d Z_\tau}{d \tau} \right\|_2^2$$
-在推理阶段，通过自适应步长 Runge-Kutta 神经 ODE 求解器沿 $\tau \in [0, 1]$ 积分求解，生成下一时刻潜状态。
+在推理阶段，通过固定步数的中点法神经 ODE 求解器（Midpoint Solver，固定积分步数 `num_flow_steps = 10`）沿 $\tau \in [0, 1]$ 积分求解，生成下一时刻潜状态。

@@ -200,7 +200,7 @@ def run_temporal_representation_audit(
         "metadata": {
             "experiment_name": cfg["experiment"]["name"],
             "protocol": cfg["experiment"]["protocol"],
-            "date": cfg["experiment"]["date"],
+            "date": cfg["experiment"].get("date", "2026-10-10"),
             "device": dev_str,
             "domain": dom_cfg,
             "physical_parameters": phys_cfg,
@@ -321,8 +321,41 @@ def run_temporal_representation_audit(
         max_recon_residual = float(max(abs(r) for r in recon_budget_residuals))
         mean_recon_residual = float(np.mean(recon_budget_residuals))
 
-        # Check attenuation bias
-        dissipation_attenuated = bool(recon_z_total_decay_pct < 0.20 * gt_z_total_decay_pct)
+        # 1. Decay magnitude diagnosis
+        if recon_z_total_decay_pct < 0.20 * gt_z_total_decay_pct:
+            decay_diagnosis = "ATTENUATED_DISSIPATION_BIAS"
+            dissipation_attenuated = True
+        elif recon_z_total_decay_pct < 0.0:
+            decay_diagnosis = "UNPHYSICAL_ENERGY_GROWTH"
+            dissipation_attenuated = False
+        elif recon_z_total_decay_pct > 2.0 * gt_z_total_decay_pct:
+            decay_diagnosis = "EXCESSIVE_DISSIPATION_BIAS"
+            dissipation_attenuated = False
+        else:
+            decay_diagnosis = "DECAY_MAGNITUDE_COMPARABLE"
+            dissipation_attenuated = False
+
+        # 2. Physical budget consistency verdict:
+        # Avoid granting PHYSICALLY_BALANCED unless a budget threshold is explicitly declared
+        # and both residual condition and decay comparability are rigorously met.
+        threshold_budget_res = eval_cfg.get("threshold_budget_residual", None)
+        if threshold_budget_res is not None:
+            threshold_budget_res = float(threshold_budget_res)
+            if max_recon_residual <= threshold_budget_res and decay_diagnosis == "DECAY_MAGNITUDE_COMPARABLE":
+                budget_verdict = "PHYSICALLY_BALANCED"
+            elif dissipation_attenuated:
+                budget_verdict = "ATTENUATED_DISSIPATION_BIAS"
+            elif decay_diagnosis != "DECAY_MAGNITUDE_COMPARABLE":
+                budget_verdict = decay_diagnosis
+            else:
+                budget_verdict = "PHYSICAL_BUDGET_RESIDUAL_EXCEEDED"
+        else:
+            if dissipation_attenuated:
+                budget_verdict = "ATTENUATED_DISSIPATION_BIAS"
+            elif decay_diagnosis != "DECAY_MAGNITUDE_COMPARABLE":
+                budget_verdict = decay_diagnosis
+            else:
+                budget_verdict = "BUDGET_CONSISTENCY_NOT_ASSESSED"
 
         results["models"][str(cz)] = {
             "checkpoint_path": str(ckpt_path),
@@ -350,11 +383,10 @@ def run_temporal_representation_audit(
                     "recon_total_decay_percent": recon_z_total_decay_pct,
                     "max_enstrophy_budget_residual": max_recon_residual,
                     "mean_enstrophy_budget_residual": mean_recon_residual,
+                    "decay_magnitude_diagnosis": decay_diagnosis,
                     "dissipation_attenuation_bias": dissipation_attenuated,
-                    "physical_budget_verdict": (
-                        "ATTENUATED_DISSIPATION_BIAS"
-                        if dissipation_attenuated else "PHYSICALLY_BALANCED"
-                    ),
+                    "threshold_budget_residual_declared": threshold_budget_res,
+                    "physical_budget_verdict": budget_verdict,
                 },
             },
             "time_series": {
@@ -391,9 +423,8 @@ def run_temporal_representation_audit(
         print(f"=== Evaluated Frozen Capacity Cz={cz} on Dynamic Trajectories ===")
         print(f"    t=0.00s Rel L2: {rel_l2_series[0]*100:.2f}% | PDE: {pde_series[0]*100:.2f}%")
         print(f"    t={total_time:.2f}s Rel L2: {rel_l2_series[-1]*100:.2f}% | PDE: {pde_series[-1]*100:.2f}%")
-        print(f"    Max Rel L2: {max_rel_l2*100:.2f}% (Threshold: {threshold*100:.2f}%) -> {results['models'][str(cz)]['summary_metrics']['diagnostic_verdict']}")
-        print(f"    GT Enstrophy Decay: {gt_z_total_decay_pct:.2f}% | Recon Enstrophy Decay: {recon_z_total_decay_pct:.2f}%")
-        print(f"    Physical Budget Verdict: {results['models'][str(cz)]['summary_metrics']['enstrophy_physics']['physical_budget_verdict']}")
+        print(f"    GT Enstrophy Decay: {gt_z_total_decay_pct:.2f}% | Recon Enstrophy Decay: {recon_z_total_decay_pct:.2f}% -> {decay_diagnosis}")
+        print(f"    Physical Budget Verdict: {budget_verdict}")
 
     # 5. Generate Visualization Plots
     generated_plots = []
