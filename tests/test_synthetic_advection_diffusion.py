@@ -7,7 +7,9 @@ import torch
 from src.data.synthetic_advection_diffusion import (
     AdvectionDiffusionConfig,
     PeriodicScalarAdvectionDiffusion,
+    build_trajectory_dataset_manifest,
     build_trajectory_windows,
+    compute_enstrophy_budget_residual,
     generate_trajectory_dataset,
     verify_trajectory_split_isolation,
 )
@@ -159,21 +161,34 @@ def test_trajectory_isolation_and_no_leakage():
 
 
 def test_trajectory_windowing_contract():
-    """Verify build_trajectory_windows slices trajectories into [B, L, C, H, W] and [B, H, C, H, W]."""
+    """Verify build_trajectory_windows slices trajectories into [B, L, C, H, W] and [B, H, C, H, W], and tracks window mapping."""
     cfg = AdvectionDiffusionConfig(nx=32, ny=32)
-    trajs, _ = generate_trajectory_dataset(
+    trajs, seeds = generate_trajectory_dataset(
         num_trajectories=3, num_steps=10, dt=0.05, seed_base=100, cfg=cfg,
     )
     # trajs shape: (3, 11, 1, 32, 32)
+    # 1. Default backward compatible call
     hist, fut = build_trajectory_windows(trajs, history_len=3, future_len=5, stride=2)
 
     assert hist.ndim == 5 and hist.shape[1] == 3 and hist.shape[2:] == (1, 32, 32)
     assert fut.ndim == 5 and fut.shape[1] == 5 and fut.shape[2:] == (1, 32, 32)
     assert hist.shape[0] == fut.shape[0]
-
-    # Verify no NaN or Inf
     assert torch.isfinite(hist).all()
     assert torch.isfinite(fut).all()
+
+    # 2. Window identity mapping call
+    hist2, fut2, mapping = build_trajectory_windows(
+        trajs, history_len=3, future_len=5, stride=2, trajectory_seeds=seeds, return_mapping=True,
+    )
+    assert hist2.shape == hist.shape and fut2.shape == fut.shape
+    assert len(mapping) == hist.shape[0]
+    for w in mapping:
+        assert "window_idx" in w
+        assert "trajectory_idx" in w
+        assert "trajectory_seed" in w
+        assert w["trajectory_seed"] in seeds
+        assert w["history_slice"][1] - w["history_slice"][0] == 3
+        assert w["future_slice"][1] - w["future_slice"][0] == 5
 
 
 def test_enstrophy_dissipation_rate_matches_derivative():
@@ -196,3 +211,68 @@ def test_enstrophy_dissipation_rate_matches_derivative():
 
     rel_error = abs(discrete_rate - avg_diss) / abs(avg_diss)
     assert rel_error < 0.01, f"Dissipation rate mismatch: discrete {discrete_rate:.6f} vs analytical {avg_diss:.6f}"
+
+
+def test_enstrophy_budget_residual_analytical():
+    """Verify compute_enstrophy_budget_residual yields near-zero residual for analytical solutions."""
+    cfg = AdvectionDiffusionConfig(nx=64, ny=64, u0=0.5, v0=0.5, nu=0.002)
+    solver = PeriodicScalarAdvectionDiffusion(cfg=cfg)
+
+    f0, phases = solver.generate_initial_condition(seed=77, dtype=torch.float64)
+    dt = 0.02
+    f1 = solver.step_algebraic(t=dt, phases=phases, dtype=torch.float64)
+
+    z0 = solver.compute_enstrophy(f0)
+    z1 = solver.compute_enstrophy(f1)
+    diss0 = solver.compute_enstrophy_dissipation_rate(f0)
+    diss1 = solver.compute_enstrophy_dissipation_rate(f1)
+
+    residual = compute_enstrophy_budget_residual(z0, z1, diss0, diss1, dt=dt)
+    # Trapezoidal rule error is O(dt^2) -> residual should be < 1e-4
+    assert abs(residual) < 1e-4, f"Analytical residual too large: {residual}"
+
+
+def test_dataset_manifest_and_identity_governance(tmp_path):
+    """Verify build_trajectory_dataset_manifest enforces disjoint seeds and creates full identity records."""
+    cfg = AdvectionDiffusionConfig(nx=32, ny=32)
+    train_trajs, train_seeds = generate_trajectory_dataset(2, 4, 0.05, 100, cfg=cfg)
+    val_trajs, val_seeds = generate_trajectory_dataset(2, 4, 0.05, 200, cfg=cfg)
+    test_trajs, test_seeds = generate_trajectory_dataset(2, 4, 0.05, 300, cfg=cfg)
+
+    time_cfg = {"num_steps": 4, "dt": 0.05, "total_time": 0.20}
+    window_cfg = {"history_len": 1, "future_len": 2, "stride": 1}
+
+    manifest = build_trajectory_dataset_manifest(
+        train_trajs, val_trajs, test_trajs,
+        train_seeds, val_seeds, test_seeds,
+        adv_cfg=cfg, time_cfg=time_cfg, window_cfg=window_cfg,
+    )
+
+    assert manifest["protocol"] == "periodic_scalar_advection_diffusion_v1"
+    assert manifest["isolation_metrics"]["is_strictly_isolated"] is True
+    assert set(train_seeds).isdisjoint(set(val_seeds))
+    assert set(val_seeds).isdisjoint(set(test_seeds))
+    assert len(manifest["partitions"]["train"]["window_mapping"]) > 0
+
+    # Test error on overlapping seeds
+    with pytest.raises(ValueError, match="strictly disjoint"):
+        build_trajectory_dataset_manifest(
+            train_trajs, val_trajs, test_trajs,
+            train_seeds, train_seeds, test_seeds,  # train_seeds duplicated into val
+            adv_cfg=cfg, time_cfg=time_cfg, window_cfg=window_cfg,
+        )
+
+
+def test_step_spectral_bandlimited_consistency():
+    """Verify that step_spectral exactly matches step_algebraic for band-limited initial fields."""
+    cfg = AdvectionDiffusionConfig(nx=64, ny=64, u0=0.3, v0=-0.4, nu=0.001)
+    solver = PeriodicScalarAdvectionDiffusion(cfg=cfg)
+
+    # Synthetic initial condition has modes up to K_MAX = 4, strictly band-limited
+    f0, phases = solver.generate_initial_condition(seed=12, dtype=torch.float64)
+    t = 0.5
+    f_alg = solver.step_algebraic(t=t, phases=phases, dtype=torch.float64)
+    f_spec = solver.step_spectral(field_0=f0, t=t)
+
+    max_err = torch.max(torch.abs(f_alg - f_spec)).item()
+    assert max_err < 1e-12, f"Spectral vs algebraic mismatch on bandlimited field: {max_err}"

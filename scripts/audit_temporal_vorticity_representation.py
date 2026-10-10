@@ -6,8 +6,8 @@ periodic scalar advection-diffusion trajectories.
 
 Scientific Objective:
 Examine whether the frozen representation manifold (trained strictly on static background fields)
-maintains reconstruction fidelity when subjected to spatial translation and viscous dissipation
-over continuous time t in [0, T].
+maintains reconstruction fidelity and physical conservation when subjected to spatial translation
+and viscous dissipation over continuous time t in [0, T].
 
 Engineering Contracts:
 1. Zero retraining or weight updates: autoencoders are loaded in eval() mode with all
@@ -15,7 +15,10 @@ Engineering Contracts:
 2. Checkpoint immutability assertion: SHA-256 of checkpoint files is verified before and after execution.
 3. Pre-declared diagnostic threshold: if frozen AE reconstruction error exceeds 20% (threshold_diagnosis_rel_l2),
    the audit flags an out-of-distribution diagnostic alert in the summary without silently masking it.
-4. Physical enstrophy budget tracking: monitors both instantaneous enstrophy Z(t) and dissipation rate dZ/dt.
+4. Physical enstrophy budget tracking: monitors both instantaneous enstrophy Z(t), instantaneous dissipation
+   rate diss(t) = -nu * <|grad omega|^2>, and the enstrophy budget residual:
+       R_Z(t_k) = (Z(t_{k+1}) - Z(t_k)) / dt - 0.5 * (diss(t_k) + diss(t_{k+1}))
+5. Comprehensive dataset manifest: saves complete partition splits, seeds, digests, and window-to-trajectory mappings.
 """
 
 import argparse
@@ -44,6 +47,8 @@ from scripts.train_vorticity_autoencoder import VorticityAutoencoder
 from src.data.synthetic_advection_diffusion import (
     AdvectionDiffusionConfig,
     PeriodicScalarAdvectionDiffusion,
+    build_trajectory_dataset_manifest,
+    compute_enstrophy_budget_residual,
     compute_tensor_digest,
     generate_trajectory_dataset,
     verify_trajectory_split_isolation,
@@ -125,6 +130,7 @@ def run_temporal_representation_audit(
     time_cfg = cfg["temporal_params"]
     traj_cfg = cfg["trajectories"]
     eval_cfg = cfg["evaluation"]
+    win_cfg = cfg.get("windowing", {"history_len": 4, "future_len": 16, "stride": 1})
 
     adv_cfg = AdvectionDiffusionConfig(
         nx=dom_cfg["nx"],
@@ -168,13 +174,21 @@ def run_temporal_representation_audit(
         seed_base=test_seed_base, cfg=adv_cfg, device=dev,
     )
 
-    # Fail-closed partition isolation assertion
-    isolation_res = verify_trajectory_split_isolation(
+    # Build and persist complete dataset manifest
+    dataset_manifest = build_trajectory_dataset_manifest(
         train_trajectories=train_trajs,
         val_trajectories=val_trajs,
         test_trajectories=test_trajs,
-        min_dist_threshold=1e-3,
+        train_seeds=train_seeds,
+        val_seeds=val_seeds,
+        test_seeds=test_seeds,
+        adv_cfg=adv_cfg,
+        time_cfg=time_cfg,
+        window_cfg=win_cfg,
     )
+    manifest_path = out_dir / "temporal_dataset_manifest.json"
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(dataset_manifest, f, indent=2)
 
     val_digest = compute_tensor_digest(val_trajs)
 
@@ -193,15 +207,20 @@ def run_temporal_representation_audit(
             "temporal_parameters": time_cfg,
             "time_points": time_points,
             "threshold_diagnosis_rel_l2": threshold,
-            "dataset_isolation": isolation_res,
+            "dataset_manifest_file": str(manifest_path),
+            "dataset_isolation": dataset_manifest["isolation_metrics"],
             "validation_dataset_digest": val_digest,
+            "scientific_note": (
+                "Threshold diagnosis specifically checks field-level relative L2 reconstruction error. "
+                "Physical enstrophy dissipation fidelity is tracked separately via enstrophy budget residuals."
+            ),
         },
         "capacities_evaluated": capacities,
         "models": {},
     }
 
     # 3. Evaluate each frozen capacity across time points
-    plot_data: Dict[int, Dict[str, List[float]]] = {}
+    plot_data: Dict[int, Dict[str, Any]] = {}
 
     for cz in capacities:
         ckpt_path = ckpt_root / f"cz_{cz}" / "latest_checkpoint.pt"
@@ -248,7 +267,7 @@ def run_temporal_representation_audit(
                 recon_enstrophy_series.append(float(recon_z))
                 enstrophy_ratio_series.append(float(recon_z / (gt_z + 1e-12)))
 
-                # Enstrophy Dissipation Rate: dZ/dt = -nu * mean(|grad omega|^2)
+                # Enstrophy Dissipation Rate: diss = -nu * mean(|grad omega|^2) (<= 0)
                 gt_diss = solver.compute_enstrophy_dissipation_rate(gt_frame).mean().item()
                 recon_diss = solver.compute_enstrophy_dissipation_rate(recon_frame).mean().item()
                 gt_dissipation_series.append(float(gt_diss))
@@ -263,12 +282,47 @@ def run_temporal_representation_audit(
                 f"Before: {sha_before}, After: {sha_after}."
             )
 
+        # 4. Enstrophy budget residual calculation
+        # R_Z(t_k) = (Z(t_{k+1}) - Z(t_k)) / dt - 0.5 * (diss_k + diss_{k+1})
+        gt_delta_rate_series = []
+        recon_delta_rate_series = []
+        gt_budget_residuals = []
+        recon_budget_residuals = []
+
+        for k in range(num_steps):
+            gt_delta_rate = (gt_enstrophy_series[k + 1] - gt_enstrophy_series[k]) / dt
+            recon_delta_rate = (recon_enstrophy_series[k + 1] - recon_enstrophy_series[k]) / dt
+            gt_delta_rate_series.append(float(gt_delta_rate))
+            recon_delta_rate_series.append(float(recon_delta_rate))
+
+            r_gt = compute_enstrophy_budget_residual(
+                gt_enstrophy_series[k], gt_enstrophy_series[k + 1],
+                gt_dissipation_series[k], gt_dissipation_series[k + 1],
+                dt=dt,
+            )
+            r_recon = compute_enstrophy_budget_residual(
+                recon_enstrophy_series[k], recon_enstrophy_series[k + 1],
+                recon_dissipation_series[k], recon_dissipation_series[k + 1],
+                dt=dt,
+            )
+            gt_budget_residuals.append(float(r_gt))
+            recon_budget_residuals.append(float(r_recon))
+
         max_rel_l2 = max(rel_l2_series)
         mean_rel_l2 = float(np.mean(rel_l2_series))
         min_rel_l2 = min(rel_l2_series)
         error_drift = float(rel_l2_series[-1] - rel_l2_series[0])
 
         is_alert = bool(max_rel_l2 > threshold)
+
+        # Physical enstrophy decay comparison
+        gt_z_total_decay_pct = float((gt_enstrophy_series[0] - gt_enstrophy_series[-1]) / gt_enstrophy_series[0] * 100.0)
+        recon_z_total_decay_pct = float((recon_enstrophy_series[0] - recon_enstrophy_series[-1]) / recon_enstrophy_series[0] * 100.0)
+        max_recon_residual = float(max(abs(r) for r in recon_budget_residuals))
+        mean_recon_residual = float(np.mean(recon_budget_residuals))
+
+        # Check attenuation bias
+        dissipation_attenuated = bool(recon_z_total_decay_pct < 0.20 * gt_z_total_decay_pct)
 
         results["models"][str(cz)] = {
             "checkpoint_path": str(ckpt_path),
@@ -291,6 +345,17 @@ def run_temporal_representation_audit(
                     "REPRESENTATION_ERROR_EXCEEDED_THRESHOLD"
                     if is_alert else "WITHIN_ACCEPTABLE_BOUNDS"
                 ),
+                "enstrophy_physics": {
+                    "gt_total_decay_percent": gt_z_total_decay_pct,
+                    "recon_total_decay_percent": recon_z_total_decay_pct,
+                    "max_enstrophy_budget_residual": max_recon_residual,
+                    "mean_enstrophy_budget_residual": mean_recon_residual,
+                    "dissipation_attenuation_bias": dissipation_attenuated,
+                    "physical_budget_verdict": (
+                        "ATTENUATED_DISSIPATION_BIAS"
+                        if dissipation_attenuated else "PHYSICALLY_BALANCED"
+                    ),
+                },
             },
             "time_series": {
                 "relative_l2": rel_l2_series,
@@ -303,6 +368,10 @@ def run_temporal_representation_audit(
                 "ground_truth_dissipation_rate": gt_dissipation_series,
                 "reconstructed_dissipation_rate": recon_dissipation_series,
                 "dissipation_rate_ratio": dissipation_ratio_series,
+                "gt_enstrophy_delta_rate": gt_delta_rate_series,
+                "recon_enstrophy_delta_rate": recon_delta_rate_series,
+                "gt_enstrophy_budget_residuals": gt_budget_residuals,
+                "recon_enstrophy_budget_residuals": recon_budget_residuals,
             },
         }
 
@@ -313,15 +382,20 @@ def run_temporal_representation_audit(
             "recon_enstrophy": recon_enstrophy_series,
             "gt_diss": gt_dissipation_series,
             "recon_diss": recon_dissipation_series,
+            "gt_residuals": gt_budget_residuals,
+            "recon_residuals": recon_budget_residuals,
+            "gt_delta_rate": gt_delta_rate_series,
+            "recon_delta_rate": recon_delta_rate_series,
         }
 
         print(f"=== Evaluated Frozen Capacity Cz={cz} on Dynamic Trajectories ===")
         print(f"    t=0.00s Rel L2: {rel_l2_series[0]*100:.2f}% | PDE: {pde_series[0]*100:.2f}%")
         print(f"    t={total_time:.2f}s Rel L2: {rel_l2_series[-1]*100:.2f}% | PDE: {pde_series[-1]*100:.2f}%")
-        print(f"    Max Rel L2: {max_rel_l2*100:.2f}% (Threshold: {threshold*100:.2f}%)")
-        print(f"    Diagnostic Verdict: {results['models'][str(cz)]['summary_metrics']['diagnostic_verdict']}")
+        print(f"    Max Rel L2: {max_rel_l2*100:.2f}% (Threshold: {threshold*100:.2f}%) -> {results['models'][str(cz)]['summary_metrics']['diagnostic_verdict']}")
+        print(f"    GT Enstrophy Decay: {gt_z_total_decay_pct:.2f}% | Recon Enstrophy Decay: {recon_z_total_decay_pct:.2f}%")
+        print(f"    Physical Budget Verdict: {results['models'][str(cz)]['summary_metrics']['enstrophy_physics']['physical_budget_verdict']}")
 
-    # 4. Generate Visualization Plots
+    # 5. Generate Visualization Plots
     generated_plots = []
     if generate_plots:
         # Plot 1: Reconstruction Error & PDE over Time
@@ -343,9 +417,8 @@ def run_temporal_representation_audit(
         plt.close()
         generated_plots.append(str(plot1_path))
 
-        # Plot 2: Enstrophy Evolution & Dissipation Rate
+        # Plot 2: Enstrophy Evolution & Time Rate vs Instantaneous Dissipation
         fig, axes = plt.subplots(1, 2, figsize=(14, 5), dpi=150)
-        # GT Enstrophy
         ref_gt_z = plot_data[capacities[0]]["gt_enstrophy"]
         axes[0].plot(t_arr, ref_gt_z, "k-", lw=2.5, label="Analytical Ground Truth")
         for cz, pdata in plot_data.items():
@@ -356,16 +429,19 @@ def run_temporal_representation_audit(
         axes[0].grid(True, alpha=0.3)
         axes[0].legend()
 
-        # Dissipation Rate dZ/dt
+        t_mid = t_arr[:-1] + 0.5 * dt
+        ref_gt_delta = plot_data[capacities[0]]["gt_delta_rate"]
         ref_gt_diss = plot_data[capacities[0]]["gt_diss"]
-        axes[1].plot(t_arr, ref_gt_diss, "k-", lw=2.5, label="Analytical dZ/dt")
+        axes[1].plot(t_mid, ref_gt_delta, "k-", lw=2.5, label="GT dZ/dt (Delta Z / dt)")
+        axes[1].plot(t_arr, ref_gt_diss, "k:", lw=1.5, label="GT Dissipation Rate diss(t)")
         for cz, pdata in plot_data.items():
-            axes[1].plot(t_arr, pdata["recon_diss"], label=f"Frozen Recon Cz={cz}", lw=1.8, linestyle="--")
+            axes[1].plot(t_mid, pdata["recon_delta_rate"], label=f"Recon Cz={cz} dZ/dt", lw=1.8)
+            axes[1].plot(t_arr, pdata["recon_diss"], label=f"Recon Cz={cz} diss(t)", lw=1.2, linestyle=":")
         axes[1].set_xlabel("Time t (s)")
-        axes[1].set_ylabel("Enstrophy Dissipation Rate dZ/dt")
-        axes[1].set_title("Viscous Dissipation Rate dZ/dt = -nu * ||grad omega||^2")
+        axes[1].set_ylabel("Rate")
+        axes[1].set_title("Actual Time Derivative dZ/dt vs Gradient Dissipation diss(t)")
         axes[1].grid(True, alpha=0.3)
-        axes[1].legend()
+        axes[1].legend(fontsize=8)
 
         plt.tight_layout()
         plot2_path = out_dir / "enstrophy_and_dissipation_vs_time.png"
@@ -373,12 +449,31 @@ def run_temporal_representation_audit(
         plt.close()
         generated_plots.append(str(plot2_path))
 
+        # Plot 3: Enstrophy Budget Residual R_Z(t)
+        plt.figure(figsize=(10, 5), dpi=150)
+        ref_gt_res = plot_data[capacities[0]]["gt_residuals"]
+        plt.plot(t_mid, ref_gt_res, "k-o", lw=2.0, label="Ground Truth Residual R_Z(t) (Analytical O(dt^2))")
+        for cz, pdata in plot_data.items():
+            plt.plot(t_mid, pdata["recon_residuals"], label=f"Recon Cz={cz} Budget Residual R_Z(t)", lw=1.8, marker="x")
+        plt.axhline(0.0, color="gray", linestyle="--", alpha=0.5)
+        plt.xlabel("Physical Evolution Time t (seconds)")
+        plt.ylabel("Budget Residual R_Z(t)")
+        plt.title("Enstrophy Budget Residual R_Z(t_k) = Delta Z / dt - 0.5 * (diss_k + diss_{k+1})")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plot3_path = out_dir / "enstrophy_budget_residuals_vs_time.png"
+        plt.savefig(plot3_path)
+        plt.close()
+        generated_plots.append(str(plot3_path))
+
     results["generated_plots"] = generated_plots
 
     summary_file = out_dir / "temporal_audit_summary.json"
     with open(summary_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
     print(f"\nSaved complete temporal audit summary to: {summary_file}")
+    print(f"Saved complete dataset manifest to: {manifest_path}")
 
     return results
 
