@@ -315,8 +315,17 @@ def draw_single_step_prediction_eval():
     if not os.path.exists(prov_path):
         raise FileNotFoundError(f"Cannot find {prov_path}")
 
+    manifest_path = os.path.join(PROJECT_ROOT, "outputs/splits/grouped_split.json")
+    if not os.path.isfile(manifest_path):
+        raise FileNotFoundError(f"Formal test split manifest not found: {manifest_path}")
+
     # Mandatory upfront verification: Fail closed before reading or rendering
-    is_valid = verify_prediction_arrays(npz_path, prov_path, atol=1e-5)
+    is_valid = verify_prediction_arrays(
+        npz_path,
+        prov_path,
+        atol=1e-5,
+        manifest_path=manifest_path,
+    )
     if not is_valid:
         raise ValueError(f"Array verification failed for {npz_path} against {prov_path}")
 

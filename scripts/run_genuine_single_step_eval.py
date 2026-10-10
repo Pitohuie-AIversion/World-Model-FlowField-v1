@@ -334,17 +334,22 @@ def verify_prediction_arrays(
        - traj_idx is valid non-negative integer
        - cluster_id is valid non-negative integer
        - source_file_relative is non-empty string
-       - checkpoint_expected_split_hash == split_content_hash (and matches runtime manifest if present)
-    4. Validates required array keys in npz (gt_*, pred_*, err_* for u, v, p, s, and vort).
-    5. Checks strict finiteness of all raw arrays (rejects NaN / Inf fail-closed).
-    6. Checks strict spatial grid dimensions: (128, 256) for Nx=128, Ny=256.
-    7. Checks error fields consistency: err_* must strictly match abs(gt_* - pred_*) within atol.
-    8. Checks zero-mean pressure gauge on raw spatial arrays: |mean(p)| <= 1e-5.
-    9. Checks that vorticity fields are physically derived from velocity fields via
+       - checkpoint_expected_split_hash == split_content_hash
+    4. Validates split manifest & test partition membership fail-closed:
+       - manifest_path must be provided and exist as a regular file.
+       - split_content_hash matches runtime manifest content hash.
+       - trajectory strictly belongs to 'test' partition via verify_test_partition_membership.
+       - cluster_id strictly matches the manifest entry cluster_id.
+    5. Validates required array keys in npz (gt_*, pred_*, err_* for u, v, p, s, and vort).
+    6. Checks strict finiteness of all raw arrays (rejects NaN / Inf fail-closed).
+    7. Checks strict spatial grid dimensions: (128, 256) for Nx=128, Ny=256.
+    8. Checks error fields consistency: err_* must strictly match abs(gt_* - pred_*) within atol.
+    9. Checks zero-mean pressure gauge on raw spatial arrays: |mean(p)| <= 1e-5.
+    10. Checks that vorticity fields are physically derived from velocity fields via
        spectral curl (omega = dv/dx - du/dy) on SHEAR_FLOW_DOMAIN_SIZE_XY within vort_atol.
-    10. Recomputes metrics using canonical compute_metrics_from_arrays protocol.
-    11. Checks that all stored metrics and recomputed metrics are strictly finite.
-    12. Checks absolute error between recomputed and stored metrics <= atol.
+    11. Recomputes metrics using canonical compute_metrics_from_arrays protocol.
+    12. Checks that all stored metrics and recomputed metrics are strictly finite.
+    13. Checks absolute error between recomputed and stored metrics <= atol.
     """
     if not os.path.exists(npz_path):
         raise FileNotFoundError(f"Missing prediction arrays archive: {npz_path}")
@@ -411,13 +416,44 @@ def verify_prediction_arrays(
             f"Provenance record split fingerprint mismatch: split_hash='{meta['split_hash']}' "
             f"!= split_content_hash='{split_cnt_hash}'"
         )
-    if manifest_path and os.path.exists(manifest_path):
-        runtime_split_hash = compute_split_hash_from_file(manifest_path)
-        if split_cnt_hash != runtime_split_hash:
-            raise ValueError(
-                f"Provenance record split content hash '{split_cnt_hash}' does not match "
-                f"runtime manifest content hash '{runtime_split_hash}' from {manifest_path}."
-            )
+
+    # P1 Final Fix: Resolve manifest path fail-closed, check content hash, and verify test partition membership
+    if not manifest_path:
+        raise ValueError("manifest_path must be provided for formal test partition verification fail-closed.")
+
+    if os.path.isabs(manifest_path):
+        resolved_manifest = manifest_path
+    else:
+        cand = os.path.join(PROJECT_ROOT, manifest_path)
+        if os.path.exists(cand):
+            resolved_manifest = cand
+        elif os.path.exists(manifest_path):
+            resolved_manifest = os.path.abspath(manifest_path)
+        else:
+            resolved_manifest = cand
+
+    if not os.path.isfile(resolved_manifest):
+        raise FileNotFoundError(f"Formal split manifest file not found: {resolved_manifest}")
+
+    runtime_split_hash = compute_split_hash_from_file(resolved_manifest)
+    if split_cnt_hash != runtime_split_hash:
+        raise ValueError(
+            f"Provenance record split content hash '{split_cnt_hash}' does not match "
+            f"runtime manifest content hash '{runtime_split_hash}' from {resolved_manifest}."
+        )
+
+    # Formal test partition membership verification
+    test_entry = verify_test_partition_membership(
+        manifest_path=str(resolved_manifest),
+        target_file_rel=source_file_rel,
+        target_traj_idx=traj_idx,
+    )
+
+    # Cluster identity verification
+    if int(test_entry.get("cluster_id")) != int(cluster_id):
+        raise ValueError(
+            f"Cached cluster_id ({cluster_id}) does not match the test manifest entry ({test_entry.get('cluster_id')})."
+        )
 
     stored = meta["sample_metrics"]
     if not isinstance(stored, dict):
@@ -659,7 +695,8 @@ def run_genuine_single_step_evaluation():
     print(f"Saved provenance metadata: {meta_out}")
 
     # 15. Verify arrays match metadata
-    verify_prediction_arrays(arrays_out, meta_out)
+    resolved_manifest_file = manifest_file if os.path.isabs(manifest_file) else os.path.join(PROJECT_ROOT, manifest_file)
+    verify_prediction_arrays(arrays_out, meta_out, manifest_path=resolved_manifest_file)
     print("Self-verification PASSED: Saved npz arrays match provenance json metrics exactly.")
 
     # 16. Plot figure directly from verified arrays

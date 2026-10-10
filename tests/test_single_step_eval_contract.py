@@ -469,3 +469,141 @@ def test_verify_prediction_arrays_rejects_vorticity_offset_not_matching_velocity
 
     with pytest.raises(ValueError, match="does not match derived vorticity from velocity fields"):
         verify_prediction_arrays(str(tampered_npz), PROVENANCE_PATH)
+
+
+# =========================================================================
+# P1 Final Fix: Test Partition Membership, Manifest Integrity, & Entry Gate Tests
+# =========================================================================
+
+def test_verify_prediction_arrays_rejects_train_partition_identity(tmp_path):
+    """P1 test: Rejects cached identity belonging to train partition (traj_idx=0 in same source file)."""
+    with open(PROVENANCE_PATH, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+
+    meta_train = copy.deepcopy(meta)
+    meta_train["traj_idx"] = 0  # traj_idx=0 is valid non-negative int but belongs to train
+    meta_train["cluster_id"] = 0
+    json_train = tmp_path / "train_identity.json"
+    with open(json_train, "w", encoding="utf-8") as f:
+        json.dump(meta_train, f)
+
+    with pytest.raises(ValueError, match="does NOT belong to 'test' partition"):
+        verify_prediction_arrays(NPZ_PATH, str(json_train))
+
+
+def test_verify_prediction_arrays_rejects_valid_partition_identity(tmp_path):
+    """P1 test: Rejects cached identity belonging to valid partition (traj_idx=3 in same source file)."""
+    with open(PROVENANCE_PATH, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+
+    meta_valid = copy.deepcopy(meta)
+    meta_valid["traj_idx"] = 3  # traj_idx=3 is valid non-negative int but belongs to valid
+    json_valid = tmp_path / "valid_identity.json"
+    with open(json_valid, "w", encoding="utf-8") as f:
+        json.dump(meta_valid, f)
+
+    with pytest.raises(ValueError, match="does NOT belong to 'test' partition"):
+        verify_prediction_arrays(NPZ_PATH, str(json_valid))
+
+
+def test_verify_prediction_arrays_rejects_mismatched_cluster_id(tmp_path):
+    """P1 test: Rejects genuine test trajectory when cached cluster_id does not match manifest entry."""
+    with open(PROVENANCE_PATH, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+
+    meta_bad_cluster = copy.deepcopy(meta)
+    meta_bad_cluster["cluster_id"] = 999  # Valid non-negative int, but manifest entry has cluster_id=1
+    json_bad_cluster = tmp_path / "bad_cluster.json"
+    with open(json_bad_cluster, "w", encoding="utf-8") as f:
+        json.dump(meta_bad_cluster, f)
+
+    with pytest.raises(ValueError, match="does not match the test manifest entry"):
+        verify_prediction_arrays(NPZ_PATH, str(json_bad_cluster))
+
+
+def test_verify_prediction_arrays_rejects_source_file_outside_manifest(tmp_path):
+    """P1 test: Rejects valid non-empty source file path that does not exist in split manifest."""
+    with open(PROVENANCE_PATH, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+
+    meta_extraneous = copy.deepcopy(meta)
+    meta_extraneous["source_file_relative"] = "data/test/nonexistent_shear_flow_file.hdf5"
+    json_extraneous = tmp_path / "extraneous_source.json"
+    with open(json_extraneous, "w", encoding="utf-8") as f:
+        json.dump(meta_extraneous, f)
+
+    with pytest.raises(ValueError, match="does NOT belong to 'test' partition"):
+        verify_prediction_arrays(NPZ_PATH, str(json_extraneous))
+
+
+def test_verify_prediction_arrays_rejects_missing_or_nonexistent_manifest(tmp_path):
+    """P1 test: verify_prediction_arrays fails closed when manifest_path is missing or nonexistent."""
+    # 1. Nonexistent manifest file path -> FileNotFoundError
+    nonexistent_manifest = tmp_path / "nonexistent_manifest.json"
+    with pytest.raises(FileNotFoundError, match="Formal split manifest file not found"):
+        verify_prediction_arrays(NPZ_PATH, PROVENANCE_PATH, manifest_path=str(nonexistent_manifest))
+
+    # 2. None manifest_path -> ValueError
+    with pytest.raises(ValueError, match="manifest_path must be provided"):
+        verify_prediction_arrays(NPZ_PATH, PROVENANCE_PATH, manifest_path=None)
+
+    # 3. Empty string manifest_path -> ValueError
+    with pytest.raises(ValueError, match="manifest_path must be provided"):
+        verify_prediction_arrays(NPZ_PATH, PROVENANCE_PATH, manifest_path="")
+
+
+def test_draw_entry_blocks_and_does_not_generate_figure_on_train_identity(tmp_path, monkeypatch):
+    """P1 test: draw_single_step_prediction_eval refuses to create output figure on train partition cache."""
+    import shutil
+    import scripts.generate_synthesis_figures_v2 as gen_mod
+
+    # Setup temporary directory with valid npz but train-identity provenance
+    tampered_npz = tmp_path / "single_step_real_prediction_arrays.npz"
+    shutil.copyfile(NPZ_PATH, tampered_npz)
+
+    with open(PROVENANCE_PATH, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+    meta["traj_idx"] = 0  # Train partition trajectory
+    meta["cluster_id"] = 0
+    tampered_json = tmp_path / "single_step_real_prediction_provenance.json"
+    with open(tampered_json, "w", encoding="utf-8") as f:
+        json.dump(meta, f)
+
+    monkeypatch.setattr(gen_mod, "OUTPUT_DIR", str(tmp_path))
+
+    target_fig = tmp_path / "fig_single_step_prediction_eval.png"
+    assert not target_fig.exists(), "Target figure should not exist prior to test run"
+
+    with pytest.raises(ValueError, match="does NOT belong to 'test' partition"):
+        gen_mod.draw_single_step_prediction_eval()
+
+    # Fail-closed guarantee: Figure must NOT have been created
+    assert not target_fig.exists(), "Figure must NOT be created when cache partition verification fails!"
+
+
+def test_draw_entry_blocks_and_does_not_overwrite_figure_on_mismatched_cluster(tmp_path, monkeypatch):
+    """P1 test: draw_single_step_prediction_eval refuses to overwrite existing figure on mismatched cluster_id."""
+    import shutil
+    import scripts.generate_synthesis_figures_v2 as gen_mod
+
+    tampered_npz = tmp_path / "single_step_real_prediction_arrays.npz"
+    shutil.copyfile(NPZ_PATH, tampered_npz)
+
+    with open(PROVENANCE_PATH, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+    meta["cluster_id"] = 999  # Mismatched cluster_id
+    tampered_json = tmp_path / "single_step_real_prediction_provenance.json"
+    with open(tampered_json, "w", encoding="utf-8") as f:
+        json.dump(meta, f)
+
+    monkeypatch.setattr(gen_mod, "OUTPUT_DIR", str(tmp_path))
+
+    target_fig = tmp_path / "fig_single_step_prediction_eval.png"
+    sentinel_content = b"PRE_EXISTING_UNTOUCHED_IMAGE_SENTINEL"
+    target_fig.write_bytes(sentinel_content)
+
+    with pytest.raises(ValueError, match="does not match the test manifest entry"):
+        gen_mod.draw_single_step_prediction_eval()
+
+    # Fail-closed guarantee: Figure must NOT have been overwritten
+    assert target_fig.read_bytes() == sentinel_content, "Existing figure must NOT be overwritten when verification fails!"
