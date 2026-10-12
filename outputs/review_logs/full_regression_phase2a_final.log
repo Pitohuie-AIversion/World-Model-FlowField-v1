@@ -1,0 +1,30 @@
+# Pytest Full Regression Raw Log (Phase 2 A Audit Final Verification)
+TESTED_COMMIT=a40c82cb42c80843f9464a7803040f396cee7d7f
+TESTED_TREE=a5ba9148bf501abf52f8ec4b0ac3945535ade0d3
+BASE_CODE_COMMIT=4f80896dc5b38d74b901ead1eee5ee9db63ca0dc
+BASE_CODE_TREE=5206a8b81373fe1e5296ba664f3fdbb849692965
+EXECUTION_COMMAND=python -m pytest -q $(git ls-files 'tests/test_*.py')
+DURATION=162.24s (0:02:42)
+STATUS=PASSED
+TOTAL_PASSED=670
+WARNINGS=14
+EXIT_CODE=0
+
+============================== RAW PYTEST STDOUT ==============================
+........................................................................ [ 10%]
+........................................................................ [ 21%]
+........................................................................ [ 32%]
+........................................................................ [ 42%]
+........................................................................ [ 53%]
+........................................................................ [ 64%]
+........................................................................ [ 75%]
+........................................................................ [ 85%]
+........................................................................ [ 96%]
+......................                                                   [100%]
+=============================== warnings summary ===============================
+tests/test_compile_roundtrip.py: 14 warnings
+  /root/miniconda3/envs/seagent/lib/python3.12/site-packages/torch/jit/_script.py:362: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+670 passed, 14 warnings in 162.24s (0:02:42)
