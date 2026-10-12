@@ -1,0 +1,29 @@
+{
+  "manifest_version": "1.0",
+  "experiment_name": "latent_forecaster_pilot",
+  "protocol": "periodic_scalar_advection_diffusion_v1",
+  "phase": "2A_deterministic_pilot",
+  "checkpoint_path": "outputs/experiments/latent_forecaster_pilot/latest_checkpoint.pt",
+  "checkpoint_sha256": "f933f5b755b7f6ccc59746529cbaac2bcc7671b1675cb80b74238e9c07040c4e",
+  "base_code_commit": "4f80896dc5b38d74b901ead1eee5ee9db63ca0dc",
+  "transformer_config": {
+    "latent_channels": 64,
+    "embed_dim": 128,
+    "cond_dim": 64,
+    "depth": 4,
+    "num_heads": 4,
+    "history_length": 4,
+    "prediction_mode": "direct"
+  },
+  "ae_reference": {
+    "ae_checkpoint_path": "outputs/experiments/vorticity_capacity/cz_64/latest_checkpoint.pt",
+    "ae_checkpoint_sha256": "45bd5b16875c3ec212a57eda1500fb8fbb39af949370de75853f68dce512ac09",
+    "latent_channels": 64
+  },
+  "training_summary": {
+    "completed_epoch": 20,
+    "final_train_loss": 0.0009251369629055262,
+    "val_model_rel_l2": 0.08117614686489105,
+    "persistence_rel_l2": 0.22010822594165802
+  }
+}

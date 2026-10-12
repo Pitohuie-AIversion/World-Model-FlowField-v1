@@ -57,3 +57,6 @@ logs/*
 !videos/
 !videos/*.json
 !videos/*.md
+!review_logs/
+!review_logs/full_regression_*.log
+!review_logs/synthesis_*.log

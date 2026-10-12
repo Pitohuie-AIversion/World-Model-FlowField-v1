@@ -15,6 +15,7 @@ Engineering & Scientific Contracts:
    - Persistence Baseline: omega_t
 """
 
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
@@ -88,6 +89,141 @@ class VorticityLatentForecaster(nn.Module):
             checkpoint_path=ckpt_p,
             checkpoint_sha256=sha_before,
         )
+
+    @classmethod
+    def load_trained(
+        cls,
+        transformer_checkpoint_path: Union[str, Path],
+        ae_checkpoint_path: Optional[Union[str, Path]] = None,
+        device: torch.device = torch.device("cpu"),
+    ) -> "VorticityLatentForecaster":
+        """Load trained forecaster from Phase 2 A checkpoint containing architecture metadata.
+
+        Backward compatible with legacy pilot checkpoints by resolving AE references from
+        sidecar metadata or standard experiment paths, and reconstructing transformer architecture
+        via state_dict / sidecar inspection.
+        """
+        tf_ckpt_p = Path(transformer_checkpoint_path)
+        payload = torch.load(tf_ckpt_p, map_location=device, weights_only=False)
+
+        # 1. Resolve AE checkpoint path
+        resolved_ae_path = None
+        if ae_checkpoint_path is not None:
+            resolved_ae_path = Path(ae_checkpoint_path)
+        elif "ae_reference" in payload and "ae_checkpoint_path" in payload["ae_reference"]:
+            resolved_ae_path = Path(payload["ae_reference"]["ae_checkpoint_path"])
+        elif "ae_checkpoint_path" in payload:
+            resolved_ae_path = Path(payload["ae_checkpoint_path"])
+        else:
+            # Fallback 1: check sidecar metadata or summary json in the checkpoint directory
+            sidecar_candidates = [
+                tf_ckpt_p.with_suffix(".metadata.json"),
+                tf_ckpt_p.with_name(f"{tf_ckpt_p.stem}_metadata.json"),
+                tf_ckpt_p.parent / "latent_forecaster_pilot_summary.json",
+            ]
+            for sc in sidecar_candidates:
+                if sc.is_file():
+                    try:
+                        with open(sc, "r", encoding="utf-8") as f:
+                            sc_meta = json.load(f)
+                        cand_ae = (
+                            sc_meta.get("ae_reference", {}).get("ae_checkpoint_path")
+                            or sc_meta.get("checkpoint_integrity", {}).get("ae_checkpoint_path")
+                        )
+                        if cand_ae and Path(cand_ae).is_file():
+                            resolved_ae_path = Path(cand_ae)
+                            break
+                    except Exception:
+                        pass
+
+            # Fallback 2: check standard capacity experiment path based on latent_channels
+            if resolved_ae_path is None:
+                latent_ch = payload.get("transformer_config", {}).get(
+                    "latent_channels", payload.get("latent_channels", 64)
+                )
+                default_cand = Path(f"outputs/experiments/vorticity_capacity/cz_{latent_ch}/latest_checkpoint.pt")
+                if default_cand.is_file():
+                    resolved_ae_path = default_cand
+
+        if resolved_ae_path is None or not resolved_ae_path.is_file():
+            raise FileNotFoundError(
+                f"Could not determine valid ae_checkpoint_path from payload, sidecar, or arguments for {tf_ckpt_p}."
+            )
+
+        latent_channels = payload.get("transformer_config", {}).get(
+            "latent_channels", payload.get("latent_channels", 64)
+        )
+
+        ae, _, sha_before = load_frozen_autoencoder(
+            checkpoint_path=resolved_ae_path,
+            latent_channels=latent_channels,
+            device=device,
+        )
+
+        # Verify AE SHA if recorded in checkpoint
+        expected_ae_sha = (
+            payload.get("ae_reference", {}).get("ae_checkpoint_sha256")
+            or payload.get("ae_checkpoint_sha256")
+        )
+        if expected_ae_sha and sha_before != expected_ae_sha:
+            raise RuntimeError(
+                f"Autoencoder SHA mismatch: expected {expected_ae_sha}, got {sha_before}"
+            )
+
+        # 2. Reconstruct Transformer from config or state dict
+        if "transformer_config" in payload:
+            tf_kwargs = dict(payload["transformer_config"])
+        else:
+            # Check sidecar metadata
+            sidecar_cfg = None
+            sidecar_candidates = [
+                tf_ckpt_p.with_suffix(".metadata.json"),
+                tf_ckpt_p.with_name(f"{tf_ckpt_p.stem}_metadata.json"),
+                tf_ckpt_p.parent / "latent_forecaster_pilot_summary.json",
+            ]
+            for sc in sidecar_candidates:
+                if sc.is_file():
+                    try:
+                        with open(sc, "r", encoding="utf-8") as f:
+                            sc_meta = json.load(f)
+                        if "transformer_config" in sc_meta:
+                            sidecar_cfg = sc_meta["transformer_config"]
+                            break
+                    except Exception:
+                        pass
+            if sidecar_cfg:
+                tf_kwargs = dict(sidecar_cfg)
+            else:
+                sd = payload.get("transformer_state_dict", {})
+                block_keys = [k for k in sd.keys() if k.endswith(".spatial_attn.qkv.weight")]
+                inferred_depth = len(block_keys) if block_keys else int(payload.get("depth", 4))
+                cond_w = sd.get("cond_embed.mlp.0.weight")
+                inferred_cond = (cond_w.shape[0] // 2) if cond_w is not None else int(payload.get("cond_dim", 64))
+                tf_kwargs = {
+                    "latent_channels": latent_channels,
+                    "embed_dim": int(payload.get("embed_dim", 128)),
+                    "cond_dim": inferred_cond,
+                    "depth": inferred_depth,
+                    "num_heads": int(payload.get("num_heads", 4)),
+                    "history_length": int(payload.get("history_length", 4)),
+                    "prediction_mode": str(payload.get("prediction_mode", "direct")),
+                }
+
+        transformer = LatentSTTransformer(**tf_kwargs)
+        transformer.load_state_dict(payload["transformer_state_dict"])
+        transformer.to(device)
+
+        return cls(
+            autoencoder=ae,
+            transformer=transformer,
+            checkpoint_path=resolved_ae_path,
+            checkpoint_sha256=sha_before,
+        )
+
+    def forward(self, q_hist: torch.Tensor) -> torch.Tensor:
+        """Standard nn.Module forward pass: returns predicted physical field q_{t+1}."""
+        q_pred, _, _ = self.forward_single_step(q_hist)
+        return q_pred
 
     def verify_checkpoint_immutability(self) -> bool:
         """Verify that the underlying autoencoder checkpoint on disk was not modified."""

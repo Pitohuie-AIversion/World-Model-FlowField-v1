@@ -267,15 +267,21 @@ def run_latent_forecaster_pilot(
 
         diss_gt = solver.compute_enstrophy_dissipation_rate(q_val_gt)
         diss_pred = solver.compute_enstrophy_dissipation_rate(q_val_pred)
+        diss_ae = solver.compute_enstrophy_dissipation_rate(q_val_ae_ref)
         diss_hist = solver.compute_enstrophy_dissipation_rate(q_val_persist)
 
         mean_diss_gt = float(torch.mean(diss_gt).item())
         mean_diss_pred = float(torch.mean(diss_pred).item())
+        mean_diss_ae = float(torch.mean(diss_ae).item())
         mean_diss_hist = float(torch.mean(diss_hist).item())
 
-        # Enstrophy budget residual across the single transition step
+        # Enstrophy budget residuals across single transition step from true previous frame q_t:
+        # 1. R_GT: Ground Truth transition (True q_t -> True q_{t+1})
         r_gt = compute_enstrophy_budget_residual(mean_z_hist, mean_z_gt, mean_diss_hist, mean_diss_gt, dt=dt)
-        r_pred = compute_enstrophy_budget_residual(mean_z_hist, mean_z_pred, mean_diss_hist, mean_diss_pred, dt=dt)
+        # 2. R_AE_ref: Frozen Autoencoder reference transition (True q_t -> D(E(q_{t+1})))
+        r_ae_ref = compute_enstrophy_budget_residual(mean_z_hist, mean_z_ae, mean_diss_hist, mean_diss_ae, dt=dt)
+        # 3. R_model: World model prediction transition (True q_t -> D(hat_z_{t+1}))
+        r_model = compute_enstrophy_budget_residual(mean_z_hist, mean_z_pred, mean_diss_hist, mean_diss_pred, dt=dt)
 
     # Checkpoint Immutability Verification (Verification Contract 1)
     sha_after = compute_file_sha256(ae_ckpt_path)
@@ -295,29 +301,62 @@ def run_latent_forecaster_pilot(
     print(f"      - Pure Dynamics Error     : {pure_dyn_rel_l2 * 100:.2f}% (||D(hat_z) - D(E(q))|| / ||D(E(q))||)")
     print(f"      - Latent State Rel L2     : {latent_rel_l2 * 100:.2f}% (||hat_z - E(q)|| / ||E(q)||)")
     print(f"    ----------------------------------------------------------------------")
-    print(f"    Enstrophy Physics:")
-    print(f"      - GT Mean Enstrophy       : {mean_z_gt:.6f}")
-    print(f"      - Pred Mean Enstrophy     : {mean_z_pred:.6f}")
-    print(f"      - AE Ref Mean Enstrophy   : {mean_z_ae:.6f}")
-    print(f"      - GT Budget Residual      : {r_gt:.6e}")
-    print(f"      - Pred Budget Residual    : {r_pred:.6e}")
+    print(f"    Enstrophy Physics (Single-Step Transition from Ground Truth q_t):")
+    print(f"      - GT Mean Enstrophy (q_{{t+1}})       : {mean_z_gt:.6f}")
+    print(f"      - Pred Mean Enstrophy (D(hat_z))    : {mean_z_pred:.6f}")
+    print(f"      - AE Ref Mean Enstrophy (D(E(q)))   : {mean_z_ae:.6f}")
+    print(f"      - True q_t Mean Enstrophy           : {mean_z_hist:.6f}")
+    print(f"      - R_GT Budget Residual              : {r_gt:.6e} (True q_t -> True q_{{t+1}})")
+    print(f"      - R_AE_reference Budget Residual    : {r_ae_ref:.6e} (True q_t -> D(E(q_{{t+1}})))")
+    print(f"      - R_model Budget Residual           : {r_model:.6e} (True q_t -> D(hat_z_{{t+1}}))")
     print("==========================================================================")
 
     # 8. Save Transformer Checkpoint & Summary Artifacts
+    manifest_sha256 = compute_file_sha256(manifest_path)
     model_ckpt_path = out_dir / "latest_checkpoint.pt"
-    torch.save(
-        {
-            "transformer_state_dict": forecaster.transformer.state_dict(),
+    ckpt_payload = {
+        "transformer_state_dict": forecaster.transformer.state_dict(),
+        "transformer_config": {
             "latent_channels": latent_channels,
-            "embed_dim": forecaster.transformer.embed_dim,
+            "embed_dim": int(model_cfg.get("embed_dim", 128)),
+            "cond_dim": int(model_cfg.get("cond_dim", 64)),
+            "depth": int(model_cfg.get("depth", 4)),
+            "num_heads": int(model_cfg.get("num_heads", 4)),
             "history_length": h_len,
-            "completed_epoch": num_epochs,
-            "final_train_loss": loss_history[-1],
-            "val_model_rel_l2": model_rel_l2,
-            "ae_checkpoint_sha256": sha_after,
+            "prediction_mode": str(model_cfg.get("prediction_mode", "direct")),
         },
-        model_ckpt_path,
-    )
+        "training_config": {
+            "epochs": num_epochs,
+            "batch_size": batch_size,
+            "lr": lr,
+            "weight_decay": weight_decay,
+            "device": dev_str,
+            "seed": 42,
+        },
+        "data_fingerprint": {
+            "manifest_path": str(manifest_path),
+            "manifest_sha256": manifest_sha256,
+            "train_seeds": train_seeds,
+            "val_seeds": val_seeds,
+            "test_seeds": test_seeds,
+            "dataset_isolation": isolation_metrics,
+        },
+        "ae_reference": {
+            "ae_checkpoint_path": str(ae_ckpt_path),
+            "ae_checkpoint_sha256": sha_after,
+            "latent_channels": latent_channels,
+        },
+        "completed_epoch": num_epochs,
+        "final_train_loss": loss_history[-1],
+        "val_model_rel_l2": model_rel_l2,
+        "metadata": {
+            "experiment_name": cfg["experiment"]["name"],
+            "protocol": cfg["experiment"]["protocol"],
+            "phase": "2A_deterministic_pilot",
+            "git_commit": "4f80896dc5b38d74b901ead1eee5ee9db63ca0dc",
+        },
+    }
+    torch.save(ckpt_payload, model_ckpt_path)
 
     summary: Dict[str, Any] = {
         "metadata": {
@@ -337,6 +376,8 @@ def run_latent_forecaster_pilot(
             "ae_checkpoint_sha256": sha_after,
             "ae_checkpoint_unmutated": bool(sha_before == sha_after),
             "transformer_checkpoint_path": str(model_ckpt_path),
+            "manifest_path": str(manifest_path),
+            "manifest_sha256": manifest_sha256,
         },
         "training_metrics": {
             "num_epochs": num_epochs,
@@ -358,8 +399,17 @@ def run_latent_forecaster_pilot(
                 "mean_gt_enstrophy": mean_z_gt,
                 "mean_pred_enstrophy": mean_z_pred,
                 "mean_ae_ref_enstrophy": mean_z_ae,
-                "gt_budget_residual": r_gt,
-                "pred_budget_residual": r_pred,
+                "mean_hist_enstrophy": mean_z_hist,
+                "r_gt_budget_residual": r_gt,
+                "r_ae_reference_budget_residual": r_ae_ref,
+                "r_model_budget_residual": r_model,
+                "residual_protocol": {
+                    "starting_state": "Ground truth q_t (mean_z_hist)",
+                    "gt_endpoint": "Analytical ground truth q_{t+1}",
+                    "ae_ref_endpoint": "Frozen autoencoder reconstruction D(E(q_{t+1}))",
+                    "model_endpoint": "World model single-step prediction D(hat_z_{t+1})",
+                    "formula": "R(t) = (Z_{t+1} - Z_t)/dt + 0.5 * (diss_t + diss_{t+1})",
+                },
             },
         },
     }

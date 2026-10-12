@@ -151,24 +151,241 @@ def test_history_buffer_autoregressive_rollout_mechanics():
     assert torch.isfinite(z_roll).all()
 
 
-def test_triple_trajectory_metric_decomposition(tmp_path):
-    """Verify that Total Prediction Error decomposes into Representation Error and Pure Dynamics Error."""
+def test_triple_trajectory_metric_decomposition():
+    """Verify mathematical properties of triple-trajectory error metrics.
+
+    Checks:
+    1. Absolute Euclidean L2 norm triangle inequality: ||q_hat - q||_2 <= ||q_ae - q||_2 + ||q_hat - q_ae||_2
+    2. Correct mathematically scaled relative error upper bound:
+       e_total = ||q_hat - q|| / ||q|| <= e_rep + (||q_ae|| / ||q||) * e_dyn
+    3. Positivity and finite values of metrics.
+    """
     q_gt = torch.randn(4, 1, 1, 32, 32)
     q_pred = q_gt + 0.1 * torch.randn_like(q_gt)
     q_ae_ref = q_gt + 0.05 * torch.randn_like(q_gt)
 
-    def rel_l2(a, b):
-        return float(torch.mean(torch.norm(a - b, dim=(-2, -1)) / torch.norm(b, dim=(-2, -1))).item())
+    diff_total = torch.norm(q_pred - q_gt, dim=(-2, -1))
+    diff_rep = torch.norm(q_ae_ref - q_gt, dim=(-2, -1))
+    diff_dyn = torch.norm(q_pred - q_ae_ref, dim=(-2, -1))
 
-    total_err = rel_l2(q_pred, q_gt)
-    rep_err = rel_l2(q_ae_ref, q_gt)
-    dyn_err = rel_l2(q_pred, q_ae_ref)
+    norm_gt = torch.norm(q_gt, dim=(-2, -1))
+    norm_ae = torch.norm(q_ae_ref, dim=(-2, -1))
 
-    assert total_err > 0.0
-    assert rep_err > 0.0
-    assert dyn_err > 0.0
-    # Triangle inequality holds in Euclidean norms
-    assert total_err <= rep_err + dyn_err + 1e-4
+    # 1. Absolute Euclidean L2 triangle inequality holds pointwise
+    assert torch.all(diff_total <= diff_rep + diff_dyn + 1e-6)
+
+    # 2. Mathematically correct scaled relative error upper bound holds pointwise
+    rel_total = diff_total / (norm_gt + 1e-8)
+    rel_rep = diff_rep / (norm_gt + 1e-8)
+    rel_dyn = diff_dyn / (norm_ae + 1e-8)
+    scaled_bound = rel_rep + (norm_ae / (norm_gt + 1e-8)) * rel_dyn
+    assert torch.all(rel_total <= scaled_bound + 1e-6)
+
+    # 3. Batch averages: sample-weighted mean bound holds strictly
+    e_total = float(torch.mean(rel_total).item())
+    e_rep = float(torch.mean(rel_rep).item())
+    e_dyn = float(torch.mean(rel_dyn).item())
+    sample_weighted_mean_bound = float(torch.mean(scaled_bound).item())
+    assert e_total <= sample_weighted_mean_bound + 1e-6
+    assert 0.0 < e_total < 1.0
+    assert 0.0 < e_rep < 1.0
+    assert 0.0 < e_dyn < 1.0
+
+
+def test_counterexample_unscaled_relative_error_triangle_inequality():
+    """Deterministic counterexample proving naive unscaled sum e_rep + e_dyn is NOT a general upper bound for e_total.
+
+    When ||q_ae|| > ||q||, the relative dynamics error e_dyn has a larger denominator than e_total,
+    causing e_rep + e_dyn < e_total in general.
+
+    Analytical Counterexample:
+      q        = [1.0, 0.0],  ||q||      = 1.0
+      q_ae     = [2.0, 0.0],  ||q_ae||   = 2.0
+      q_hat    = [3.0, 0.0],  ||q_hat||  = 3.0
+
+      ||q_hat - q||    = 2.0  => e_total = 2.0 / 1.0 = 2.0
+      ||q_ae - q||     = 1.0  => e_rep   = 1.0 / 1.0 = 1.0
+      ||q_hat - q_ae|| = 1.0  => e_dyn   = 1.0 / 2.0 = 0.5
+
+      Unscaled sum: e_rep + e_dyn = 1.0 + 0.5 = 1.5 < e_total (2.0)  -> Fails!
+      Scaled bound: e_rep + (||q_ae|| / ||q||) * e_dyn = 1.0 + (2.0/1.0)*0.5 = 2.0 == e_total -> Holds!
+    """
+    q = torch.tensor([1.0, 0.0])
+    q_ae = torch.tensor([2.0, 0.0])
+    q_hat = torch.tensor([3.0, 0.0])
+
+    norm_q = float(torch.norm(q).item())
+    norm_ae = float(torch.norm(q_ae).item())
+
+    e_total = float((torch.norm(q_hat - q) / norm_q).item())
+    e_rep = float((torch.norm(q_ae - q) / norm_q).item())
+    e_dyn = float((torch.norm(q_hat - q_ae) / norm_ae).item())
+
+    assert abs(e_total - 2.0) < 1e-6
+    assert abs(e_rep - 1.0) < 1e-6
+    assert abs(e_dyn - 0.5) < 1e-6
+
+    # 1. Demonstrates that naive unscaled sum strictly fails as an upper bound
+    unscaled_sum = e_rep + e_dyn
+    assert abs(unscaled_sum - 1.5) < 1e-6
+    assert e_total > unscaled_sum, "Expected counterexample to violate naive unscaled inequality!"
+
+    # 2. Demonstrates that mathematically correct scaled upper bound holds exactly
+    scaled_bound = e_rep + (norm_ae / norm_q) * e_dyn
+    assert abs(scaled_bound - 2.0) < 1e-6
+    assert e_total <= scaled_bound + 1e-6
+
+
+def test_enstrophy_budget_residual_diagnostics_semantics():
+    """Verify the three budget residual diagnostics under single-step transition starting from true q_t.
+
+    Diagnostics:
+    1. R_GT: Ground Truth transition (True q_t -> True q_{t+1})
+    2. R_AE_ref: Frozen Autoencoder reference transition (True q_t -> D(E(q_{t+1})))
+    3. R_model: World model prediction transition (True q_t -> D(hat_z_{t+1}))
+    """
+    from scripts.audit_temporal_vorticity_representation import compute_enstrophy_budget_residual
+    import math
+
+    dt = 0.05
+    z_hist = 0.50
+    diss_hist = 0.02
+
+    # GT has physical decay consistent with dissipation: (0.499 - 0.50)/0.05 + 0.5*(0.02 + 0.02) = -0.2 + 0.02 = -0.18
+    z_gt = 0.499
+    diss_gt = 0.02
+    r_gt = compute_enstrophy_budget_residual(z_hist, z_gt, diss_hist, diss_gt, dt=dt)
+
+    # AE reference shows dissipation attenuation
+    z_ae = 0.505
+    diss_ae = 0.025
+    r_ae = compute_enstrophy_budget_residual(z_hist, z_ae, diss_hist, diss_ae, dt=dt)
+
+    # Model prediction
+    z_model = 0.506
+    diss_model = 0.026
+    r_model = compute_enstrophy_budget_residual(z_hist, z_model, diss_hist, diss_model, dt=dt)
+
+    assert math.isfinite(r_gt)
+    assert math.isfinite(r_ae)
+    assert math.isfinite(r_model)
+    # The three residuals must be distinct and reflect their respective endpoints
+    assert abs(r_model - r_ae) < abs(r_model - r_gt)
+
+
+def test_load_trained_latent_forecaster_from_enriched_checkpoint(tmp_path):
+    """Verify VorticityLatentForecaster.load_trained restores model architecture from checkpoint metadata."""
+    mock_ckpt = create_mock_checkpoint(tmp_path / "mock_ckpts", latent_channels=64)
+    sha_ae = compute_file_sha256(mock_ckpt)
+
+    tf = LatentSTTransformer(
+        latent_channels=64,
+        embed_dim=64,
+        cond_dim=32,
+        depth=2,
+        num_heads=2,
+        history_length=4,
+        prediction_mode="direct",
+    )
+    ckpt_file = tmp_path / "enriched_checkpoint.pt"
+    payload = {
+        "transformer_state_dict": tf.state_dict(),
+        "transformer_config": {
+            "latent_channels": 64,
+            "embed_dim": 64,
+            "cond_dim": 32,
+            "depth": 2,
+            "num_heads": 2,
+            "history_length": 4,
+            "prediction_mode": "direct",
+        },
+        "ae_reference": {
+            "ae_checkpoint_path": str(mock_ckpt),
+            "ae_checkpoint_sha256": sha_ae,
+            "latent_channels": 64,
+        },
+        "completed_epoch": 20,
+    }
+    torch.save(payload, ckpt_file)
+
+    loaded_forecaster = VorticityLatentForecaster.load_trained(ckpt_file)
+    assert loaded_forecaster.transformer.embed_dim == 64
+    assert len(loaded_forecaster.transformer.blocks) == 2
+    assert loaded_forecaster.verify_checkpoint_immutability() is True
+
+
+def test_load_legacy_pilot_checkpoint_backward_compatibility(tmp_path):
+    """Verify legacy checkpoint schema without transformer_config can be restored seamlessly."""
+    mock_ae = create_mock_checkpoint(tmp_path / "mock_ae", latent_channels=64)
+    sha_ae = compute_file_sha256(mock_ae)
+
+    tf = LatentSTTransformer(
+        latent_channels=64,
+        embed_dim=128,
+        cond_dim=64,
+        depth=2,
+        num_heads=4,
+        history_length=4,
+        prediction_mode="direct",
+    )
+    legacy_ckpt_file = tmp_path / "legacy_checkpoint.pt"
+    # Legacy payload structure: lacks transformer_config and ae_checkpoint_path
+    legacy_payload = {
+        "transformer_state_dict": tf.state_dict(),
+        "latent_channels": 64,
+        "embed_dim": 128,
+        "history_length": 4,
+        "completed_epoch": 20,
+        "final_train_loss": 0.001,
+        "val_model_rel_l2": 0.08,
+        "ae_checkpoint_sha256": sha_ae,
+    }
+    torch.save(legacy_payload, legacy_ckpt_file)
+
+    # 1. Load with explicit ae_checkpoint_path
+    forecaster = VorticityLatentForecaster.load_trained(
+        legacy_ckpt_file, ae_checkpoint_path=mock_ae
+    )
+    assert forecaster.transformer.embed_dim == 128
+    assert len(forecaster.transformer.blocks) == 2
+    assert forecaster.verify_checkpoint_immutability() is True
+
+    # 2. Forward pass with physical input
+    q_hist = torch.randn(2, 4, 1, 32, 32)
+    q_pred = forecaster(q_hist)
+    assert q_pred.shape == (2, 1, 1, 32, 32)
+    assert torch.isfinite(q_pred).all()
+
+
+def test_load_real_trained_checkpoint_on_disk():
+    """Verify the actual Phase 2 A trained checkpoint on disk can be loaded without retraining."""
+    ckpt_p = Path("outputs/experiments/latent_forecaster_pilot/latest_checkpoint.pt")
+    if not ckpt_p.is_file():
+        pytest.skip("Physical pilot checkpoint not present on disk in isolated test environment.")
+
+    sha_before = compute_file_sha256(ckpt_p)
+
+    forecaster = VorticityLatentForecaster.load_trained(ckpt_p)
+    assert forecaster.transformer.embed_dim == 128
+    assert len(forecaster.transformer.blocks) == 4
+    assert forecaster.verify_checkpoint_immutability() is True
+
+    # Forward pass on CPU
+    q_hist = torch.randn(2, 4, 1, 64, 64)
+    q_pred = forecaster(q_hist)
+    assert q_pred.shape == (2, 1, 1, 64, 64)
+    assert torch.isfinite(q_pred).all()
+
+    # Autoregressive rollout
+    q_roll, z_roll = forecaster.rollout(q_hist, horizon=4)
+    assert q_roll.shape == (2, 4, 1, 64, 64)
+    assert z_roll.shape == (2, 4, 64, 8, 8)
+    assert torch.isfinite(q_roll).all()
+    assert torch.isfinite(z_roll).all()
+
+    # Checkpoint on disk must remain strictly immutable
+    sha_after = compute_file_sha256(ckpt_p)
+    assert sha_before == sha_after, "Checkpoint was modified during loading!"
 
 
 def test_pilot_pipeline_end_to_end_smoke_decoupled(tmp_path):
@@ -242,4 +459,13 @@ def test_pilot_pipeline_end_to_end_smoke_decoupled(tmp_path):
     assert "latent_rel_l2" in eval_m
     assert "state_transition_verdict" in eval_m
     assert "physical_enstrophy" in eval_m
-    assert "gt_budget_residual" in eval_m["physical_enstrophy"]
+    assert "r_gt_budget_residual" in eval_m["physical_enstrophy"]
+    assert "r_ae_reference_budget_residual" in eval_m["physical_enstrophy"]
+    assert "r_model_budget_residual" in eval_m["physical_enstrophy"]
+
+    # 5. Checkpoint payload assertions
+    ckpt_loaded = torch.load(out_dir / "latest_checkpoint.pt", weights_only=False)
+    assert "transformer_config" in ckpt_loaded
+    assert ckpt_loaded["transformer_config"]["depth"] == 1
+    assert "data_fingerprint" in ckpt_loaded
+    assert "manifest_sha256" in ckpt_loaded["data_fingerprint"]
