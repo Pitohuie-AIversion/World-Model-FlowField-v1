@@ -272,6 +272,14 @@ def test_enstrophy_budget_residual_diagnostics_semantics():
     # The three residuals must be distinct and reflect their respective endpoints
     assert abs(r_model - r_ae) < abs(r_model - r_gt)
 
+    # Exact numerical verification matching physical contract:
+    # Physical dissipation D(t) <= 0. If delta_Z/dt = -0.08 and D_t = D_{t+1} = -0.08:
+    # R(t) = (-0.08) - 0.5 * (-0.08 + -0.08) = -0.08 - (-0.08) = 0.0
+    r_exact_zero = compute_enstrophy_budget_residual(
+        z_k=1.0, z_next=0.92, diss_k=-0.08, diss_next=-0.08, dt=1.0
+    )
+    assert abs(r_exact_zero - 0.0) < 1e-7, f"Expected 0.0, got {r_exact_zero}"
+
 
 def test_load_trained_latent_forecaster_from_enriched_checkpoint(tmp_path):
     """Verify VorticityLatentForecaster.load_trained restores model architecture from checkpoint metadata."""
@@ -462,6 +470,7 @@ def test_pilot_pipeline_end_to_end_smoke_decoupled(tmp_path):
     assert "r_gt_budget_residual" in eval_m["physical_enstrophy"]
     assert "r_ae_reference_budget_residual" in eval_m["physical_enstrophy"]
     assert "r_model_budget_residual" in eval_m["physical_enstrophy"]
+    assert "- 0.5 *" in eval_m["physical_enstrophy"]["residual_protocol"]["formula"]
 
     # 5. Checkpoint payload assertions
     ckpt_loaded = torch.load(out_dir / "latest_checkpoint.pt", weights_only=False)

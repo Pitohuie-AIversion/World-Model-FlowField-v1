@@ -1,0 +1,866 @@
+{
+  "metadata": {
+    "experiment": "latent_forecaster_rollout_eval",
+    "protocol": "periodic_scalar_advection_diffusion_v1",
+    "phase": "2B_deterministic_rollout_eval",
+    "execution_timestamp": "2026-10-12T07:47:55.266042+00:00",
+    "device": "cpu",
+    "checkpoints": {
+      "transformer_checkpoint_path": "outputs/experiments/latent_forecaster_pilot/latest_checkpoint.pt",
+      "transformer_checkpoint_sha256": "f933f5b755b7f6ccc59746529cbaac2bcc7671b1675cb80b74238e9c07040c4e",
+      "ae_checkpoint_path": "outputs/experiments/vorticity_capacity/cz_64/latest_checkpoint.pt",
+      "ae_checkpoint_sha256": "45bd5b16875c3ec212a57eda1500fb8fbb39af949370de75853f68dce512ac09",
+      "checkpoints_unmutated": true
+    },
+    "domain": {
+      "nx": 64,
+      "ny": 64,
+      "lx": 1.0,
+      "ly": 1.0
+    },
+    "physical_parameters": {
+      "u0": 0.5,
+      "v0": 0.5,
+      "nu": 0.001,
+      "base_wavenumber": 1,
+      "perturbation_modes": [
+        [
+          1,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "perturbation_amplitude": 0.1
+    },
+    "temporal_parameters": {
+      "dt": 0.05,
+      "num_steps": 20,
+      "total_time": 1.0
+    },
+    "windowing": {
+      "history_len": 4,
+      "future_len": 1,
+      "stride": 1
+    },
+    "evaluation_contract": {
+      "num_test_trajectories": 16,
+      "test_seed_base": 3000,
+      "test_seeds": [
+        3000,
+        3001,
+        3002,
+        3003,
+        3004,
+        3005,
+        3006,
+        3007,
+        3008,
+        3009,
+        3010,
+        3011,
+        3012,
+        3013,
+        3014,
+        3015
+      ],
+      "horizons": [
+        4,
+        8,
+        16
+      ],
+      "grouping_unit": "independent_test_trajectory",
+      "statistical_distribution": "Student-t (df=15, t_crit=2.13145)",
+      "budget_residual_formula": "R(t) = (Z_{t+1} - Z_t)/dt - 0.5 * (diss_t + diss_{t+1})",
+      "physical_interpretation": "\u51bb\u7ed3 AE \u53c2\u8003\u8f68\u8ff9\u672c\u8eab\u5df2\u8868\u73b0\u51fa\u663e\u8457\u7684\u62df\u6da1\u80fd\u9884\u7b97\u504f\u5dee (R_AE \u2248 0.0802)\uff1b\u6a21\u578b\u8f68\u8ff9\u7684\u9884\u7b97\u6b8b\u5dee (R_pred \u2248 0.0909) \u4e0e\u6b64\u5904\u4e8e\u76f8\u8fd1\u91cf\u7ea7\uff0c\u4e8c\u8005\u5dee\u989d\u4e3a Delta R = 0.0107\u3002\u6b64\u8bca\u65ad\u8868\u660e\u6a21\u578b\u9884\u6d4b\u504f\u5dee\u4e2d\u76f8\u5f53\u5927\u90e8\u5206\u5728\u51bb\u7ed3 AE \u91cd\u6784\u4e2d\u5df2\u6709\u4f53\u73b0\uff0c\u4f46\u4e0d\u80fd\u5c06\u6bd4\u503c\u7b80\u5355\u7b49\u540c\u4e3a\u5355\u4e00\u56e0\u679c\u5f52\u56e0\u3002"
+    }
+  },
+  "controlled_common_window_comparison": {
+    "H_4": {
+      "horizon": 4,
+      "window_protocol": "canonical_common_window_w0",
+      "num_trajectories": 16,
+      "statistics": {
+        "final_step_rel_l2": {
+          "mean": 0.06585587654262781,
+          "std": 0.016348308658523936,
+          "ci95_half_width": 0.008711398765220448,
+          "ci95_low": 0.05714447777740736,
+          "ci95_high": 0.07456727530784826,
+          "min": 0.04157346859574318,
+          "max": 0.09850788861513138,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "horizon_mean_rel_l2": {
+          "mean": 0.057963785948231816,
+          "std": 0.013552461579971515,
+          "ci95_half_width": 0.007221597018961652,
+          "ci95_low": 0.05074218892927016,
+          "ci95_high": 0.06518538296719346,
+          "min": 0.03999910969287157,
+          "max": 0.08657780475914478,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_persist_rel_l2": {
+          "mean": 0.8438027054071426,
+          "std": 0.024028033489299275,
+          "ci95_half_width": 0.012803635265365505,
+          "ci95_low": 0.8309990701417771,
+          "ci95_high": 0.8566063406725082,
+          "min": 0.8102762699127197,
+          "max": 0.879446268081665,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_ae_ref_rel_l2": {
+          "mean": 0.05653046746738255,
+          "std": 0.014974613312033596,
+          "ci95_half_width": 0.007979408184716845,
+          "ci95_low": 0.048551059282665704,
+          "ci95_high": 0.0645098756520994,
+          "min": 0.03372420743107796,
+          "max": 0.08636622130870819,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_dyn_rel_l2": {
+          "mean": 0.02265167230507359,
+          "std": 0.004764047750927605,
+          "ci95_half_width": 0.0025385818534349293,
+          "ci95_low": 0.02011309045163866,
+          "ci95_high": 0.025190254158508518,
+          "min": 0.01428303588181734,
+          "max": 0.02947504073381424,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_rel_l2": {
+          "mean": 0.04774583294056356,
+          "std": 0.002172447796512179,
+          "ci95_half_width": 0.001157615717157055,
+          "ci95_low": 0.0465882172234065,
+          "ci95_high": 0.048903448657720616,
+          "min": 0.044082701206207275,
+          "max": 0.05323309451341629,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "latent_norm_drift_ratio": {
+          "mean": 0.9999670878954244,
+          "std": 0.0023078118057571657,
+          "ci95_half_width": 0.0012297461061546492,
+          "ci95_low": 0.9987373417892698,
+          "ci95_high": 1.001196834001579,
+          "min": 0.9948044092396533,
+          "max": 1.0022893864447862,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_variance": {
+          "mean": 0.9577072747051716,
+          "std": 0.008106061279683562,
+          "ci95_half_width": 0.004319415157715306,
+          "ci95_low": 0.9533878595474563,
+          "ci95_high": 0.9620266898628869,
+          "min": 0.9410761594772339,
+          "max": 0.9688114523887634,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_model": {
+          "mean": 0.10017296896936993,
+          "std": 0.004477231352915226,
+          "ci95_half_width": 0.0023857481831342847,
+          "ci95_low": 0.09778722078623565,
+          "ci95_high": 0.10255871715250421,
+          "min": 0.09234545131524403,
+          "max": 0.10964781170090039,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_ae_ref": {
+          "mean": 0.08177142248799404,
+          "std": 0.001156382804543863,
+          "ci95_half_width": 0.000616192900809539,
+          "ci95_low": 0.0811552295871845,
+          "ci95_high": 0.08238761538880358,
+          "min": 0.07999516899387042,
+          "max": 0.08448054393132527,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_gt": {
+          "mean": -1.76175187031428e-07,
+          "std": 2.6440946075337463e-07,
+          "ci95_half_width": 1.4089385624112145e-07,
+          "ci95_low": -3.1706904327254946e-07,
+          "ci95_high": -3.528133079030656e-08,
+          "min": -7.37607479095459e-07,
+          "max": 1.7508864402770996e-07,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_delta": {
+          "mean": 0.018401546481375892,
+          "std": 0.00480900591707769,
+          "ci95_half_width": 0.0025625383691373787,
+          "ci95_low": 0.015839008112238512,
+          "ci95_high": 0.020964084850513272,
+          "min": 0.008889921009540558,
+          "max": 0.026330715666214616,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        }
+      }
+    },
+    "H_8": {
+      "horizon": 8,
+      "window_protocol": "canonical_common_window_w0",
+      "num_trajectories": 16,
+      "statistics": {
+        "final_step_rel_l2": {
+          "mean": 0.10104731097817421,
+          "std": 0.020262538122175926,
+          "ci95_half_width": 0.010797144418099877,
+          "ci95_low": 0.09025016656007433,
+          "ci95_high": 0.11184445539627409,
+          "min": 0.06654022634029388,
+          "max": 0.1412578821182251,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "horizon_mean_rel_l2": {
+          "mean": 0.07188809785293415,
+          "std": 0.016218683087867884,
+          "ci95_half_width": 0.008642326174303506,
+          "ci95_low": 0.06324577167863064,
+          "ci95_high": 0.08053042402723766,
+          "min": 0.047972682397812605,
+          "max": 0.10511144623160362,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_persist_rel_l2": {
+          "mean": 1.3719972968101501,
+          "std": 0.03955465828788443,
+          "ci95_half_width": 0.021077189608120873,
+          "ci95_low": 1.3509201072020294,
+          "ci95_high": 1.393074486418271,
+          "min": 1.316798210144043,
+          "max": 1.4306654930114746,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_ae_ref_rel_l2": {
+          "mean": 0.06499979691579938,
+          "std": 0.01976621359921254,
+          "ci95_half_width": 0.010532671748369757,
+          "ci95_low": 0.054467125167429624,
+          "ci95_high": 0.07553246866416914,
+          "min": 0.033423103392124176,
+          "max": 0.09851661324501038,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_dyn_rel_l2": {
+          "mean": 0.06629690784029663,
+          "std": 0.010940258049088528,
+          "ci95_half_width": 0.005829652011759106,
+          "ci95_low": 0.06046725582853752,
+          "ci95_high": 0.07212655985205574,
+          "min": 0.04904109239578247,
+          "max": 0.08262772113084793,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_rel_l2": {
+          "mean": 0.0860271854326129,
+          "std": 0.007742615057408181,
+          "ci95_half_width": 0.004125748336389236,
+          "ci95_low": 0.08190143709622366,
+          "ci95_high": 0.09015293376900213,
+          "min": 0.07466347515583038,
+          "max": 0.09988953173160553,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "latent_norm_drift_ratio": {
+          "mean": 1.0013678990425332,
+          "std": 0.0026979193270047818,
+          "ci95_half_width": 0.0014376197308753197,
+          "ci95_low": 0.9999302793116579,
+          "ci95_high": 1.0028055187734086,
+          "min": 0.994430714873125,
+          "max": 1.004748778668239,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_variance": {
+          "mean": 0.9605469256639481,
+          "std": 0.008304150608655286,
+          "ci95_half_width": 0.004424969510269561,
+          "ci95_low": 0.9561219561536785,
+          "ci95_high": 0.9649718951742177,
+          "min": 0.9410895705223083,
+          "max": 0.9696321487426758,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_model": {
+          "mean": 0.09860337538910763,
+          "std": 0.004460829661304098,
+          "ci95_half_width": 0.0023770083386015473,
+          "ci95_low": 0.09622636705050608,
+          "ci95_high": 0.10098038372770918,
+          "min": 0.09021446481347084,
+          "max": 0.10604244789906911,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_ae_ref": {
+          "mean": 0.0828683616460434,
+          "std": 0.0013131622224729815,
+          "ci95_half_width": 0.0006997347555840755,
+          "ci95_low": 0.08216862689045933,
+          "ci95_high": 0.08356809640162748,
+          "min": 0.0807502626308373,
+          "max": 0.08533127393041338,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_gt": {
+          "mean": -4.490305270467486e-08,
+          "std": 9.931114266726717e-08,
+          "ci95_half_width": 5.291917247679217e-08,
+          "ci95_low": -9.782222518146702e-08,
+          "ci95_high": 8.016119772117309e-09,
+          "min": -2.2724270820617676e-07,
+          "max": 1.543334552219936e-07,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_delta": {
+          "mean": 0.015735013743064234,
+          "std": 0.004907357163648494,
+          "ci95_half_width": 0.0026149460490895236,
+          "ci95_low": 0.01312006769397471,
+          "ci95_high": 0.01834995979215376,
+          "min": 0.006040966404335837,
+          "max": 0.022972808352538523,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        }
+      }
+    },
+    "H_16": {
+      "horizon": 16,
+      "window_protocol": "canonical_common_window_w0",
+      "num_trajectories": 16,
+      "statistics": {
+        "final_step_rel_l2": {
+          "mean": 0.20265282317996025,
+          "std": 0.025368883441531584,
+          "ci95_half_width": 0.013518123770702856,
+          "ci95_low": 0.1891346994092574,
+          "ci95_high": 0.2161709469506631,
+          "min": 0.1467897593975067,
+          "max": 0.25159889459609985,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "horizon_mean_rel_l2": {
+          "mean": 0.11568817516672425,
+          "std": 0.01874853070668556,
+          "ci95_half_width": 0.009990386813669611,
+          "ci95_low": 0.10569778835305464,
+          "ci95_high": 0.12567856198039387,
+          "min": 0.08045724662952125,
+          "max": 0.15527266915887594,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_persist_rel_l2": {
+          "mean": 0.8829196877777576,
+          "std": 0.023122146211368162,
+          "ci95_half_width": 0.012320922008646842,
+          "ci95_low": 0.8705987657691108,
+          "ci95_high": 0.8952406097864045,
+          "min": 0.8506896495819092,
+          "max": 0.9172465205192566,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_ae_ref_rel_l2": {
+          "mean": 0.08454885031096637,
+          "std": 0.0255812968071133,
+          "ci95_half_width": 0.013631310863587848,
+          "ci95_low": 0.07091753944737852,
+          "ci95_high": 0.09818016117455422,
+          "min": 0.04379583150148392,
+          "max": 0.12289103865623474,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_dyn_rel_l2": {
+          "mean": 0.16843821201473475,
+          "std": 0.02419389534714264,
+          "ci95_half_width": 0.01289201681074699,
+          "ci95_low": 0.15554619520398777,
+          "ci95_high": 0.18133022882548172,
+          "min": 0.13101136684417725,
+          "max": 0.20902299880981445,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_rel_l2": {
+          "mean": 0.1576116979122162,
+          "std": 0.022052768606254772,
+          "ci95_half_width": 0.011751090906034158,
+          "ci95_low": 0.14586060700618203,
+          "ci95_high": 0.16936278881825034,
+          "min": 0.12588270008563995,
+          "max": 0.19690914452075958,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "latent_norm_drift_ratio": {
+          "mean": 1.0044665452459385,
+          "std": 0.004663001499029145,
+          "ci95_half_width": 0.0024847381065125564,
+          "ci95_low": 1.001981807139426,
+          "ci95_high": 1.006951283352451,
+          "min": 0.9912838868635193,
+          "max": 1.0104656197770583,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_variance": {
+          "mean": 0.9659465737640858,
+          "std": 0.00957129319201573,
+          "ci95_half_width": 0.005100182131135326,
+          "ci95_low": 0.9608463916329505,
+          "ci95_high": 0.971046755895221,
+          "min": 0.9343612790107727,
+          "max": 0.9767952561378479,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_model": {
+          "mean": 0.09126653345301747,
+          "std": 0.002527508069130545,
+          "ci95_half_width": 0.0013468139813367418,
+          "ci95_low": 0.08991971947168073,
+          "ci95_high": 0.0926133474343542,
+          "min": 0.08518848046660424,
+          "max": 0.09538583680987359,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_ae_ref": {
+          "mean": 0.08027227440228066,
+          "std": 0.0011170370723320542,
+          "ci95_half_width": 0.0005952270400488949,
+          "ci95_low": 0.07967704736223176,
+          "ci95_high": 0.08086750144232956,
+          "min": 0.07841277172168096,
+          "max": 0.08225344394644102,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_gt": {
+          "mean": 3.55656569202741e-07,
+          "std": 4.579590038096769e-08,
+          "ci95_half_width": 2.4402912763878587e-08,
+          "ci95_low": 3.312536564388624e-07,
+          "ci95_high": 3.8005948196661955e-07,
+          "min": 2.9752651850382485e-07,
+          "max": 4.4231613477071127e-07,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_delta": {
+          "mean": 0.010994259050736824,
+          "std": 0.0027078390712086987,
+          "ci95_half_width": 0.0014429055894441968,
+          "ci95_low": 0.009551353461292628,
+          "ci95_high": 0.01243716464018102,
+          "min": 0.005223148067792269,
+          "max": 0.015055770426988607,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        }
+      }
+    }
+  },
+  "sliding_window_multi_horizon": {
+    "H_4": {
+      "horizon": 4,
+      "window_protocol": "all_sliding_windows_14_per_trajectory",
+      "num_windows_per_trajectory": 14,
+      "total_windows": 224,
+      "num_trajectories": 16,
+      "statistics": {
+        "final_step_rel_l2": {
+          "mean": 0.07991339638829231,
+          "std": 0.021430799564924587,
+          "ci95_half_width": 0.011419666998410289,
+          "ci95_low": 0.06849372938988202,
+          "ci95_high": 0.0913330633867026,
+          "min": 0.04421976953744888,
+          "max": 0.11486878246068954,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "horizon_mean_rel_l2": {
+          "mean": 0.07316613080911338,
+          "std": 0.02002935381247005,
+          "ci95_half_width": 0.010672889270361313,
+          "ci95_low": 0.06249324153875207,
+          "ci95_high": 0.08383902007947469,
+          "min": 0.04141981899738312,
+          "max": 0.10708184540271759,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_persist_rel_l2": {
+          "mean": 0.8433576300740242,
+          "std": 0.024068249464774184,
+          "ci95_half_width": 0.012825064846028064,
+          "ci95_low": 0.8305325652279961,
+          "ci95_high": 0.8561826949200523,
+          "min": 0.8097742199897766,
+          "max": 0.8790597915649414,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_ae_ref_rel_l2": {
+          "mean": 0.07074452447704971,
+          "std": 0.02155120383817902,
+          "ci95_half_width": 0.011483825906788193,
+          "ci95_low": 0.05926069857026152,
+          "ci95_high": 0.0822283503838379,
+          "min": 0.03644248843193054,
+          "max": 0.1061926856637001,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_dyn_rel_l2": {
+          "mean": 0.02428629866335541,
+          "std": 0.005116163188698532,
+          "ci95_half_width": 0.0027262109258902848,
+          "ci95_low": 0.021560087737465126,
+          "ci95_high": 0.027012509589245694,
+          "min": 0.01722915656864643,
+          "max": 0.03269480913877487,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_rel_l2": {
+          "mean": 0.04791505984030664,
+          "std": 0.0024461572099031014,
+          "ci95_half_width": 0.0013034651683539338,
+          "ci95_low": 0.04661159467195271,
+          "ci95_high": 0.04921852500866057,
+          "min": 0.042782869189977646,
+          "max": 0.053394291549921036,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "latent_norm_drift_ratio": {
+          "mean": 0.9984054826200008,
+          "std": 0.002346088201657673,
+          "ci95_half_width": 0.0012501421578165997,
+          "ci95_low": 0.9971553404621842,
+          "ci95_high": 0.9996556247778174,
+          "min": 0.9930839538574219,
+          "max": 1.0006028413772583,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_model": {
+          "mean": 0.09672651201530938,
+          "std": 0.004996895312609617,
+          "ci95_half_width": 0.0026626575608178858,
+          "ci95_low": 0.09406385445449149,
+          "ci95_high": 0.09938916957612727,
+          "min": 0.08840085885354451,
+          "max": 0.10377821645566396,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_ae_ref": {
+          "mean": 0.08005479291924053,
+          "std": 0.001140277326911501,
+          "ci95_half_width": 0.0006076108975644087,
+          "ci95_low": 0.07944718202167612,
+          "ci95_high": 0.08066240381680494,
+          "min": 0.07818101381971723,
+          "max": 0.08209591225853988,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_gt": {
+          "mean": 4.4289932009719666e-07,
+          "std": 3.0823005978358877e-08,
+          "ci95_half_width": 1.6424420521339823e-08,
+          "ci95_low": 4.2647489957585685e-07,
+          "ci95_high": 4.5932374061853647e-07,
+          "min": 3.913328761146182e-07,
+          "max": 5.085908231281099e-07,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        }
+      }
+    },
+    "H_8": {
+      "horizon": 8,
+      "window_protocol": "all_sliding_windows_10_per_trajectory",
+      "num_windows_per_trajectory": 10,
+      "total_windows": 160,
+      "num_trajectories": 16,
+      "statistics": {
+        "final_step_rel_l2": {
+          "mean": 0.10903697507455945,
+          "std": 0.02184561506838039,
+          "ci95_half_width": 0.011640706577493293,
+          "ci95_low": 0.09739626849706616,
+          "ci95_high": 0.12067768165205274,
+          "min": 0.07574829459190369,
+          "max": 0.14861133694648743,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "horizon_mean_rel_l2": {
+          "mean": 0.08135800249874592,
+          "std": 0.01997458966266019,
+          "ci95_half_width": 0.010643707514805015,
+          "ci95_low": 0.0707142949839409,
+          "ci95_high": 0.09200171001355094,
+          "min": 0.049472592771053314,
+          "max": 0.11684948951005936,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_persist_rel_l2": {
+          "mean": 1.3718004673719406,
+          "std": 0.039573202723305244,
+          "ci95_half_width": 0.021087071240233464,
+          "ci95_low": 1.350713396131707,
+          "ci95_high": 1.3928875386121742,
+          "min": 1.3165746927261353,
+          "max": 1.4304959774017334,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_ae_ref_rel_l2": {
+          "mean": 0.0752446639817208,
+          "std": 0.023473460562486975,
+          "ci95_half_width": 0.012508124212157046,
+          "ci95_low": 0.06273653976956375,
+          "ci95_high": 0.08775278819387786,
+          "min": 0.038039375096559525,
+          "max": 0.11187706142663956,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_dyn_rel_l2": {
+          "mean": 0.06517817452549934,
+          "std": 0.011598341331521407,
+          "ci95_half_width": 0.006180319840079618,
+          "ci95_low": 0.05899785468541972,
+          "ci95_high": 0.07135849436557896,
+          "min": 0.04646841436624527,
+          "max": 0.08279123157262802,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_rel_l2": {
+          "mean": 0.08635421190410852,
+          "std": 0.00796957946251238,
+          "ci95_half_width": 0.004246689130918634,
+          "ci95_low": 0.08210752277318989,
+          "ci95_high": 0.09060090103502716,
+          "min": 0.07583910971879959,
+          "max": 0.09984087944030762,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "latent_norm_drift_ratio": {
+          "mean": 0.9993716478347778,
+          "std": 0.002671194161587763,
+          "ci95_half_width": 0.0014233788954545411,
+          "ci95_low": 0.9979482689393233,
+          "ci95_high": 1.0007950267302324,
+          "min": 0.993425726890564,
+          "max": 1.0030186176300049,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_model": {
+          "mean": 0.09533911005128175,
+          "std": 0.004423142255117338,
+          "ci95_half_width": 0.0023569261374040236,
+          "ci95_low": 0.09298218391387772,
+          "ci95_high": 0.09769603618868578,
+          "min": 0.0867969699203968,
+          "max": 0.10049294579241957,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_ae_ref": {
+          "mean": 0.0802353936846235,
+          "std": 0.0011355617602785604,
+          "ci95_half_width": 0.0006050981494751991,
+          "ci95_low": 0.0796302955351483,
+          "ci95_high": 0.0808404918340987,
+          "min": 0.07819989706788744,
+          "max": 0.08228514519120966,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_gt": {
+          "mean": 4.195109275834901e-07,
+          "std": 4.295008326987139e-08,
+          "ci95_half_width": 2.2886483866830475e-08,
+          "ci95_low": 3.9662444371665963e-07,
+          "ci95_high": 4.4239741145032054e-07,
+          "min": 3.702938556671143e-07,
+          "max": 5.120145423071725e-07,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        }
+      }
+    },
+    "H_16": {
+      "horizon": 16,
+      "window_protocol": "all_sliding_windows_2_per_trajectory",
+      "num_windows_per_trajectory": 2,
+      "total_windows": 32,
+      "num_trajectories": 16,
+      "statistics": {
+        "final_step_rel_l2": {
+          "mean": 0.20352317485958338,
+          "std": 0.025579824536455357,
+          "ci95_half_width": 0.013630526345931645,
+          "ci95_low": 0.18989264851365173,
+          "ci95_high": 0.21715370120551503,
+          "min": 0.14702972769737244,
+          "max": 0.25304192304611206,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "horizon_mean_rel_l2": {
+          "mean": 0.11634922167286277,
+          "std": 0.01916490931254372,
+          "ci95_half_width": 0.010212259311228909,
+          "ci95_low": 0.10613696236163386,
+          "ci95_high": 0.12656148098409167,
+          "min": 0.08024507761001587,
+          "max": 0.15613020956516266,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_persist_rel_l2": {
+          "mean": 0.8829433619976044,
+          "std": 0.02312018861886612,
+          "ci95_half_width": 0.012319878881234625,
+          "ci95_low": 0.8706234831163697,
+          "ci95_high": 0.895263240878839,
+          "min": 0.8507159948348999,
+          "max": 0.917267382144928,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_ae_ref_rel_l2": {
+          "mean": 0.08663590834476054,
+          "std": 0.025641988350392587,
+          "ci95_half_width": 0.013663651104173337,
+          "ci95_low": 0.0729722572405872,
+          "ci95_high": 0.10029955944893387,
+          "min": 0.0457954928278923,
+          "max": 0.12481150776147842,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_dyn_rel_l2": {
+          "mean": 0.16921751853078604,
+          "std": 0.023496096530451253,
+          "ci95_half_width": 0.012520186068064739,
+          "ci95_low": 0.1566973324627213,
+          "ci95_high": 0.18173770459885077,
+          "min": 0.13202720880508423,
+          "max": 0.2087688446044922,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_rel_l2": {
+          "mean": 0.15735114179551601,
+          "std": 0.021700887446252166,
+          "ci95_half_width": 0.011563586671389507,
+          "ci95_low": 0.1457875551241265,
+          "ci95_high": 0.16891472846690553,
+          "min": 0.12773390114307404,
+          "max": 0.1959400475025177,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "latent_norm_drift_ratio": {
+          "mean": 1.0043405331671238,
+          "std": 0.004758310955004298,
+          "ci95_half_width": 0.0025355249306690036,
+          "ci95_low": 1.0018050082364547,
+          "ci95_high": 1.006876058097793,
+          "min": 0.9908695816993713,
+          "max": 1.0100345611572266,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_model": {
+          "mean": 0.0908561762344713,
+          "std": 0.002550698243992795,
+          "ci95_half_width": 0.0013591711532546403,
+          "ci95_low": 0.08949700508121666,
+          "ci95_high": 0.09221534738772594,
+          "min": 0.08508078083395958,
+          "max": 0.09492586217820645,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_ae_ref": {
+          "mean": 0.08022942658669005,
+          "std": 0.0011380686823833908,
+          "ci95_half_width": 0.0006064339939704728,
+          "ci95_low": 0.07962299259271957,
+          "ci95_high": 0.08083586058066053,
+          "min": 0.07838014401495456,
+          "max": 0.08223346322774887,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "enstrophy_budget_residual_gt": {
+          "mean": 4.0676289548476536e-07,
+          "std": 2.7018319047767553e-08,
+          "ci95_half_width": 1.4397045964038298e-08,
+          "ci95_low": 3.9236584952072705e-07,
+          "ci95_high": 4.211599414488037e-07,
+          "min": 3.735224405924479e-07,
+          "max": 4.7398110230763754e-07,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        }
+      }
+    }
+  }
+}

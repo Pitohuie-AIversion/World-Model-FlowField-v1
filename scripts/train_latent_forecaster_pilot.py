@@ -408,7 +408,7 @@ def run_latent_forecaster_pilot(
                     "gt_endpoint": "Analytical ground truth q_{t+1}",
                     "ae_ref_endpoint": "Frozen autoencoder reconstruction D(E(q_{t+1}))",
                     "model_endpoint": "World model single-step prediction D(hat_z_{t+1})",
-                    "formula": "R(t) = (Z_{t+1} - Z_t)/dt + 0.5 * (diss_t + diss_{t+1})",
+                    "formula": "R(t) = (Z_{t+1} - Z_t)/dt - 0.5 * (diss_t + diss_{t+1})",
                 },
             },
         },
