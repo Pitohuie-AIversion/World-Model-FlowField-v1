@@ -58,6 +58,18 @@ from src.models.latent_forecaster_pilot import VorticityLatentForecaster
 from src.utils.reproducibility import seed_everything
 
 
+def get_git_provenance() -> Dict[str, Any]:
+    """Capture runtime git revision metadata to guarantee immutable evaluation provenance."""
+    import subprocess
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True).strip()
+        tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], stderr=subprocess.DEVNULL, text=True).strip()
+        branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], stderr=subprocess.DEVNULL, text=True).strip()
+        return {"git_commit": commit, "git_tree": tree, "git_branch": branch}
+    except Exception:
+        return {"git_commit": "unknown", "git_tree": "unknown", "git_branch": "unknown"}
+
+
 def compute_rel_l2_pointwise(pred: torch.Tensor, target: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     """Compute relative L2 error pointwise over spatial dimensions (-2, -1)."""
     diff_norm = torch.linalg.vector_norm(pred - target, dim=(-2, -1))
@@ -91,6 +103,7 @@ def run_rollout_evaluation(
     config_path: Union[str, Path] = "configs/experiment/latent_forecaster_pilot.yaml",
     horizons: Optional[List[int]] = None,
     output_json_path: Optional[Union[str, Path]] = None,
+    allow_overwrite: bool = False,
     device_str: str = "cpu",
     num_test_trajectories: int = 16,
     test_seed_base: int = 3000,
@@ -108,6 +121,16 @@ def run_rollout_evaluation(
         raise FileNotFoundError(f"Transformer checkpoint not found at: {tf_ckpt_p}")
     if not ae_ckpt_p.is_file():
         raise FileNotFoundError(f"Autoencoder checkpoint not found at: {ae_ckpt_p}")
+
+    # Safety: Overwrite protection for benchmark persistence
+    if output_json_path is None:
+        output_json_path = PROJECT_ROOT / "outputs" / "evaluations" / "latent_forecaster_rollout_cz64.json"
+    out_p = Path(output_json_path)
+    if out_p.exists() and not allow_overwrite:
+        raise FileExistsError(
+            f"Evaluation output file already exists at '{out_p}'. "
+            "To prevent accidental overwriting of benchmark records, specify a new output path or pass allow_overwrite=True / --overwrite."
+        )
 
     # 1. SHA-256 Checkpoint Verification Before Loading
     sha_tf_before = compute_file_sha256(tf_ckpt_p)
@@ -226,9 +249,13 @@ def run_rollout_evaluation(
             ref_lat_norm = torch.linalg.vector_norm(lat_gt_full, dim=(-3, -2, -1))
             rel_lat_c = (diff_lat_norm / (ref_lat_norm + 1e-8)).squeeze(0).cpu().numpy()
             lat_norm_c = torch.linalg.vector_norm(lat_pred_full, dim=(-3, -2, -1)).squeeze(0).cpu().numpy()
-            lat_var_c = torch.var(lat_pred_full, dim=(-3, -2, -1)).squeeze(0).cpu().numpy()
+            # 1. Overall element-wise variance across (Cz, Hz, Wz)
+            lat_overall_var_c = torch.var(lat_pred_full, dim=(-3, -2, -1)).squeeze(0).cpu().numpy()
+            # 2. Channel-averaged spatial variance: V_spatial(t) = (1/Cz) * sum_c Var_{x,y}(z_{t,c})
+            spatial_var_per_channel = torch.var(lat_pred_full, dim=(-2, -1))
+            lat_spatial_var_c = torch.mean(spatial_var_per_channel, dim=-1).squeeze(0).cpu().numpy()
 
-            # Step-to-step physical budget residuals
+            # Step-to-step physical budget residuals (H-1 forecast-to-forecast step intervals)
             r_gt_c, r_ae_c, r_pred_c = [], [], []
             for k in range(max_h - 1):
                 r_gt_c.append(compute_enstrophy_budget_residual(z_gt_c[k], z_gt_c[k + 1], diss_gt_c[k], diss_gt_c[k + 1], dt=dt))
@@ -244,7 +271,9 @@ def run_rollout_evaluation(
                 "rel_persist_steps": rel_persist_c.tolist(),
                 "rel_latent_steps": rel_lat_c.tolist(),
                 "lat_norm_steps": lat_norm_c.tolist(),
-                "lat_var_steps": lat_var_c.tolist(),
+                "lat_overall_var_steps": lat_overall_var_c.tolist(),
+                "lat_spatial_var_steps": lat_spatial_var_c.tolist(),
+                "lat_var_steps": lat_overall_var_c.tolist(),
                 "r_model_steps": r_pred_c,
                 "r_ae_steps": r_ae_c,
                 "r_gt_steps": r_gt_c,
@@ -261,9 +290,10 @@ def run_rollout_evaluation(
         arr_final_persist = np.array([r["rel_persist_steps"][idx_step] for r in controlled_traj_records])
         arr_final_latent = np.array([r["rel_latent_steps"][idx_step] for r in controlled_traj_records])
         arr_drift_ratio = np.array([r["lat_norm_steps"][idx_step] / (r["lat_norm_steps"][0] + 1e-8) for r in controlled_traj_records])
-        arr_lat_var = np.array([r["lat_var_steps"][idx_step] for r in controlled_traj_records])
+        arr_lat_overall_var = np.array([r["lat_overall_var_steps"][idx_step] for r in controlled_traj_records])
+        arr_lat_spatial_var = np.array([r["lat_spatial_var_steps"][idx_step] for r in controlled_traj_records])
 
-        # Residuals across first H steps
+        # Residuals across first H steps (H-1 forecast-to-forecast step intervals)
         arr_r_model = np.array([np.mean(r["r_model_steps"][:H - 1]) for r in controlled_traj_records]) if H > 1 else np.zeros(num_test_trajectories)
         arr_r_ae = np.array([np.mean(r["r_ae_steps"][:H - 1]) for r in controlled_traj_records]) if H > 1 else np.zeros(num_test_trajectories)
         arr_r_gt = np.array([np.mean(r["r_gt_steps"][:H - 1]) for r in controlled_traj_records]) if H > 1 else np.zeros(num_test_trajectories)
@@ -273,6 +303,7 @@ def run_rollout_evaluation(
             "horizon": H,
             "window_protocol": "canonical_common_window_w0",
             "num_trajectories": num_test_trajectories,
+            "num_budget_residual_intervals": max(H - 1, 0),
             "statistics": {
                 "final_step_rel_l2": calc_trajectory_group_stats(arr_final_total),
                 "horizon_mean_rel_l2": calc_trajectory_group_stats(arr_mean_total),
@@ -281,7 +312,9 @@ def run_rollout_evaluation(
                 "final_step_dyn_rel_l2": calc_trajectory_group_stats(arr_final_dyn),
                 "final_step_latent_rel_l2": calc_trajectory_group_stats(arr_final_latent),
                 "latent_norm_drift_ratio": calc_trajectory_group_stats(arr_drift_ratio),
-                "final_step_latent_variance": calc_trajectory_group_stats(arr_lat_var),
+                "final_step_latent_overall_variance": calc_trajectory_group_stats(arr_lat_overall_var),
+                "final_step_latent_spatial_variance": calc_trajectory_group_stats(arr_lat_spatial_var),
+                "final_step_latent_variance": calc_trajectory_group_stats(arr_lat_overall_var),
                 "enstrophy_budget_residual_model": calc_trajectory_group_stats(arr_r_model),
                 "enstrophy_budget_residual_ae_ref": calc_trajectory_group_stats(arr_r_ae),
                 "enstrophy_budget_residual_gt": calc_trajectory_group_stats(arr_r_gt),
@@ -308,6 +341,8 @@ def run_rollout_evaluation(
                 w_rel_dyn = []
                 w_rel_latent = []
                 w_drift = []
+                w_overall_var = []
+                w_spatial_var = []
                 w_r_model = []
                 w_r_ae = []
                 w_r_gt = []
@@ -340,6 +375,8 @@ def run_rollout_evaluation(
                     r_lat = torch.linalg.vector_norm(lat_gt, dim=(-3, -2, -1))
                     rel_lat = (d_lat / (r_lat + 1e-8)).squeeze(0).cpu().numpy()
                     l_norm = torch.linalg.vector_norm(lat_pred, dim=(-3, -2, -1)).squeeze(0).cpu().numpy()
+                    l_overall_var = torch.var(lat_pred, dim=(-3, -2, -1)).squeeze(0).cpu().numpy()
+                    l_spatial_var = torch.mean(torch.var(lat_pred, dim=(-2, -1)), dim=-1).squeeze(0).cpu().numpy()
 
                     r_m_l, r_a_l, r_g_l = [], [], []
                     for k in range(H - 1):
@@ -353,6 +390,8 @@ def run_rollout_evaluation(
                     w_rel_dyn.append(rel_dyn)
                     w_rel_latent.append(rel_lat)
                     w_drift.append(l_norm[-1] / (l_norm[0] + 1e-8))
+                    w_overall_var.append(l_overall_var[-1])
+                    w_spatial_var.append(l_spatial_var[-1])
                     w_r_model.append(r_m_l)
                     w_r_ae.append(r_a_l)
                     w_r_gt.append(r_g_l)
@@ -373,6 +412,8 @@ def run_rollout_evaluation(
                     "final_rel_dyn": float(traj_dyn[-1]),
                     "final_rel_latent": float(traj_lat[-1]),
                     "drift_ratio": float(np.mean(w_drift)),
+                    "final_latent_overall_variance": float(np.mean(w_overall_var)),
+                    "final_latent_spatial_variance": float(np.mean(w_spatial_var)),
                     "mean_r_model": float(np.mean(w_r_model)) if w_r_model and len(w_r_model[0]) > 0 else 0.0,
                     "mean_r_ae": float(np.mean(w_r_ae)) if w_r_ae and len(w_r_ae[0]) > 0 else 0.0,
                     "mean_r_gt": float(np.mean(w_r_gt)) if w_r_gt and len(w_r_gt[0]) > 0 else 0.0,
@@ -385,6 +426,8 @@ def run_rollout_evaluation(
         sw_dyn = np.array([t["final_rel_dyn"] for t in traj_summaries_sw])
         sw_lat = np.array([t["final_rel_latent"] for t in traj_summaries_sw])
         sw_drift = np.array([t["drift_ratio"] for t in traj_summaries_sw])
+        sw_overall_var = np.array([t["final_latent_overall_variance"] for t in traj_summaries_sw])
+        sw_spatial_var = np.array([t["final_latent_spatial_variance"] for t in traj_summaries_sw])
         sw_r_mod = np.array([t["mean_r_model"] for t in traj_summaries_sw])
         sw_r_ae = np.array([t["mean_r_ae"] for t in traj_summaries_sw])
         sw_r_gt = np.array([t["mean_r_gt"] for t in traj_summaries_sw])
@@ -403,6 +446,9 @@ def run_rollout_evaluation(
                 "final_step_dyn_rel_l2": calc_trajectory_group_stats(sw_dyn),
                 "final_step_latent_rel_l2": calc_trajectory_group_stats(sw_lat),
                 "latent_norm_drift_ratio": calc_trajectory_group_stats(sw_drift),
+                "final_step_latent_overall_variance": calc_trajectory_group_stats(sw_overall_var),
+                "final_step_latent_spatial_variance": calc_trajectory_group_stats(sw_spatial_var),
+                "final_step_latent_variance": calc_trajectory_group_stats(sw_overall_var),
                 "enstrophy_budget_residual_model": calc_trajectory_group_stats(sw_r_mod),
                 "enstrophy_budget_residual_ae_ref": calc_trajectory_group_stats(sw_r_ae),
                 "enstrophy_budget_residual_gt": calc_trajectory_group_stats(sw_r_gt),
@@ -431,12 +477,24 @@ def run_rollout_evaluation(
     assert sha_tf_before == sha_tf_after, "CRITICAL ERROR: Transformer checkpoint binary mutated during rollout!"
     assert sha_ae_before == sha_ae_after, "CRITICAL ERROR: Autoencoder checkpoint binary mutated during rollout!"
 
+    # 9. Dynamic synthesis of physical interpretation without stale hardcoded numbers
+    h_max_key = f"H_{max_h}"
+    st_max = controlled_summary_by_horizon[h_max_key]["statistics"]
+    r_gt_m = st_max["enstrophy_budget_residual_gt"]["mean"]
+    r_ae_m = st_max["enstrophy_budget_residual_ae_ref"]["mean"]
+    r_pred_m = st_max["enstrophy_budget_residual_model"]["mean"]
+    d_r_m = st_max["enstrophy_budget_residual_delta"]["mean"]
+    num_res_intervals = max_h - 1
+
+    git_prov = get_git_provenance()
+
     output_payload: Dict[str, Any] = {
         "metadata": {
             "experiment": "latent_forecaster_rollout_eval",
             "protocol": "periodic_scalar_advection_diffusion_v1",
             "phase": "2B_deterministic_rollout_eval",
             "execution_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "git_provenance": git_prov,
             "device": str(device),
             "checkpoints": {
                 "transformer_checkpoint_path": str(tf_ckpt_p),
@@ -455,18 +513,25 @@ def run_rollout_evaluation(
                 "test_seeds": test_seeds,
                 "horizons": horizons,
                 "grouping_unit": "independent_test_trajectory",
-                "statistical_distribution": "Student-t (df=15, t_crit=2.13145)",
+                "statistical_distribution": f"Student-t (df={num_test_trajectories-1}, t_crit=2.13145)",
                 "budget_residual_formula": "R(t) = (Z_{t+1} - Z_t)/dt - 0.5 * (diss_t + diss_{t+1})",
-                "physical_interpretation": "冻结 AE 参考轨迹本身已表现出显著的拟涡能预算偏差 (R_AE ≈ 0.0802)；模型轨迹的预算残差 (R_pred ≈ 0.0909) 与此处于相近量级，二者差额为 Delta R = 0.0107。此诊断表明模型预测偏差中相当大部分在冻结 AE 重构中已有体现，但不能将比值简单等同为单一因果归因。",
+                "budget_residual_interval": (
+                    f"{num_res_intervals} forecast-to-forecast step-to-step intervals (k=0..{num_res_intervals-1} between adjacent predictions "
+                    f"hat_q_{{t+k}} and hat_q_{{t+k+1}}), strictly isolating autonomous dynamical trajectory consistency without mixing the transition from historical truth."
+                ),
+                "physical_interpretation": (
+                    f"在受控共同起点 (w=0) 的 {max_h} 步连续推演中，评估了 {num_res_intervals} 个预测-预测相邻时间步间隔 ("
+                    f"k=0..{num_res_intervals-1}) 的平均物理拟涡能预算残差。真实真值残差 R_GT ≈ {r_gt_m:.2e}；"
+                    f"冻结 AE 参考轨迹的预算残差为 R_AE = {r_ae_m:.5f}；模型自主预测轨迹的预算残差为 R_pred = {r_pred_m:.5f}，"
+                    f"二者客观差额为 Delta R = {d_r_m:.5f}。模型自主推演的物理残差与冻结 AE 处于相近量级，"
+                    f"额外引入的动力学物理偏差较小，但该诊断性差额不能等同为单一因果贡献分解。"
+                ),
             },
         },
         "controlled_common_window_comparison": controlled_summary_by_horizon,
         "sliding_window_multi_horizon": sliding_summary_by_horizon,
     }
 
-    if output_json_path is None:
-        output_json_path = PROJECT_ROOT / "outputs" / "evaluations" / "latent_forecaster_rollout_cz64.json"
-    out_p = Path(output_json_path)
     out_p.parent.mkdir(parents=True, exist_ok=True)
     with open(out_p, "w", encoding="utf-8") as f:
         json.dump(output_payload, f, indent=2)
@@ -483,6 +548,7 @@ def parse_args():
     parser.add_argument("--horizons", type=int, nargs="+", default=[4, 8, 16])
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--output-json", type=str, default="outputs/evaluations/latent_forecaster_rollout_cz64.json")
+    parser.add_argument("--overwrite", action="store_true", default=False, help="Allow overwriting existing evaluation JSON.")
     parser.add_argument("--num-test-trajectories", type=int, default=16)
     parser.add_argument("--test-seed-base", type=int, default=3000)
     return parser.parse_args()
@@ -496,6 +562,7 @@ if __name__ == "__main__":
         config_path=args.config,
         horizons=args.horizons,
         output_json_path=args.output_json,
+        allow_overwrite=args.overwrite,
         device_str=args.device,
         num_test_trajectories=args.num_test_trajectories,
         test_seed_base=args.test_seed_base,

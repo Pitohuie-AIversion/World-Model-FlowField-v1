@@ -3,7 +3,12 @@
     "experiment": "latent_forecaster_rollout_eval",
     "protocol": "periodic_scalar_advection_diffusion_v1",
     "phase": "2B_deterministic_rollout_eval",
-    "execution_timestamp": "2026-10-12T07:47:55.266042+00:00",
+    "execution_timestamp": "2026-10-12T08:25:22.084245+00:00",
+    "git_provenance": {
+      "git_commit": "18206294f80608f342f02bf06d0b2421a5b26f5a",
+      "git_tree": "fdeea4e20abf24d33347f381f13fe64b39de346e",
+      "git_branch": "review/synthesis-v2"
+    },
     "device": "cpu",
     "checkpoints": {
       "transformer_checkpoint_path": "outputs/experiments/latent_forecaster_pilot/latest_checkpoint.pt",
@@ -82,7 +87,8 @@
       "grouping_unit": "independent_test_trajectory",
       "statistical_distribution": "Student-t (df=15, t_crit=2.13145)",
       "budget_residual_formula": "R(t) = (Z_{t+1} - Z_t)/dt - 0.5 * (diss_t + diss_{t+1})",
-      "physical_interpretation": "\u51bb\u7ed3 AE \u53c2\u8003\u8f68\u8ff9\u672c\u8eab\u5df2\u8868\u73b0\u51fa\u663e\u8457\u7684\u62df\u6da1\u80fd\u9884\u7b97\u504f\u5dee (R_AE \u2248 0.0802)\uff1b\u6a21\u578b\u8f68\u8ff9\u7684\u9884\u7b97\u6b8b\u5dee (R_pred \u2248 0.0909) \u4e0e\u6b64\u5904\u4e8e\u76f8\u8fd1\u91cf\u7ea7\uff0c\u4e8c\u8005\u5dee\u989d\u4e3a Delta R = 0.0107\u3002\u6b64\u8bca\u65ad\u8868\u660e\u6a21\u578b\u9884\u6d4b\u504f\u5dee\u4e2d\u76f8\u5f53\u5927\u90e8\u5206\u5728\u51bb\u7ed3 AE \u91cd\u6784\u4e2d\u5df2\u6709\u4f53\u73b0\uff0c\u4f46\u4e0d\u80fd\u5c06\u6bd4\u503c\u7b80\u5355\u7b49\u540c\u4e3a\u5355\u4e00\u56e0\u679c\u5f52\u56e0\u3002"
+      "budget_residual_interval": "15 forecast-to-forecast step-to-step intervals (k=0..14 between adjacent predictions hat_q_{t+k} and hat_q_{t+k+1}), strictly isolating autonomous dynamical trajectory consistency without mixing the transition from historical truth.",
+      "physical_interpretation": "\u5728\u53d7\u63a7\u5171\u540c\u8d77\u70b9 (w=0) \u7684 16 \u6b65\u8fde\u7eed\u63a8\u6f14\u4e2d\uff0c\u8bc4\u4f30\u4e86 15 \u4e2a\u9884\u6d4b-\u9884\u6d4b\u76f8\u90bb\u65f6\u95f4\u6b65\u95f4\u9694 (k=0..14) \u7684\u5e73\u5747\u7269\u7406\u62df\u6da1\u80fd\u9884\u7b97\u6b8b\u5dee\u3002\u771f\u5b9e\u771f\u503c\u6b8b\u5dee R_GT \u2248 3.56e-07\uff1b\u51bb\u7ed3 AE \u53c2\u8003\u8f68\u8ff9\u7684\u9884\u7b97\u6b8b\u5dee\u4e3a R_AE = 0.08027\uff1b\u6a21\u578b\u81ea\u4e3b\u9884\u6d4b\u8f68\u8ff9\u7684\u9884\u7b97\u6b8b\u5dee\u4e3a R_pred = 0.09127\uff0c\u4e8c\u8005\u5ba2\u89c2\u5dee\u989d\u4e3a Delta R = 0.01099\u3002\u6a21\u578b\u81ea\u4e3b\u63a8\u6f14\u7684\u7269\u7406\u6b8b\u5dee\u4e0e\u51bb\u7ed3 AE \u5904\u4e8e\u76f8\u8fd1\u91cf\u7ea7\uff0c\u989d\u5916\u5f15\u5165\u7684\u52a8\u529b\u5b66\u7269\u7406\u504f\u5dee\u8f83\u5c0f\uff0c\u4f46\u8be5\u8bca\u65ad\u6027\u5dee\u989d\u4e0d\u80fd\u7b49\u540c\u4e3a\u5355\u4e00\u56e0\u679c\u8d21\u732e\u5206\u89e3\u3002"
     }
   },
   "controlled_common_window_comparison": {
@@ -90,6 +96,7 @@
       "horizon": 4,
       "window_protocol": "canonical_common_window_w0",
       "num_trajectories": 16,
+      "num_budget_residual_intervals": 3,
       "statistics": {
         "final_step_rel_l2": {
           "mean": 0.06585587654262781,
@@ -168,6 +175,28 @@
           "sample_size": 16,
           "distribution": "Student-t (df=15, t_crit=2.13145)"
         },
+        "final_step_latent_overall_variance": {
+          "mean": 0.9577072747051716,
+          "std": 0.008106061279683562,
+          "ci95_half_width": 0.004319415157715306,
+          "ci95_low": 0.9533878595474563,
+          "ci95_high": 0.9620266898628869,
+          "min": 0.9410761594772339,
+          "max": 0.9688114523887634,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_spatial_variance": {
+          "mean": 0.45913994312286377,
+          "std": 0.005863633833027332,
+          "ci95_half_width": 0.0031245099171837583,
+          "ci95_low": 0.45601543320568,
+          "ci95_high": 0.46226445304004754,
+          "min": 0.4475524425506592,
+          "max": 0.46799436211586,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
         "final_step_latent_variance": {
           "mean": 0.9577072747051716,
           "std": 0.008106061279683562,
@@ -229,6 +258,7 @@
       "horizon": 8,
       "window_protocol": "canonical_common_window_w0",
       "num_trajectories": 16,
+      "num_budget_residual_intervals": 7,
       "statistics": {
         "final_step_rel_l2": {
           "mean": 0.10104731097817421,
@@ -307,6 +337,28 @@
           "sample_size": 16,
           "distribution": "Student-t (df=15, t_crit=2.13145)"
         },
+        "final_step_latent_overall_variance": {
+          "mean": 0.9605469256639481,
+          "std": 0.008304150608655286,
+          "ci95_half_width": 0.004424969510269561,
+          "ci95_low": 0.9561219561536785,
+          "ci95_high": 0.9649718951742177,
+          "min": 0.9410895705223083,
+          "max": 0.9696321487426758,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_spatial_variance": {
+          "mean": 0.46301539801061153,
+          "std": 0.007146275468659298,
+          "ci95_half_width": 0.003807981400029709,
+          "ci95_low": 0.45920741661058184,
+          "ci95_high": 0.4668233794106412,
+          "min": 0.44478607177734375,
+          "max": 0.47114452719688416,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
         "final_step_latent_variance": {
           "mean": 0.9605469256639481,
           "std": 0.008304150608655286,
@@ -368,6 +420,7 @@
       "horizon": 16,
       "window_protocol": "canonical_common_window_w0",
       "num_trajectories": 16,
+      "num_budget_residual_intervals": 15,
       "statistics": {
         "final_step_rel_l2": {
           "mean": 0.20265282317996025,
@@ -443,6 +496,28 @@
           "ci95_high": 1.006951283352451,
           "min": 0.9912838868635193,
           "max": 1.0104656197770583,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_overall_variance": {
+          "mean": 0.9659465737640858,
+          "std": 0.00957129319201573,
+          "ci95_half_width": 0.005100182131135326,
+          "ci95_low": 0.9608463916329505,
+          "ci95_high": 0.971046755895221,
+          "min": 0.9343612790107727,
+          "max": 0.9767952561378479,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_spatial_variance": {
+          "mean": 0.47097916156053543,
+          "std": 0.008973304519253107,
+          "ci95_half_width": 0.004781536459932879,
+          "ci95_low": 0.46619762510060253,
+          "ci95_high": 0.47576069802046833,
+          "min": 0.4413917064666748,
+          "max": 0.48221060633659363,
           "sample_size": 16,
           "distribution": "Student-t (df=15, t_crit=2.13145)"
         },
@@ -589,6 +664,39 @@
           "sample_size": 16,
           "distribution": "Student-t (df=15, t_crit=2.13145)"
         },
+        "final_step_latent_overall_variance": {
+          "mean": 0.9547293856739998,
+          "std": 0.008509170367441359,
+          "ci95_half_width": 0.004534216828193399,
+          "ci95_low": 0.9501951688458063,
+          "ci95_high": 0.9592636025021932,
+          "min": 0.9364127516746521,
+          "max": 0.9651695489883423,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_spatial_variance": {
+          "mean": 0.45580571703612804,
+          "std": 0.005376471466993467,
+          "ci95_half_width": 0.002864919416259582,
+          "ci95_low": 0.45294079761986844,
+          "ci95_high": 0.45867063645238765,
+          "min": 0.4449504017829895,
+          "max": 0.46234968304634094,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_variance": {
+          "mean": 0.9547293856739998,
+          "std": 0.008509170367441359,
+          "ci95_half_width": 0.004534216828193399,
+          "ci95_low": 0.9501951688458063,
+          "ci95_high": 0.9592636025021932,
+          "min": 0.9364127516746521,
+          "max": 0.9651695489883423,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
         "enstrophy_budget_residual_model": {
           "mean": 0.09672651201530938,
           "std": 0.004996895312609617,
@@ -708,6 +816,39 @@
           "sample_size": 16,
           "distribution": "Student-t (df=15, t_crit=2.13145)"
         },
+        "final_step_latent_overall_variance": {
+          "mean": 0.9567217230796814,
+          "std": 0.008301562800083541,
+          "ci95_half_width": 0.004423590564418501,
+          "ci95_low": 0.9522981325152629,
+          "ci95_high": 0.9611453136440999,
+          "min": 0.9402685165405273,
+          "max": 0.9668213725090027,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_spatial_variance": {
+          "mean": 0.4594975635409355,
+          "std": 0.006557813964178361,
+          "ci95_half_width": 0.0034944123984533802,
+          "ci95_low": 0.45600315114248213,
+          "ci95_high": 0.4629919759393889,
+          "min": 0.44502609968185425,
+          "max": 0.4688236713409424,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_variance": {
+          "mean": 0.9567217230796814,
+          "std": 0.008301562800083541,
+          "ci95_half_width": 0.004423590564418501,
+          "ci95_low": 0.9522981325152629,
+          "ci95_high": 0.9611453136440999,
+          "min": 0.9402685165405273,
+          "max": 0.9668213725090027,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
         "enstrophy_budget_residual_model": {
           "mean": 0.09533911005128175,
           "std": 0.004423142255117338,
@@ -824,6 +965,39 @@
           "ci95_high": 1.006876058097793,
           "min": 0.9908695816993713,
           "max": 1.0100345611572266,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_overall_variance": {
+          "mean": 0.9653051719069481,
+          "std": 0.009660661180254267,
+          "ci95_half_width": 0.0051478029706149816,
+          "ci95_low": 0.9601573689363331,
+          "ci95_high": 0.9704529748775631,
+          "min": 0.9333775639533997,
+          "max": 0.9757074117660522,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_spatial_variance": {
+          "mean": 0.4707505349069834,
+          "std": 0.009042977425875008,
+          "ci95_half_width": 0.004818662531222149,
+          "ci95_low": 0.4659318723757612,
+          "ci95_high": 0.4755691974382055,
+          "min": 0.44096583127975464,
+          "max": 0.4823055863380432,
+          "sample_size": 16,
+          "distribution": "Student-t (df=15, t_crit=2.13145)"
+        },
+        "final_step_latent_variance": {
+          "mean": 0.9653051719069481,
+          "std": 0.009660661180254267,
+          "ci95_half_width": 0.0051478029706149816,
+          "ci95_low": 0.9601573689363331,
+          "ci95_high": 0.9704529748775631,
+          "min": 0.9333775639533997,
+          "max": 0.9757074117660522,
           "sample_size": 16,
           "distribution": "Student-t (df=15, t_crit=2.13145)"
         },
