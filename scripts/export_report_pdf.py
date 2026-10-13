@@ -57,39 +57,17 @@ def build_styled_html(md_content: str, doc_dir: Path) -> str:
         r"(?<!\$)\$(?!\$)([^\n$]+?)(?<!\$)\$(?!\$)", save_inline, processed_md
     )
 
-    # 2. Resolve image links: ![alt](path) -> embed as data URI
-    def replace_image(match):
+    # 2. Tokenize image links before markdown parsing to avoid regex catastrophic backtracking on base64
+    image_tokens = []
+
+    def save_image(match):
+        idx = len(image_tokens)
         alt = match.group(1)
         src = match.group(2).strip()
+        image_tokens.append((alt, src))
+        return f"IMAGETOKEN{idx}END"
 
-        candidates = []
-        if src.startswith("/"):
-            candidates.append(Path(src))
-        else:
-            candidates.append((doc_dir / src).resolve())
-            candidates.append((PROJECT_ROOT / src.lstrip("/")).resolve())
-            candidates.append((PROJECT_ROOT / "outputs" / "figures" / "probabilistic" / Path(src).name).resolve())
-            candidates.append((PROJECT_ROOT / "outputs" / "figures" / "pde_controlled" / Path(src).name).resolve())
-            for p in (PROJECT_ROOT / "outputs" / "figures").glob(f"**/{Path(src).name}"):
-                candidates.append(p.resolve())
-
-        found_path = None
-        for c in candidates:
-            if c.exists() and c.is_file():
-                found_path = c
-                break
-
-        if found_path:
-            data_uri = image_to_base64_data_uri(found_path)
-            return (
-                f'<div class="figure-container"><img src="{data_uri}" alt="{alt}" '
-                f'class="report-figure" /><div class="figure-caption">{alt}</div></div>'
-            )
-        else:
-            print(f"[WARNING] Image not found for src='{src}', searched {len(candidates)} candidates.")
-            return f'<p class="missing-image">[Image: {alt} ({src})]</p>'
-
-    processed_md = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", replace_image, processed_md)
+    processed_md = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", save_image, processed_md)
 
     # 3. Convert GitHub-style alerts: > [!WARNING] etc.
     alert_pattern = re.compile(r">\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*\n((?:>.*\n?)+)")
@@ -105,7 +83,7 @@ def build_styled_html(md_content: str, doc_dir: Path) -> str:
 
     processed_md = alert_pattern.sub(replace_alert, processed_md)
 
-    # 4. Render markdown to HTML
+    # 4. Render markdown to HTML (super fast now that images are tokens)
     body_html = markdown.markdown(
         processed_md,
         extensions=[
@@ -121,7 +99,54 @@ def build_styled_html(md_content: str, doc_dir: Path) -> str:
         body_html = body_html.replace(f"MATHBLOCKTOKEN{idx}END", block)
         body_html = body_html.replace(f"MATHINLINETOKEN{idx}END", block)
 
-    # 6. Wrap in professional report CSS layout
+    # 6. Resolve and restore image tokens with crisp figures
+    def resolve_image(alt: str, src: str) -> str:
+        candidates = []
+        if src.startswith("/"):
+            candidates.append(Path(src))
+        else:
+            candidates.append((doc_dir / src).resolve())
+            candidates.append((PROJECT_ROOT / src.lstrip("/")).resolve())
+            candidates.append((PROJECT_ROOT / "outputs" / "figures" / "paper_synthesis" / Path(src).name).resolve())
+            candidates.append((PROJECT_ROOT / "outputs" / "figures" / "manuscript" / Path(src).name).resolve())
+            candidates.append((PROJECT_ROOT / "outputs" / "figures" / "paper" / Path(src).name).resolve())
+            candidates.append((PROJECT_ROOT / "outputs" / "figures" / "benchmark" / Path(src).name).resolve())
+            candidates.append((PROJECT_ROOT / "outputs" / "figures" / "representation" / Path(src).name).resolve())
+            candidates.append((PROJECT_ROOT / "outputs" / "figures" / "closure_r4" / Path(src).name).resolve())
+            candidates.append((PROJECT_ROOT / "outputs" / "figures" / "probabilistic" / Path(src).name).resolve())
+            candidates.append((PROJECT_ROOT / "outputs" / "figures" / "pde_controlled" / Path(src).name).resolve())
+            candidates.append((PROJECT_ROOT / "outputs" / "figures" / "horizon_r1" / Path(src).name).resolve())
+            for p in (PROJECT_ROOT / "outputs" / "figures").glob(f"**/{Path(src).name}"):
+                candidates.append(p.resolve())
+
+        found_path = None
+        for c in candidates:
+            if c.exists() and c.is_file():
+                found_path = c
+                break
+
+        if found_path:
+            # Use file URI for near-instant rendering without inflating HTML with megabytes of base64
+            img_uri = found_path.as_uri()
+            return (
+                f'<figure class="figure-container">'
+                f'<img src="{img_uri}" alt="{alt}" class="report-figure" />'
+                f'<figcaption class="figure-caption">{alt}</figcaption>'
+                f'</figure>'
+            )
+        else:
+            print(f"[WARNING] Image not found for src='{src}', searched {len(candidates)} candidates.")
+            return f'<p class="missing-image">[Image: {alt} ({src})]</p>'
+
+    for idx, (alt, src) in enumerate(image_tokens):
+        fig_html = resolve_image(alt, src)
+        body_html = body_html.replace(f"<p>IMAGETOKEN{idx}END</p>", fig_html)
+        body_html = body_html.replace(f"IMAGETOKEN{idx}END", fig_html)
+
+    body_html = body_html.replace("<p><figure", "<figure")
+    body_html = body_html.replace("</figure></p>", "</figure>")
+
+    # 7. Wrap in professional report CSS layout
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -136,6 +161,13 @@ window.MathJax = {{
   }},
   svg: {{
     fontCache: 'global'
+  }},
+  startup: {{
+    pageReady: () => {{
+      return MathJax.startup.defaultPageReady().then(() => {{
+        document.body.classList.add('mathjax-ready');
+      }});
+    }}
   }}
 }};
 </script>
@@ -357,14 +389,15 @@ def convert_markdown_to_pdf(md_path: Path, output_pdf_path: Path):
         "--headless",
         "--disable-gpu",
         "--no-sandbox",
+        "--allow-file-access-from-files",
         "--no-pdf-header-footer",
         "--run-all-compositor-stages-before-draw",
-        "--virtual-time-budget=10000",
+        "--virtual-time-budget=15000",
         f"--print-to-pdf={output_pdf_path.resolve()}",
         str(tmp_html_path.resolve()),
     ]
 
-    ret = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=45)
+    ret = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=90)
     if ret.returncode != 0:
         print(f"Chrome error stderr:\n{ret.stderr}")
         raise RuntimeError(f"Google Chrome PDF conversion failed with exit code {ret.returncode}")
@@ -427,11 +460,17 @@ def main():
             out_p = in_p.with_suffix(".pdf")
         targets = [(in_p, out_p)]
 
-    # Current conversation artifact directory
+    # Collect known and active conversation artifact directories
     artifact_dirs = [
+        Path("/root/.gemini/antigravity-ide/brain/eb07dcdb-193c-449c-91f5-d8e24090f403"),
         Path("/root/.gemini/antigravity-ide/brain/25604b97-21bd-42b9-814b-524c55a6667a"),
         Path("/root/.gemini/antigravity-ide/brain/df6d6fdd-c45c-4927-91ce-a466b0537f1e"),
     ]
+    brain_root = Path("/root/.gemini/antigravity-ide/brain")
+    if brain_root.exists():
+        for d in brain_root.iterdir():
+            if d.is_dir() and d not in artifact_dirs and not d.name.startswith("."):
+                artifact_dirs.append(d)
 
     for md_file, pdf_file in targets:
         convert_markdown_to_pdf(md_file, pdf_file)
