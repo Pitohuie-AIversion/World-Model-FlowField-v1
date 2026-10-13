@@ -137,11 +137,6 @@ outputs/*
 !outputs/evaluations/**/
 !outputs/normalization/*.pt
 !outputs/normalization/*.json
-!outputs/figures/**/*.png
-!outputs/figures/**/*.pdf
-!outputs/figures/**/*.svg
-!outputs/figures/**/*.json
-!outputs/figures/**/
 !outputs/figures/README.md
 !outputs/logs/README.md
 !outputs/tables/*.tex
@@ -164,3 +159,10 @@ outputs/*
 !docs/**/*.jpeg
 !docs/**/*.svg
 !docs/**/*.gif
+
+# ------------------------------------------------------------------------------
+# 11. 导出的论文与报告 PDF 产物 (Generated Document PDFs)
+# ------------------------------------------------------------------------------
+docs/**/*.pdf
+*.pdf
+
